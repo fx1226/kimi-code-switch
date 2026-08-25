@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { AlertTriangle, ChevronDown, ChevronsLeft, ChevronsRight, RefreshCw, Terminal, X } from "lucide-react";
 
-import type { KimiCodeEnvironment, McpServerConfig, ShortcutAction, ShortcutBinding } from "@shared/types";
+import type { KimiCodeEnvironment, ShortcutAction, ShortcutBinding } from "@shared/types";
 import { applyProfile, normalizeKimiCodeEnvironments } from "@shared/configStore";
 import type { SearchResult } from "@shared/configStore";
 import { parseMcpConfigStrict } from "@shared/mcpStore";
@@ -29,7 +29,6 @@ import {
 } from "./dialogs";
 import { t } from "./i18n";
 import { McpImportDialog, formatMessage } from "./tabComponents";
-import { SummaryCard } from "./overviewDashboard";
 import { TopbarControls } from "./topbarControls";
 import { ToastContainer } from "./Toast";
 import { useToast } from "./useToast";
@@ -477,88 +476,19 @@ export function App(): JSX.Element {
 
       <main className="main">
         <header className="topbar">
-          <div className="summary-grid">
-            <SummaryCard
-              label={t(locale, "summaryProfiles")}
-              value={String(profileEntries.length)}
-              active={activeTab === "profiles"}
-              onClick={() => {
-                if (activeTab === "profiles") return;
-                runAfterUnsavedHandled(() => setActiveTab("profiles"));
-              }}
-            />
-            <SummaryCard
-              label={t(locale, "summaryProviders")}
-              value={String(providerEntries.length)}
-              active={activeTab === "providers"}
-              onClick={() => {
-                if (activeTab === "providers") return;
-                runAfterUnsavedHandled(() => setActiveTab("providers"));
-              }}
-            />
-            <SummaryCard
-              label={t(locale, "summaryModels")}
-              value={String(modelEntries.length)}
-              active={activeTab === "models"}
-              onClick={() => {
-                if (activeTab === "models") return;
-                runAfterUnsavedHandled(() => setActiveTab("models"));
-              }}
-            />
-            <SummaryCard
-              label={t(locale, "summaryMcp")}
-              value={formatMessage(t(locale, "summaryMcpCompact"), {
-                total: mcpEntries.length,
-                enabled: mcpEntries.filter(([, server]: [string, McpServerConfig]) => server.enabled !== false).length,
-              })}
-              title={`${formatMessage(t(locale, "summaryMcpTotal"), { count: mcpEntries.length })} · ${formatMessage(
-                t(locale, "summaryMcpEnabled"),
-                { count: mcpEntries.filter(([, server]: [string, McpServerConfig]) => server.enabled !== false).length },
-              )}`}
-              active={activeTab === "mcp"}
-              onClick={() => {
-                if (activeTab === "mcp") return;
-                runAfterUnsavedHandled(() => setActiveTab("mcp"));
-              }}
-            />
-            <SummaryCard
-              label={t(locale, "summarySkills")}
-              value={
-                skillsReport
-                  ? formatMessage(t(locale, "summarySkillsCompact"), {
-                      total: skillsReport.summary.total,
-                      effective: skillsReport.summary.effective,
-                    })
-                  : "-"
-              }
-              title={
-                skillsReport
-                  ? `${formatMessage(t(locale, "summarySkillsTotal"), { count: skillsReport.summary.total })} · ${formatMessage(
-                      t(locale, "summarySkillsEffective"),
-                      { count: skillsReport.summary.effective },
-                    )}`
-                  : undefined
-              }
-              active={activeTab === "skills"}
-              onClick={() => {
-                if (activeTab === "skills") return;
-                runAfterUnsavedHandled(() => setActiveTab("skills"));
-              }}
-            />
-            <div className="summary-card accent summary-active-card" title={state.activeProfile || undefined}>
-              <div className="summary-active-copy">
-                <span>{t(locale, "summaryActive")}</span>
-                <strong>{activeProfileDisplayName}</strong>
-              </div>
+          <div className="toolbar toolbar-active">
+            <div className="active-profile-chip" title={state.activeProfile || undefined}>
+              <span className="active-profile-label">{t(locale, "summaryActive")}</span>
+              <strong className="active-profile-name">{activeProfileDisplayName}</strong>
               <button
-                className="summary-terminal-button no-drag"
+                className="active-profile-terminal no-drag"
                 type="button"
                 aria-label={t(locale, "openActiveProfileInTerminal")}
                 title={t(locale, "openActiveProfileInTerminal")}
                 disabled={!state.activeProfile}
                 onClick={() => void openKimiInTerminal(state.activeProfile)}
               >
-                <Terminal size={15} />
+                <Terminal size={14} />
               </button>
             </div>
           </div>

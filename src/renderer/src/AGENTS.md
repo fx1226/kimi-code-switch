@@ -13,8 +13,13 @@ src/renderer/src/
 |-- useAppHandlers.tsx    # central state/action hook
 |-- use*Actions.ts        # persistence, backup, safety, preview, shortcuts, mutations
 |-- tabs/                 # TabPanels router and AppContext type only
-|-- styles.css            # global tokens, themes, layout, controls
-`-- assets/               # dark/light logo PNGs
+|-- styles.css            # entries: fonts.css -> tokens.css -> components.css -> layout.css
+|-- fonts.css             # bundled Inter + JetBrains Mono @font-face
+|-- tokens.css            # design tokens: palettes, radius/shadow/type scales, 9 accent themes
+|-- layout.css            # shell grid (sidebar 232px / collapsed 64px / main)
+|-- components.css        # component styles (large, intentionally central)
+|-- assets/               # dark/light logo PNGs + fonts/ (woff2 + OFL licenses)
+`-- insights.css / toast.css  # usage-dashboard / toast (imported by their components)
 ```
 
 ## WHERE TO LOOK
@@ -26,7 +31,7 @@ src/renderer/src/
 | Persist or preview state | `useAppPersistence.ts`, `usePreviewAndSkills.ts` | Native work goes through `getApi()`. |
 | Edit provider/model/profile/MCP forms | `tabComponents.tsx`, `tabs/TabPanels.tsx` | Shared transforms live under `@shared/`. |
 | i18n copy | `i18n.ts`, `localeText.ts` | `zh-CN` is base; `zh-TW` often derives through `toTraditionalChinese`. |
-| Theme/style changes | `styles.css` | Use existing CSS variables and `data-theme` / `data-appearance-theme`. |
+| Theme/style changes | `tokens.css` (tokens) + `components.css` (components) | Use existing CSS variables and `data-theme` / `data-appearance-theme`; bundled fonts in `fonts.css`. |
 | About/version UI | `aboutPage.tsx` | `ABOUT_INFO.version` must match release version. |
 
 ## CONVENTIONS

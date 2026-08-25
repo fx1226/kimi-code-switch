@@ -46,25 +46,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       }
       const locale = this.props.locale ?? "en-US";
       return (
-        <section className="glass-panel form-panel empty-state" style={{ padding: "28px", borderRadius: "20px" }}>
+        <section className="glass-panel form-panel empty-state error-boundary">
           <div className="section-title">{t(locale, "errorBoundaryTitle")}</div>
-          <p style={{ color: "var(--muted)", lineHeight: 1.7, marginBottom: "16px" }}>
+          <p className="error-boundary-message">
             {this.state.error?.message ?? t(locale, "errorBoundaryDescription")}
           </p>
           {this.state.showDetails && this.state.error?.stack && (
-            <pre style={{
-              background: "var(--surface, #1a1a2e)",
-              color: "var(--muted, #888)",
-              padding: "12px",
-              borderRadius: "8px",
-              fontSize: "12px",
-              lineHeight: 1.5,
-              overflowX: "auto",
-              maxHeight: "240px",
-              marginBottom: "16px",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}>
+            <pre className="error-details" style={{ marginBottom: "16px" }}>
               {this.state.error.stack}
             </pre>
           )}

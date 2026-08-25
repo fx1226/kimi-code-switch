@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Boxes, Check, Download, FileText, Globe, Layers3, LoaderCircle, RefreshCw, Zap } from "lucide-react";
 
-import type { AppState, KimiCodeInstallSource, Locale } from "@shared/types";
+import type { AppState, KimiCodeInstallSource, Locale, McpServerConfig } from "@shared/types";
 
 import { ABOUT_INFO } from "./aboutPage";
 import { APPEARANCE_THEME_OPTIONS, labelForLocale } from "./appOptions";
@@ -42,63 +42,21 @@ function cliVersionFromDetection(detection: AppState["kimiTargetDetection"] | un
   };
 }
 
-export function SummaryCard(props: {
-  label: string;
-  value: string;
-  note?: string;
-  title?: string;
-  accent?: boolean;
-  active?: boolean;
-  onClick?: () => void;
-}): JSX.Element {
-  const className = [
-    "summary-card",
-    props.accent ? "accent" : "",
-    props.onClick ? "summary-card-clickable" : "",
-    props.active ? "summary-card-active" : "",
-  ].filter(Boolean).join(" ");
-  const content = (
-    <>
-      <span>{props.label}</span>
-      <strong>{props.value}</strong>
-      {props.note ? <small>{props.note}</small> : null}
-    </>
-  );
-
-  if (props.onClick) {
-    return (
-      <button
-        type="button"
-        className={className}
-        title={props.title}
-        aria-label={`${props.label} ${props.value}`}
-        aria-pressed={props.active}
-        onClick={props.onClick}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <div className={className} title={props.title}>
-      {content}
-    </div>
-  );
-}
-
 export function OverviewDashboard(props: {
   state: AppState;
   locale: Locale;
   diagnostics: DiagnosticsState;
+  skillsReport: AppState["skillsReport"];
+  mcpEntries: [string, McpServerConfig][];
   onActivateProfile: (name: string) => void;
   onNavigate: (tab: OverviewTabId) => void;
 }): JSX.Element {
-  const { state, locale, diagnostics, onActivateProfile, onNavigate } = props;
+  const { state, locale, diagnostics, skillsReport, mcpEntries, onActivateProfile, onNavigate } = props;
   const activeProfile = state.profiles[state.activeProfile];
   const providerEntries = Object.entries(state.mainConfig.providers);
   const modelEntries = Object.entries(state.mainConfig.models);
   const profileEntries = Object.entries(state.profiles);
+
   const activeProfileDisplayName = activeProfile?.label?.trim() || state.activeProfile || "-";
   const visibleProviders = providerEntries.slice(0, 3);
   const visibleModels = modelEntries.slice(0, 3);
@@ -196,6 +154,13 @@ export function OverviewDashboard(props: {
         <div className="overview-app-title">
           <span className="overview-app-name">{activeProfileDisplayName}</span>
           <span className="overview-app-ver">v{ABOUT_INFO.version}</span>
+        </div>
+        <div className="overview-stats-strip">
+          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryProfiles")}</span><strong className="overview-stat-value">{profileEntries.length}</strong></div>
+          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryProviders")}</span><strong className="overview-stat-value">{providerEntries.length}</strong></div>
+          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryModels")}</span><strong className="overview-stat-value">{modelEntries.length}</strong></div>
+          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryMcp")}</span><strong className="overview-stat-value">{mcpEntries.length}</strong></div>
+          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summarySkills")}</span><strong className="overview-stat-value">{skillsReport ? skillsReport.summary.total : "-"}</strong></div>
         </div>
         <div className="overview-hero-body">
           <div className="overview-hero-col">

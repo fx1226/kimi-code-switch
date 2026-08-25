@@ -280,7 +280,7 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
                     <Activity size={14} />
                     {t(locale, "insightsMetricDataSource")}
                   </div>
-                  <div className="insights-metric-value" style={{ fontSize: "0.875rem" }}>
+                  <div className="insights-metric-value" style={{ fontSize: "var(--text-sm)" }}>
                     ~/.kimi-code/logs/kimi-code.log
                   </div>
                 </div>
@@ -307,11 +307,11 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
               <div
                 style={{
                   marginTop: "16px",
-                  padding: "12px 16px",
+                  padding: "8px 12px",
                   background: "rgba(var(--primary-rgb), 0.05)",
                   border: "1px solid rgba(var(--primary-rgb), 0.15)",
-                  borderRadius: "12px",
-                  fontSize: "0.875rem",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: "var(--text-sm)",
                   color: "var(--text)",
                   display: "flex",
                   alignItems: "center",
@@ -370,8 +370,8 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
             </div>
             {storageInfo?.exceedsWarn && (
               <div className="insights-warning-banner">
-                <AlertCircle size={20} color="#f97316" style={{ flexShrink: 0, marginTop: 2 }} />
-                <div style={{ fontSize: "0.875rem", fontWeight: 500, color: "#f97316" }}>
+                <AlertCircle size={20} className="insights-warning-icon" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div className="insights-warning-text">
                   {t(locale, "insightsStorageExceedsWarn")}
                 </div>
               </div>

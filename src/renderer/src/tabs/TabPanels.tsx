@@ -777,6 +777,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             state={state}
             locale={locale}
             diagnostics={diagnostics}
+            skillsReport={skillsReport}
+            mcpEntries={mcpEntries}
             onActivateProfile={(name) =>
               updateState((draft) => {
                 applyProfile(draft, name);

@@ -8,7 +8,7 @@
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: clamp(272px, 22vw, 310px) minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
   overflow: hidden;
@@ -17,14 +17,14 @@
 }
 
 .shell.sidebar-collapsed {
-  grid-template-columns: 118px 1fr;
+  grid-template-columns: 64px 1fr;
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: calc(var(--titlebar-height) + 16px) 18px 18px 0;
+  gap: 12px;
+  padding: calc(var(--titlebar-height) + 12px) 16px 16px 12px;
   height: 100vh;
   overflow: hidden;
   min-width: 0;
@@ -34,13 +34,14 @@
 
 .content-scroll {
   display: flex;
-  gap: 18px;
+  gap: 14px;
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   padding-right: 2px;
   align-items: stretch;
+  border-radius: var(--radius-lg);
 }
 
 .tab-panel-shell {
@@ -61,7 +62,7 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  border-radius: 28px;
+  border-radius: var(--radius-lg);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -73,7 +74,7 @@
 .tab-panel-shell-split {
   display: flex;
   overflow: hidden;
-  border-radius: 28px;
+  border-radius: var(--radius-lg);
 }
 
 .tab-panel-shell-split > .split-layout {
@@ -86,23 +87,23 @@
 .overview-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 14px;
   align-content: start;
-  padding: 18px;
+  padding: 14px;
   border: 1px solid var(--line);
-  background: var(--panel-strong);
+  background: var(--panel);
   box-shadow: var(--shadow);
 }
 
 :root[data-theme="light"] .overview-grid {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
 }
 
 .overview-card {
   cursor: default;
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-  border-radius: 20px;
-  padding: 20px;
+  border-radius: var(--radius-lg);
+  padding: 14px;
 }
 
 .overview-card-wide {
@@ -112,7 +113,7 @@
 .overview-right-col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 
@@ -164,16 +165,16 @@
 
 /* profiles tab：ProfileCentricView 作为左栏，编辑表单占右侧 */
 .content-scroll > .profile-centric-view {
-  flex: 0 0 clamp(300px, calc(32% - 40px), 400px);
+  flex: 0 0 clamp(272px, 30%, 360px);
   box-sizing: border-box;
   min-width: 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 20px;
+  padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 28px;
-  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
   box-shadow: var(--shadow);
 }
 
@@ -190,12 +191,6 @@
 
   .sidebar {
     width: auto;
-    margin: 18px 18px 0;
-  }
-
-  .shell.sidebar-collapsed .sidebar {
-    width: auto;
-    padding: 22px;
   }
 
   .shell.sidebar-collapsed .brand {
@@ -214,7 +209,7 @@
     width: 34px;
     height: 34px;
     margin-left: auto;
-    border-radius: 14px;
+    border-radius: var(--radius-md);
     box-shadow: none;
   }
 
@@ -242,7 +237,7 @@
   .main {
     height: auto;
     min-height: 0;
-    padding: 0 18px 18px;
+    padding: 0 16px 16px;
     overflow: visible;
   }
 
@@ -286,7 +281,7 @@
 /* ============ Responsive: 1280px (wide desktop) ============ */
 @media (min-width: 1181px) and (max-width: 1280px) {
   .shell {
-    grid-template-columns: clamp(252px, 23vw, 288px) minmax(0, 1fr);
+    grid-template-columns: 232px minmax(0, 1fr);
   }
 
   .overview-grid {

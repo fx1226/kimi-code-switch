@@ -17,14 +17,11 @@
   gap: 12px;
   min-width: 320px;
   max-width: 480px;
-  padding: 16px 20px;
-  border-radius: 16px;
-  background: var(--panel-strong);
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(21, 24, 29, 0.92);
   border: 1px solid var(--line);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.15),
-    0 2px 8px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
   pointer-events: auto;
   animation: toast-enter 0.3s cubic-bezier(0.22, 1, 0.36, 1);
@@ -32,10 +29,7 @@
 
 :root[data-theme="light"] .toast {
   background: rgba(255, 255, 255, 0.95);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  box-shadow: var(--shadow-md);
 }
 
 .toast-exit {
@@ -69,30 +63,30 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
 }
 
 .toast-success .toast-icon {
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: white;
+  background: rgba(var(--success-rgb), 0.12);
+  color: var(--success);
 }
 
 .toast-error .toast-icon {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: white;
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
 }
 
 .toast-info .toast-icon {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
+  background: rgba(var(--info-rgb), 0.12);
+  color: var(--info);
 }
 
 .toast-message {
   flex: 1;
-  font-size: 0.9375rem;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
   line-height: 1.5;
   color: var(--text);
 }
@@ -105,11 +99,11 @@
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .toast-close:hover {
@@ -123,17 +117,17 @@
 
 /* 成功状态边框 */
 .toast-success {
-  border-color: rgba(16, 185, 129, 0.3);
+  border-color: rgba(var(--success-rgb), 0.35);
 }
 
 /* 错误状态边框 */
 .toast-error {
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: rgba(var(--danger-rgb), 0.35);
 }
 
 /* 信息状态边框 */
 .toast-info {
-  border-color: rgba(59, 130, 246, 0.3);
+  border-color: rgba(var(--info-rgb), 0.35);
 }
 
 /* 响应式 */

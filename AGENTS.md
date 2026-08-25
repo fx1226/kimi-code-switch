@@ -32,7 +32,12 @@ kimi-code-switch-gui/
 |   |-- App.tsx
 |   |-- useAppHandlers.tsx
 |   |-- i18n.ts
-|   `-- styles.css
+|   |-- fonts.css              # 内置 Inter + JetBrains Mono @font-face（assets/fonts/）
+|   |-- tokens.css             # 设计令牌：色板 / 圆角 / 阴影 / 字号标尺 / 9 套 appearance 主题
+|   |-- layout.css             # 外壳网格：侧栏 232px / 折叠 64px / 主区
+|   |-- components.css         # 组件样式主文件（集中且体量大）
+|   |-- insights.css           # 用量洞察仪表盘
+|   `-- toast.css              # Toast 浮层
 |-- src/shared/                # Pure config/state/parser/redaction/shortcut logic
 |-- resources/                 # App icons/assets
 |-- docs/images/               # README screenshots
@@ -59,7 +64,7 @@ kimi-code-switch-gui/
 | MCP JSON parsing | `src/shared/mcpStore.ts`, `src-tauri/src/mcp_servers_store.rs` | JSON parser plus SQLite-backed MCP store. |
 | Preview redaction/doctor | `src/shared/configSafety.ts` | Secrets must stay masked before preview/report display. |
 | i18n | `src/renderer/src/i18n.ts` | Simple key-value lookup, no external i18n library. |
-| CSS/theme | `src/renderer/src/styles.css` | CSS variables and `data-theme`; appearance themes use custom tokens. |
+| CSS/theme | `src/renderer/src/tokens.css` + `components.css` | Design tokens (colors/radius/shadows/type scale) and `data-theme`; appearance themes use custom tokens. Bundled fonts via `fonts.css` + `assets/fonts/`. |
 | Release workflow | `.github/workflows/release.yml` | Builds installers and publishes release on `v*` tags. |
 
 ## Key Symbols
