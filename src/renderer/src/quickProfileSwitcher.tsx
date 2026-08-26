@@ -81,12 +81,13 @@ export function QuickProfileSwitcher({ state, locale, onActivate, onClose }: Qui
 }
 
 function ProfileBadges({ profile, isActive, locale }: { profile: Profile; isActive: boolean; locale: Locale }): JSX.Element {
+  const mode = profile.default_permission_mode || "manual";
   return (
     <span className="command-palette-item-subtitle">
       {isActive ? <span className="badge badge-active">{t(locale, "quickSwitchActive")}</span> : null}
       <span>{profile.default_model}</span>
-      {profile.default_thinking ? <span className="badge">T</span> : null}
-      {profile.default_yolo ? <span className="badge">Y</span> : null}
+      {mode !== "manual" ? <span className="badge">{mode === "yolo" ? "Y" : "A"}</span> : null}
+      {profile.thinking_enabled === false ? <span className="badge">T×</span> : null}
     </span>
   );
 }

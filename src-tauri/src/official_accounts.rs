@@ -19,6 +19,8 @@ const ACCOUNTS_ROOT: &str = "~/.kimi-code-switch-gui/official-accounts";
 const CREDENTIALS_PATH: &str = "~/.kimi-code/credentials";
 const KIMI_CODE_CREDENTIAL_FILENAMES: &[&str] = &[
     "kimi-code.json",
+    // kimi-code 0.38.0：托管提供商（managed:kimi-code）的凭据文件
+    "managed:kimi-code.json",
     "kimi.json",
     "moonshot.json",
     "oauth.json",
@@ -628,16 +630,20 @@ mod tests {
         let mcp_dir = credentials.join("mcp");
         fs::create_dir_all(&mcp_dir).unwrap();
         fs::write(credentials.join("kimi-code.json"), "{}").unwrap();
+        fs::write(credentials.join("managed:kimi-code.json"), "{}").unwrap();
         fs::write(credentials.join("notes.txt"), "ignore").unwrap();
         fs::write(mcp_dir.join("server.json"), "{}").unwrap();
 
         let files = credentials_files_in(&credentials).unwrap();
 
-        assert_eq!(files.len(), 1);
-        assert_eq!(
-            files[0].file_name().and_then(|name| name.to_str()),
-            Some("kimi-code.json")
-        );
+        // 0.38.0 托管提供商凭据文件 + 标准 kimi-code.json 都被识别，notes/mcp 被忽略
+        assert_eq!(files.len(), 2);
+        let names: Vec<_> = files
+            .iter()
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect();
+        assert!(names.contains(&"kimi-code.json"));
+        assert!(names.contains(&"managed:kimi-code.json"));
         fs::remove_dir_all(root).unwrap();
     }
 }

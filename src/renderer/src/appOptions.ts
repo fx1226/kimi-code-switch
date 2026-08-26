@@ -182,17 +182,36 @@ export const PROVIDER_TYPE_OPTIONS: Array<{
     label: { "zh-CN": "Kimi API（kimi）", "zh-TW": "Kimi API（kimi）", "en-US": "Kimi API (kimi)", "ja-JP": "Kimi API（kimi）", "de-DE": "Kimi API (kimi)", "es-ES": "Kimi API (kimi)" },
   },
   {
+    value: "openai",
+    label: {
+      "zh-CN": "OpenAI Chat Completions（openai）",
+      "zh-TW": "OpenAI Chat Completions（openai）",
+      "en-US": "OpenAI Chat Completions (openai)",
+      "ja-JP": "OpenAI Chat Completions（openai）",
+      "de-DE": "OpenAI Chat Completions (openai)",
+      "es-ES": "OpenAI Chat Completions (openai)",
+    },
+  },
+  {
     value: "openai_legacy",
     label: {
-      "zh-CN": "OpenAI Chat Completions（openai_legacy）",
-      "en-US": "OpenAI Chat Completions (openai_legacy)",
+      "zh-CN": "OpenAI Chat Completions（openai_legacy，旧别名）",
+      "zh-TW": "OpenAI Chat Completions（openai_legacy，舊別名）",
+      "en-US": "OpenAI Chat Completions (openai_legacy, legacy alias)",
+      "ja-JP": "OpenAI Chat Completions（openai_legacy、旧エイリアス）",
+      "de-DE": "OpenAI Chat Completions (openai_legacy, alter Alias)",
+      "es-ES": "OpenAI Chat Completions (openai_legacy, alias antiguo)",
     },
   },
   {
     value: "openai_responses",
     label: {
       "zh-CN": "OpenAI Responses（openai_responses）",
+      "zh-TW": "OpenAI Responses（openai_responses）",
       "en-US": "OpenAI Responses (openai_responses)",
+      "ja-JP": "OpenAI Responses（openai_responses）",
+      "de-DE": "OpenAI Responses (openai_responses)",
+      "es-ES": "OpenAI Responses (openai_responses)",
     },
   },
   {
@@ -200,13 +219,42 @@ export const PROVIDER_TYPE_OPTIONS: Array<{
     label: { "zh-CN": "Anthropic Claude（anthropic）", "zh-TW": "Anthropic Claude（anthropic）", "en-US": "Anthropic Claude (anthropic)", "ja-JP": "Anthropic Claude（anthropic）", "de-DE": "Anthropic Claude (anthropic)", "es-ES": "Anthropic Claude (anthropic)" },
   },
   {
-    value: "gemini",
-    label: { "zh-CN": "Google Gemini（gemini）", "zh-TW": "Google Gemini（gemini）", "en-US": "Google Gemini (gemini)", "ja-JP": "Google Gemini（gemini）", "de-DE": "Google Gemini (gemini)", "es-ES": "Google Gemini (gemini)" },
+    value: "google-genai",
+    label: { "zh-CN": "Google Gemini（google-genai）", "zh-TW": "Google Gemini（google-genai）", "en-US": "Google Gemini (google-genai)", "ja-JP": "Google Gemini（google-genai）", "de-DE": "Google Gemini (google-genai)", "es-ES": "Google Gemini (google-genai)" },
   },
   {
     value: "vertexai",
     label: { "zh-CN": "Google Vertex AI（vertexai）", "zh-TW": "Google Vertex AI（vertexai）", "en-US": "Google Vertex AI (vertexai)", "ja-JP": "Google Vertex AI（vertexai）", "de-DE": "Google Vertex AI (vertexai)", "es-ES": "Google Vertex AI (vertexai)" },
   },
+];
+
+export const PERMISSION_MODE_OPTIONS: Array<{
+  value: string;
+  label: LocalizedText;
+}> = [
+  {
+    value: "manual",
+    label: { "zh-CN": "手动确认（manual）", "zh-TW": "手動確認（manual）", "en-US": "Manual (manual)", "ja-JP": "手動（manual）", "de-DE": "Manuell (manual)", "es-ES": "Manual (manual)" },
+  },
+  {
+    value: "auto",
+    label: { "zh-CN": "自动（auto）", "zh-TW": "自動（auto）", "en-US": "Auto (auto)", "ja-JP": "自動（auto）", "de-DE": "Automatisch (auto)", "es-ES": "Automático (auto)" },
+  },
+  {
+    value: "yolo",
+    label: { "zh-CN": "YOLO（yolo）", "zh-TW": "YOLO（yolo）", "en-US": "YOLO (yolo)", "ja-JP": "YOLO（yolo）", "de-DE": "YOLO (yolo)", "es-ES": "YOLO (yolo)" },
+  },
+];
+
+export const THINKING_EFFORT_OPTIONS: Array<{
+  value: string;
+  label: LocalizedText;
+}> = [
+  { value: "low", label: { "zh-CN": "低（low）", "zh-TW": "低（low）", "en-US": "Low (low)", "ja-JP": "低（low）", "de-DE": "Niedrig (low)", "es-ES": "Bajo (low)" } },
+  { value: "medium", label: { "zh-CN": "中（medium）", "zh-TW": "中（medium）", "en-US": "Medium (medium)", "ja-JP": "中（medium）", "de-DE": "Mittel (medium)", "es-ES": "Medio (medium)" } },
+  { value: "high", label: { "zh-CN": "高（high）", "zh-TW": "高（high）", "en-US": "High (high)", "ja-JP": "高（high）", "de-DE": "Hoch (high)", "es-ES": "Alto (high)" } },
+  { value: "xhigh", label: { "zh-CN": "超高（xhigh）", "zh-TW": "超高（xhigh）", "en-US": "Extra high (xhigh)", "ja-JP": "超高（xhigh）", "de-DE": "Extra hoch (xhigh)", "es-ES": "Extra alto (xhigh)" } },
+  { value: "max", label: { "zh-CN": "最大（max）", "zh-TW": "最大（max）", "en-US": "Max (max)", "ja-JP": "最大（max）", "de-DE": "Max (max)", "es-ES": "Máximo (max)" } },
 ];
 
 export const MODEL_CAPABILITY_OPTIONS: Array<{
@@ -255,6 +303,28 @@ export const MODEL_CAPABILITY_OPTIONS: Array<{
       "ja-JP": "動画入力（video_in）",
       "de-DE": "Videoeingabe (video_in)",
       "es-ES": "Entrada de vídeo (video_in)",
+    },
+  },
+  {
+    value: "audio_in",
+    label: {
+      "zh-CN": "音频输入（audio_in）",
+      "zh-TW": "音訊輸入（audio_in）",
+      "en-US": "Audio Input (audio_in)",
+      "ja-JP": "音声入力（audio_in）",
+      "de-DE": "Audioeingabe (audio_in)",
+      "es-ES": "Entrada de audio (audio_in)",
+    },
+  },
+  {
+    value: "tool_use",
+    label: {
+      "zh-CN": "工具调用（tool_use）",
+      "zh-TW": "工具呼叫（tool_use）",
+      "en-US": "Tool Use (tool_use)",
+      "ja-JP": "ツール使用（tool_use）",
+      "de-DE": "Tool-Nutzung (tool_use)",
+      "es-ES": "Uso de herramientas (tool_use)",
     },
   },
 ];

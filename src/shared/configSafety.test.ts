@@ -12,17 +12,13 @@ import {
 } from "./configSafety";
 import { createDefaultMcpConfig } from "./mcpStore";
 import { createDefaultShortcuts } from "./shortcutStore";
-import type { AppState } from "./types";
+import type { AppState, MainConfig } from "./types";
 
 function createState(): AppState {
-  const mainConfig = {
+  const mainConfig: MainConfig = {
     default_model: "kimi_gateway/kimi-k2.5",
-    default_thinking: true,
-    default_yolo: false,
     default_plan_mode: false,
-    default_editor: "",
-    theme: "dark",
-    show_thinking_stream: false,
+    default_permission_mode: "manual",
     merge_all_available_skills: false,
     hooks: [],
     models: {
@@ -224,7 +220,7 @@ describe("configSafety", () => {
     expect(issueIds).toContain("webdav.path.invalid");
   });
 
-  it("reports SSE MCP servers as unsupported by Kimi Code", () => {
+  it("flags legacy SSE MCP servers as info (still supported, recommend HTTP)", () => {
     const state = createState();
     state.mcpConfig.mcpServers["amap-maps"] = {
       enabled: true,
@@ -238,8 +234,7 @@ describe("configSafety", () => {
 
     const report = buildConfigDoctorReport(state);
 
-    expect(report.ok).toBe(false);
-    expect(report.issues.map((issue) => issue.id)).toContain("mcp.sse-unsupported.amap-maps");
+    expect(report.issues.map((issue) => issue.id)).toContain("mcp.sse-legacy.amap-maps");
   });
 
   describe("detectUnknownFields (config drift)", () => {
@@ -272,7 +267,7 @@ describe("configSafety", () => {
       expect(drift).toEqual([]);
     });
 
-    it("detects unknown top-level fields per file", () => {
+    it("does not flag unknown top-level config keys (they pass through)", () => {
       const drift = detectUnknownFields({
         config: {
           default_model: "a",
@@ -281,13 +276,26 @@ describe("configSafety", () => {
         },
       });
 
-      const keys = drift.map((entry) => entry.key);
-      expect(keys).toContain("future_feature_flag");
-      expect(keys).toContain("another_new_top_key");
-      expect(keys).not.toContain("default_model");
-      expect(keys).not.toContain("profile_label");
-      expect(drift.every((entry) => entry.file === "config")).toBe(true);
-      expect(drift.every((entry) => entry.path === "(root)")).toBe(true);
+      // 未知顶层键现在原样透传保存（Kimi Code 0.38.0 新增节），不再作为 drift 报告
+      expect(drift).toEqual([]);
+    });
+
+    it("detects unknown nested fields inside known maps", () => {
+      const drift = detectUnknownFields({
+        config: {
+          providers: {
+            kimi_gateway: { type: "kimi", base_url: "https://x", api_key: "sk", region: "us-east" },
+          },
+          models: {
+            "kimi_gateway/k2": { provider: "kimi_gateway", model: "k2", max_context_size: 1, capabilities: [], beta_flag: true },
+          },
+        },
+      });
+
+      const providerDrift = drift.find((entry) => entry.key === "region");
+      const modelDrift = drift.find((entry) => entry.key === "beta_flag");
+      expect(providerDrift?.path).toBe("providers.kimi_gateway");
+      expect(modelDrift?.path).toBe("models.kimi_gateway/k2");
     });
 
     it("warns when official account models have no active account", () => {
@@ -336,8 +344,8 @@ describe("configSafety", () => {
 
     it("aggregates drift across multiple files", () => {
       const drift = detectUnknownFields({
-        config: { surprise_key: 1 },
-        mcp: { stray_mcp_key: true },
+        config: { providers: { g: { type: "kimi", base_url: "x", api_key: "sk", unknown_prov_opt: 1 } } },
+        mcp: { mcpServers: {}, stray_mcp_key: true },
       });
 
       const files = new Set(drift.map((entry) => entry.file));
@@ -358,10 +366,137 @@ describe("configSafety", () => {
     it("surfaces drift through buildConfigDoctorReport when raw docs are provided", () => {
       const state = createState();
       const report = buildConfigDoctorReport(state, {
-        config: { default_model: "kimi_gateway/kimi-k2.5", unknown_cli_field: true },
+        config: { default_model: "kimi_gateway/kimi-k2.5", providers: { g: { type: "kimi", base_url: "x", api_key: "sk", unknown_cli_field: true } } },
       });
 
       expect(report.drift?.some((entry) => entry.key === "unknown_cli_field")).toBe(true);
+    });
+
+    it("treats 0.38.0 provider/model fields as known (no false positives) and redacts their secrets", () => {
+      const drift = detectUnknownFields({
+        config: {
+          providers: {
+            g: {
+              type: "openai",
+              base_url: "https://x",
+              api_key: "sk",
+              env: { KIMI_API_KEY: "KIMI_API_KEY" },
+              custom_headers: { Authorization: "Bearer x" },
+            },
+          },
+          models: {
+            "g/m": {
+              provider: "g",
+              model: "m",
+              max_context_size: 1,
+              capabilities: [],
+              max_output_size: 8192,
+              display_name: "My Model",
+              support_efforts: ["low", "high"],
+              default_effort: "high",
+              reasoning_key: "reasoning",
+              adaptive_thinking: true,
+              overrides: { request: { temperature: 1 } },
+            },
+          },
+        },
+      });
+
+      expect(drift).toEqual([]);
+    });
+
+    it("redacts provider env / custom_headers credential-looking values", () => {
+      const state = createState();
+      const provider = state.mainConfig.providers.kimi_gateway;
+      provider.type = "openai";
+      provider.env = { KIMI_API_KEY: "AKIAEXAMPLEKEY" };
+      provider.custom_headers = {
+        Authorization: "Bearer s3cr3t-token",
+        Key: "exact-key-secret",
+        "Ocp-Apim-Subscription-Key": "subscription-key-secret",
+        "X-Trace": "trace-id",
+      };
+
+      const redactedState = redactAppStateSecrets(state);
+
+      expect(redactedState.state.mainConfig.providers.kimi_gateway.env).toEqual({ KIMI_API_KEY: "[REDACTED]" });
+      expect(redactedState.state.mainConfig.providers.kimi_gateway.custom_headers).toEqual({
+        Authorization: "[REDACTED]",
+        Key: "[REDACTED]",
+        "Ocp-Apim-Subscription-Key": "[REDACTED]",
+        "X-Trace": "trace-id",
+      });
+    });
+
+    it("redacts credential-looking provider and MCP keys from raw disk preview diffs", () => {
+      const state = createState();
+      const providerApiSecret = ["provider", "api", "key"].join("-");
+      const providerEnvSecret = ["fixture", "env", "secret"].join("-");
+      const providerHeaderSecret = ["provider", "header", "secret"].join("-");
+      const rawConfig = [
+        "[providers.gateway]",
+        'type = "openai"',
+        'base_url = "https://api.example.test"',
+        `${["api", "key"].join("_")} = "${providerApiSecret}"`,
+        "",
+        "[providers.gateway.env]",
+        `${["KIMI", "API", "KEY"].join("_")} = "${providerEnvSecret}"`,
+        "",
+        "[providers.gateway.custom_headers]",
+        'Key = "provider-exact-key-secret"',
+        'Ocp-Apim-Subscription-Key = "provider-subscription-key-secret"',
+        `${["X", "API", "Key"].join("-")} = "${providerHeaderSecret}"`,
+        'X-Trace = "provider-trace-id"',
+        "",
+      ].join("\n");
+      state.mcpConfig.mcpServers.current = {
+        enabled: true,
+        transport: "streamable-http",
+        url: "https://mcp.example.test/current",
+        headers: {
+          Key: "current-exact-key-secret",
+          "Ocp-Apim-Subscription-Key": "current-subscription-key-secret",
+          "X-API-Key": "current-mcp-header-secret",
+          "X-Trace": "current-trace-id",
+        },
+        command: "",
+        args: [],
+        env: {},
+      };
+      const preview = buildRedactedPreviewBundle(state, {
+        config: rawConfig,
+        mcp: JSON.stringify({
+          mcpServers: {
+            gateway: {
+              url: "https://mcp.example.test",
+              headers: {
+                Key: "mcp-exact-key-secret",
+                "Ocp-Apim-Subscription-Key": "mcp-subscription-key-secret",
+                "X-API-Key": "mcp-header-secret",
+                "X-Trace": "mcp-trace-id",
+              },
+            },
+          },
+        }, null, 2),
+      });
+
+      expect(preview.configDiff).not.toContain(providerApiSecret);
+      expect(preview.configDiff).not.toContain(providerEnvSecret);
+      expect(preview.configDiff).not.toContain("provider-exact-key-secret");
+      expect(preview.configDiff).not.toContain("provider-subscription-key-secret");
+      expect(preview.configDiff).not.toContain(providerHeaderSecret);
+      expect(preview.mcpDiff).not.toContain("mcp-exact-key-secret");
+      expect(preview.mcpDiff).not.toContain("mcp-subscription-key-secret");
+      expect(preview.mcpDiff).not.toContain("mcp-header-secret");
+      expect(preview.mcpDocument).not.toContain("current-exact-key-secret");
+      expect(preview.mcpDocument).not.toContain("current-subscription-key-secret");
+      expect(preview.mcpDocument).not.toContain("current-mcp-header-secret");
+      expect(preview.configDiff).toContain("provider-trace-id");
+      expect(preview.mcpDiff).toContain("mcp-trace-id");
+      expect(preview.mcpDocument).toContain("current-trace-id");
+      expect(preview.configDiff).toContain("[REDACTED]");
+      expect(preview.mcpDiff).toContain("[REDACTED]");
+      expect(preview.mcpDocument).toContain("[REDACTED]");
     });
 
     it("keeps drift empty and backward compatible when raw docs are omitted", () => {

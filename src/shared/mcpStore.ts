@@ -48,9 +48,10 @@ export function parseMcpConfigStrict(document: string): McpConfig {
 }
 
 export function buildMcpConfigDocument(config: McpConfig): string {
+  // 0.38.0：sse 为 legacy transport 仍受支持，保存时原样写回，不再省略；
+  // 禁用服务器（enabled:false）直接落盘（CLI 原生语义），仅省略显式删除掉的项。
   const mcpServers = Object.fromEntries(
     Object.entries(config.mcpServers)
-      .filter(([, server]) => server.enabled !== false && !isUnsupportedSseServer(server))
       .map(([name, server]) => [name, buildMcpServerDocument(server)]),
   );
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`;
@@ -65,10 +66,25 @@ function parseMcpServer(raw: unknown): McpServerConfig {
     : [];
   const enabled = typeof data.enabled === "boolean" ? data.enabled : true;
 
-  const knownKeys = new Set(["transport", "type", "url", "auth", "headers", "command", "args", "env", "enabled", "extra"]);
+  const knownKeys = new Set([
+    "transport",
+    "type",
+    "url",
+    "auth",
+    "headers",
+    "command",
+    "args",
+    "env",
+    "enabled",
+    "extra",
+  ]);
   const derivedExtra = Object.fromEntries(
     Object.entries(data).filter(([key]) => !knownKeys.has(key)),
   );
+  // auth 是 0.38.0 的 OAuth 标记，以 extra 形式保留，避免保存时静默丢弃
+  if (data.auth !== undefined) {
+    derivedExtra.auth = data.auth;
+  }
   const explicitExtra = isRecord(data.extra) ? data.extra : {};
   const extra = {
     ...explicitExtra,
@@ -103,6 +119,18 @@ function parseMcpServer(raw: unknown): McpServerConfig {
 }
 
 function buildMcpServerDocument(server: McpServerConfig): Record<string, unknown> {
+  // transport/type 只在原始声明需要显式保留时写回：sse（legacy）+ 显式 type 别名。
+  // stdio 与按 URL/命令推断出的 transport 不写，保持输出与 CLI 惯例一致且稳定。
+  let transportOut: Record<string, unknown> = {};
+  if (server.transport === "sse") {
+    transportOut = { transport: "sse" };
+  } else {
+    const typeAlias = server.extra?.type;
+    if (typeAlias === "sse" || typeAlias === "streamable-http" || typeAlias === "http") {
+      transportOut = { type: typeAlias };
+    }
+  }
+
   const base =
     server.transport === "stdio"
       ? {
@@ -118,6 +146,7 @@ function buildMcpServerDocument(server: McpServerConfig): Record<string, unknown
   return {
     ...sanitizeMcpExtra(server.extra),
     ...base,
+    ...transportOut,
     ...(server.enabled === false ? { enabled: false } : {}),
   };
 }
@@ -133,7 +162,10 @@ function sanitizeMcpExtra(extra: Record<string, unknown> | undefined): Record<st
   if (!extra) {
     return {};
   }
-  const blockedKeys = new Set(["transport", "type"]);
+  // type 别名保留（写回时由 buildMcpServerDocument 决定输出方式）；
+  // transport 直接放进 extra 时也允许（sse 场景在上面统一用顶层 transport 表达，
+  // 这里剥掉以免与顶层重复）。
+  const blockedKeys = new Set(["transport"]);
   return Object.fromEntries(Object.entries(extra).filter(([key]) => !blockedKeys.has(key)));
 }
 

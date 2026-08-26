@@ -21,12 +21,8 @@ function createState(): AppState {
     mcpConfigPath: "/tmp/mcp.json",
     mainConfig: {
       default_model: "provider-a/model-a",
-      default_thinking: true,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: "",
-      theme: "dark",
-      show_thinking_stream: false,
+      default_permission_mode: "manual",
       merge_all_available_skills: false,
       hooks: [],
       models: {
@@ -55,24 +51,16 @@ function createState(): AppState {
         name: "default",
         label: "Default",
         default_model: "provider-a/model-a",
-        default_thinking: true,
-        default_yolo: false,
         default_plan_mode: false,
-        default_editor: "",
-        theme: "dark",
-        show_thinking_stream: false,
+        default_permission_mode: "manual",
         merge_all_available_skills: false,
       },
       work: {
         name: "work",
         label: "Work",
         default_model: "provider-a/model-a",
-        default_thinking: true,
-        default_yolo: false,
         default_plan_mode: false,
-        default_editor: "",
-        theme: "dark",
-        show_thinking_stream: false,
+        default_permission_mode: "manual",
         merge_all_available_skills: false,
       },
     },
@@ -166,12 +154,12 @@ describe("updateState", () => {
     const { updateState } = useStateMutations(ctx);
 
     updateState((draft) => {
-      draft.mainConfig.default_thinking = false;
+      draft.mainConfig.default_permission_mode = "yolo";
     });
 
     expect(ctx.setState).toHaveBeenCalledTimes(1);
     const nextState = ctx.setStateValues[0];
-    expect(nextState.mainConfig.default_thinking).toBe(false);
+    expect(nextState.mainConfig.default_permission_mode).toBe("yolo");
 
     expect(ctx.refreshPreview).toHaveBeenCalledTimes(1);
     expect(ctx.persistState).toHaveBeenCalledTimes(1);
@@ -187,7 +175,7 @@ describe("updateState", () => {
 
     updateState(
       (draft) => {
-        draft.mainConfig.default_thinking = false;
+        draft.mainConfig.default_permission_mode = "yolo";
       },
       { persist: false },
     );
@@ -213,7 +201,7 @@ describe("updateState", () => {
     const { updateState } = useStateMutations(ctx);
 
     updateState((draft) => {
-      draft.mainConfig.default_thinking = false;
+      draft.mainConfig.default_permission_mode = "yolo";
     }, { historySummary: "toggle thinking" });
 
     const [entry] = getHistory(ctx.setStateValues[0]);
@@ -227,7 +215,7 @@ describe("updateState", () => {
 
     updateState(
       (draft) => {
-        draft.mainConfig.default_thinking = false;
+        draft.mainConfig.default_permission_mode = "yolo";
       },
       { persist: false },
     );
@@ -257,7 +245,7 @@ describe("updateState", () => {
 
     updateState(
       (draft) => {
-        draft.mainConfig.default_thinking = false;
+        draft.mainConfig.default_permission_mode = "yolo";
       },
       { persist: true, recordHistory: false },
     );
@@ -313,7 +301,7 @@ describe("updateState", () => {
 describe("updateImmediateState", () => {
   it("applies updater to both visible and persisted drafts and persists immediately", () => {
     const savedState = createState();
-    savedState.mainConfig.default_thinking = false;
+    savedState.mainConfig.default_permission_mode = "yolo";
     const ctx = createMockContext({ savedState });
     const { updateImmediateState } = useStateMutations(ctx);
 

@@ -146,10 +146,23 @@ export class UsageLogWatcher {
           continue;
         }
         for (const session of sessions) {
-          const logPath = `${workDirPath}/${session}/logs/kimi-code.log`;
+          const sessionPath = `${workDirPath}/${session}`;
+          const logPath = `${sessionPath}/logs/kimi-code.log`;
           if (await this.fileStat(logPath)) paths.push(logPath);
-          const wirePath = `${workDirPath}/${session}/agents/main/wire.jsonl`;
-          if (await this.fileStat(wirePath)) paths.push(wirePath);
+          // 枚举 session 下全部 agent 的 wire.jsonl（main 与子代理 agents/agent-N/ 各自
+          // 产生 usage.record）。每个 wire 文件以完整路径为键独立持久化 offset（见
+          // readNewLines 的 getIngestState/setIngestState），互不串 offset；即便某段被
+          // 重复解析，insertEvent 也按稳定 request_id（含 sourcePath）去重兜底。
+          let agents: string[];
+          try {
+            agents = await this.listDir(`${sessionPath}/agents`);
+          } catch {
+            continue;
+          }
+          for (const agent of agents) {
+            const wirePath = `${sessionPath}/agents/${agent}/wire.jsonl`;
+            if (await this.fileStat(wirePath)) paths.push(wirePath);
+          }
         }
       }
     } catch {

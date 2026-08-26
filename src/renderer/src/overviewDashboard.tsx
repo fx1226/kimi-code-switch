@@ -123,8 +123,10 @@ export function OverviewDashboard(props: {
     profile.default_model || state.mainConfig.default_model || "";
   const activeProfileModelName = activeProfile ? resolveProfileModelName(activeProfile) : state.mainConfig.default_model;
   const formatProfileModes = (profile: AppState["profiles"][string]): string => [
-    `${t(locale, "overviewThinking")}: ${boolLabel(!!profile.default_thinking)}`,
-    `${t(locale, "overviewYolo")}: ${boolLabel(!!profile.default_yolo)}`,
+    `${t(locale, "overviewThinking")}: ${
+      profile.thinking_enabled === undefined ? "—" : boolLabel(profile.thinking_enabled)
+    }`,
+    `${t(locale, "overviewYolo")}: ${profile.default_permission_mode || "manual"}`,
     `${t(locale, "overviewPlanMode")}: ${boolLabel(!!profile.default_plan_mode)}`,
   ].join(" · ");
 
@@ -172,8 +174,8 @@ export function OverviewDashboard(props: {
           </div>
           <div className="overview-hero-col">
             <div className="overview-hero-col-title">{t(locale, "overviewActiveConfig")}</div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewThinking")}</span><BoolPill value={!!activeProfile?.default_thinking} /></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewYolo")}</span><BoolPill value={!!activeProfile?.default_yolo} /></div>
+            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewThinking")}</span><BoolPill value={activeProfile?.thinking_enabled !== false} /></div>
+            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewYolo")}</span><span className="overview-hero-kv-value">{activeProfile?.default_permission_mode || "manual"}</span></div>
             <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewPlanMode")}</span><BoolPill value={!!activeProfile?.default_plan_mode} /></div>
           </div>
         </div>

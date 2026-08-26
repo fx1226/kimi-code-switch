@@ -8,12 +8,12 @@ import type { AppState, ConfigTarget, KimiCodeInstallSource, McpServerConfig, Mo
 import * as officialAccounts from "./officialAccounts";
 import { recordStartupTiming, startupTimingNow } from "../startupTiming";
 
-const KIMI_CODE_HOMEBREW_URL = "https://formulae.brew.sh/api/formula/kimi-code.json";
-const KIMI_CODE_GITHUB_LATEST_URL = "https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest";
 const KIMI_CODE_INSTALL_SCRIPT_SH = "https://code.kimi.com/kimi-code/install.sh";
 const KIMI_CODE_INSTALL_SCRIPT_URL = "https://code.kimi.com/kimi-code/install.ps1";
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const LATEST_VERSION_TIMEOUT_MS = 3500;
+// 0.38.0 内置 `kimi upgrade`，作为原生安装/脚本/npm/pnpm 的推荐升级入口。
+const KIMI_CODE_UPGRADE_COMMAND = "kimi upgrade";
 
 interface ExecResult {
   code: number;
@@ -174,9 +174,10 @@ export interface KimiOAuthLoginEvent {
 }
 
 // GUI 期望的 Kimi Code 版本范围：低于 MIN 判定为过旧（功能可能不兼容）。
-// EXPECTED 是当前 GUI 主要对照测试过的版本，仅作展示参考。
-export const MIN_CLI_VERSION = "0.14.0";
-export const EXPECTED_CLI_VERSION = "0.14.0";
+// 0.38.0 依据：从 0.21.0 起 default_thinking 废弃、providers/models 新 schema 开始落地，
+// 本 GUI 的 Provider/Model 字段补齐与连通性测试基于该新 schema。低于此版本功能不保证兼容。
+export const MIN_CLI_VERSION = "0.21.0";
+export const EXPECTED_CLI_VERSION = "0.38.0";
 
 export type CliCompatStatus = "compatible" | "outdated" | "unknown";
 
@@ -202,7 +203,7 @@ function currentPlatform(): "windows" | "macos" | "linux" | "unknown" {
   return "unknown";
 }
 
-function versionResultBase(target: ConfigTarget): Pick<CliVersionResult, "target" | "packageName" | "installCommand" | "updateCommand"> {
+function versionResultBase(target: ConfigTarget, installSource: KimiCodeInstallSource = "unknown"): Pick<CliVersionResult, "target" | "packageName" | "installCommand" | "updateCommand"> {
   const isWindows = currentPlatform() === "windows";
   const installCommand = isWindows
     ? `irm ${KIMI_CODE_INSTALL_SCRIPT_URL} | iex`
@@ -211,7 +212,13 @@ function versionResultBase(target: ConfigTarget): Pick<CliVersionResult, "target
     target,
     packageName: "Kimi Code",
     installCommand,
-    updateCommand: isWindows ? installCommand : "brew upgrade kimi-code",
+    // 0.38.0：内置 `kimi upgrade` 是原生/官方脚本/npm/pnpm 安装的升级首选；
+    // Homebrew 安装仍走 brew upgrade，避免绕过 cask 元数据。Windows 走官方脚本。
+    updateCommand: isWindows
+      ? installCommand
+      : installSource === "homebrew"
+        ? "brew upgrade kimi-code"
+        : KIMI_CODE_UPGRADE_COMMAND,
   };
 }
 
@@ -320,7 +327,7 @@ export async function detectActiveKimiTarget(): Promise<KimiTargetDetectionResul
 
 async function detectKimiCodeHomebrewVersion(): Promise<CliVersionResult> {
   const startedAt = startupTimingNow();
-  const base = versionResultBase("kimi-code");
+  const base = versionResultBase("kimi-code", "homebrew");
   try {
     const r = await exec("brew", ["list", "--versions", "kimi-code"], 3000);
     if (r.code !== 0) throw new Error(r.stderr);
@@ -338,9 +345,9 @@ async function detectKimiCodeScriptVersion(): Promise<CliVersionResult> {
   const startedAt = startupTimingNow();
   const installCommand = `curl -fsSL ${KIMI_CODE_INSTALL_SCRIPT_SH} | bash`;
   const base = {
-    ...versionResultBase("kimi-code"),
+    ...versionResultBase("kimi-code", "official-script"),
     installCommand,
-    updateCommand: installCommand,
+    updateCommand: KIMI_CODE_UPGRADE_COMMAND,
   };
   try {
     const script = 'p="${KIMI_INSTALL_DIR:-$HOME/.kimi-code}/bin/kimi"; [ -x "$p" ] && "$p" --version';
@@ -350,7 +357,7 @@ async function detectKimiCodeScriptVersion(): Promise<CliVersionResult> {
     if (!version) throw new Error("kimi-code script install version not found");
     return withInstallSource({ ...base, version, installed: true }, "official-script");
   } catch {
-    return withInstallSource({ ...versionResultBase("kimi-code"), version: "", installed: false }, "unknown");
+    return withInstallSource({ ...versionResultBase("kimi-code", "official-script"), version: "", installed: false }, "unknown");
   } finally {
     recordStartupTiming("cli.detectKimiCodeScriptVersion", startedAt);
   }
@@ -428,16 +435,89 @@ async function detectKimiCodeVersion(): Promise<CliVersionResult> {
   }
 }
 
-async function getKimiCodeLatestVersion(): Promise<string | null> {
-  const platform = currentPlatform();
-  const url = platform === "windows" ? KIMI_CODE_GITHUB_LATEST_URL : KIMI_CODE_HOMEBREW_URL;
+// ── 更新检测（Kimi Code 0.38.0：走官方 CDN manifest）──
+// CLI 自带 manifest：https://code.{kimi.com|kimi.ai}/kimi-code/latest.json
+// 全球/大陆分域：区域信息在 ~/.kimi-code/region（如 "zh-cn" / "global"）。
+//   - "zh-cn" → code.kimi.com（大陆分域）
+//   - "global"（或缺省）→ code.kimi.ai（全球分域）
+// 本地缓存 ~/.kimi-code/updates/latest.json 形如
+// { source, checkedAt, latest, manifest: { version, ... } }，优先读取它避免每次请求网络。
+// brew / GitHub releases 仅作为安装源信息回退，不再是版本检测主路径。
+const KIMI_CODE_UPDATES_CACHE_PATH = "~/.kimi-code/updates/latest.json";
+const KIMI_CODE_REGION_PATH = "~/.kimi-code/region";
+const KIMI_CODE_UPDATES_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+
+async function readCliManifestCache(): Promise<{ latest?: string; source?: string; checkedAt?: string } | null> {
+  try {
+    const cached = await invoke<{ status: number; ok: boolean; body: string } | string | null>("read_text", { path: KIMI_CODE_UPDATES_CACHE_PATH });
+    if (typeof cached !== "string" || !cached.trim()) {
+      return null;
+    }
+    const parsed = JSON.parse(cached) as { latest?: unknown; source?: unknown; checkedAt?: unknown };
+    if (typeof parsed.latest !== "string") {
+      return null;
+    }
+    return {
+      latest: parsed.latest,
+      source: typeof parsed.source === "string" ? parsed.source : undefined,
+      checkedAt: typeof parsed.checkedAt === "string" ? parsed.checkedAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readKimiCodeRegion(): Promise<string> {
+  try {
+    const raw = await invoke<string | null>("read_text", { path: KIMI_CODE_REGION_PATH });
+    if (!raw) {
+      return "";
+    }
+    const trimmed = raw.trim().replace(/^["']|["']$/g, "").toLowerCase();
+    return trimmed === "zh-cn" ? "zh-cn" : "global";
+  } catch {
+    return "global";
+  }
+}
+
+function kimiCodeCdnHost(region: string): string {
+  return region === "zh-cn" ? "code.kimi.com" : "code.kimi.ai";
+}
+
+async function getKimiCodeLatestVersionFromCdn(): Promise<string | null> {
+  const region = await readKimiCodeRegion();
+  const url = `https://${kimiCodeCdnHost(region)}/kimi-code/latest.json`;
   const resp = await http("GET", url, { Accept: "application/json", "User-Agent": "kimi-code-switch-gui" });
-  if (!resp.ok) return null;
-  const payload = JSON.parse(resp.body) as { versions?: { stable?: string }; tag_name?: string };
-  const rawVersion = platform === "windows"
-    ? payload.tag_name
-    : payload.versions?.stable;
-  return extractSemver(rawVersion) || null;
+  if (!resp.ok) {
+    return null;
+  }
+  const payload = JSON.parse(resp.body) as { version?: unknown; latest?: unknown; manifest?: { version?: unknown } };
+  const rawVersion = typeof payload.version === "string"
+    ? payload.version
+    : typeof payload.latest === "string"
+      ? payload.latest
+      : payload.manifest?.version;
+  return extractSemver(typeof rawVersion === "string" ? rawVersion : undefined) || null;
+}
+
+/**
+ * 获取 Kimi Code 最新版本。优先读取 CLI 本地更新缓存；无缓存时回退到 CDN manifest。
+ * brew / GitHub releases 不再用于版本检测主路径。
+ */
+async function getKimiCodeLatestVersion(): Promise<string | null> {
+  const cached = await readCliManifestCache();
+  const checkedAtMs = cached?.checkedAt ? Date.parse(cached.checkedAt) : Number.NaN;
+  const cacheAgeMs = Date.now() - checkedAtMs;
+  const cacheIsFresh = Number.isFinite(checkedAtMs)
+    && cacheAgeMs >= 0
+    && cacheAgeMs <= KIMI_CODE_UPDATES_CACHE_MAX_AGE_MS;
+  if (cacheIsFresh && cached?.latest) {
+    const cachedVersion = extractSemver(cached.latest);
+    if (cachedVersion) {
+      return cachedVersion;
+    }
+  }
+  return getKimiCodeLatestVersionFromCdn();
 }
 
 async function attachLatestVersion(result: CliVersionResult, timeoutMs = LATEST_VERSION_TIMEOUT_MS): Promise<CliVersionResult> {
@@ -486,9 +566,22 @@ export async function upgradeTargetCli(
 ): Promise<{ ok: true; stdout: string; stderr: string }> {
   void target;
   const platform = currentPlatform();
-  const r = platform === "windows"
-    ? await exec("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${KIMI_CODE_INSTALL_SCRIPT_URL} | iex`], 120000)
-    : await exec("brew", [options.install ? "install" : "upgrade", "kimi-code"], 120000);
+  if (platform === "windows") {
+    // Windows：官方 PowerShell 安装脚本是唯一安装/升级入口。
+    const r = await exec("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${KIMI_CODE_INSTALL_SCRIPT_URL} | iex`], 120000);
+    if (r.code !== 0) throw new Error(r.stderr || "upgrade failed");
+    return { ok: true, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+  }
+
+  // 先检测真实安装来源，据此选升级路径：
+  // - install 请求（通常因未安装）：Homebrew 安装兜底；
+  // - homebrew：brew install/upgrade（保留 cask 元数据）；
+  // - official-script / npm / pnpm / unknown：0.38.0 内置 `kimi upgrade` 优先。
+  const detected = await detectKimiCodeVersion();
+  const isHomebrew = detected.installSource === "homebrew";
+  const r = options.install || isHomebrew
+    ? await exec("brew", [options.install ? "install" : "upgrade", "kimi-code"], 120000)
+    : await exec("sh", ["-lc", "kimi upgrade"], 120000);
   if (r.code !== 0) throw new Error(r.stderr || "upgrade failed");
   return { ok: true, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
 }
@@ -860,7 +953,8 @@ function buildRequest(provider: ProviderConfig, model: ModelConfig, prompt: stri
   body: Record<string, unknown>;
   kind: Kind;
 } {
-  const type = provider.type || "openai_legacy";
+  // 0.38.0 中 openai=chat/completions；openai_legacy 仅作旧别名保留。
+  const type = provider.type || "openai";
   if (type === "anthropic") {
     return {
       endpoint: joinUrlPath(provider.base_url, "/v1/messages"),
@@ -877,6 +971,9 @@ function buildRequest(provider: ProviderConfig, model: ModelConfig, prompt: stri
       kind: "responses",
     };
   }
+  // google-genai / vertexai / gemini 在 0.38.0 有各自的 wire 格式
+  // （generateContent 等），本 GUI 连通性测试暂不做精确实现，
+  // 统一回退到 chat/completions 兜底探测，仅保证请求可发、结构自洽。
   return {
     endpoint: joinUrlPath(provider.base_url, "/chat/completions"),
     headers: { "content-type": "application/json", authorization: `Bearer ${provider.api_key}` },

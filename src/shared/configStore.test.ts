@@ -29,6 +29,7 @@ import {
   getKimiCodeEnvironmentHomePath,
   getKimiCodeConfigPath,
   getKimiCodeMcpConfigPath,
+  getKimiCodeTuiConfigPath,
   migrateLegacyKimiCliConfigToKimiCode,
   formatMissingModelError,
   getImportPreview,
@@ -47,7 +48,8 @@ import {
   upsertProvider,
 } from "./configStore";
 import { buildMcpConfigDocument } from "./mcpStore";
-import type { AppState } from "./types";
+import { parseTuiConfigDocument } from "./tuiStore";
+import type { AppState, MainConfig, Profile } from "./types";
 
 function createState(): AppState {
   return {
@@ -58,12 +60,8 @@ function createState(): AppState {
     mcpConfigPath: "/tmp/mcp.json",
     mainConfig: {
       default_model: "kimi_gateway/kimi-k2.5",
-      default_thinking: true,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: "",
-      theme: "dark",
-      show_thinking_stream: false,
+      default_permission_mode: "",
       merge_all_available_skills: false,
       hooks: [],
       models: {
@@ -89,12 +87,8 @@ function createState(): AppState {
     },
     profiles: bootstrapProfiles({
       default_model: "kimi_gateway/kimi-k2.5",
-      default_thinking: true,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: "",
-      theme: "dark",
-      show_thinking_stream: false,
+      default_permission_mode: "",
       merge_all_available_skills: false,
       hooks: [],
       models: {
@@ -210,19 +204,20 @@ describe("configStore", () => {
       name: "work",
       label: "Work",
       default_model: "alt_gateway/gpt-4.1",
-      default_thinking: false,
-      default_yolo: true,
       default_plan_mode: true,
-      default_editor: "vim",
-      theme: "light",
-      show_thinking_stream: true,
+      default_permission_mode: "yolo",
       merge_all_available_skills: true,
+      thinking_enabled: false,
+      thinking_effort: "high",
+      tui_theme: "light",
+      tui_editor_command: "vim",
     });
 
     applyProfile(state, "work");
 
     expect(state.mainConfig.default_model).toBe("alt_gateway/gpt-4.1");
-    expect(state.mainConfig.default_yolo).toBe(true);
+    expect(state.mainConfig.default_permission_mode).toBe("yolo");
+    expect(state.mainConfig.default_plan_mode).toBe(true);
     expect(state.activeProfile).toBe("work");
   });
 
@@ -254,17 +249,15 @@ describe("configStore", () => {
       name: "work",
       label: "Work",
       default_model: "kimi_gateway/kimi-k2.5",
-      default_thinking: true,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: "vim",
-      theme: "light",
-      show_thinking_stream: false,
+      default_permission_mode: "manual",
       merge_all_available_skills: false,
+      tui_editor_command: "vim",
+      tui_theme: "light",
     });
 
-    expect(state.profiles.work.default_editor).toBe("vim");
-    expect(state.profiles.work.theme).toBe("light");
+    expect(state.profiles.work.tui_editor_command).toBe("vim");
+    expect(state.profiles.work.tui_theme).toBe("light");
   });
 
   it("renders config document", () => {
@@ -674,12 +667,11 @@ url = "https://mcp.context7.com/mcp"
         name: "other",
         label: "Other",
         default_model: "kimi_gateway/kimi-k2.5",
-        default_thinking: false,
-        default_yolo: true,
+        default_permission_mode: "yolo",
         default_plan_mode: true,
-        default_editor: "vim",
-        theme: "light",
-        show_thinking_stream: true,
+        thinking_enabled: false,
+        tui_theme: "light",
+        tui_editor_command: "vim",
         merge_all_available_skills: true,
       };
       const diff = compareProfiles(a, b);
@@ -689,7 +681,7 @@ url = "https://mcp.context7.com/mcp"
     it("reports partial differences correctly", () => {
       const state = createState();
       const a = state.profiles.default;
-      const b = { ...a, label: "Changed", default_thinking: false, theme: "light" };
+      const b: Profile = { ...a, label: "Changed", default_permission_mode: "yolo", tui_theme: "light" };
       const diff = compareProfiles(a, b);
       const changed = diff.differences.filter((d) => !d.isSame);
       expect(changed.length).toBeGreaterThanOrEqual(2);
@@ -703,26 +695,24 @@ url = "https://mcp.context7.com/mcp"
         name: "source",
         label: "Source",
         default_model: "kimi_gateway/kimi-k2.5",
-        default_thinking: false,
-        default_yolo: true,
         default_plan_mode: false,
-        default_editor: "",
-        theme: "light",
-        show_thinking_stream: false,
+        default_permission_mode: "manual",
         merge_all_available_skills: false,
+        tui_theme: "light",
       });
-      copyProfileField(state, "default", "source", "theme");
-      expect(state.profiles.source.theme).toBe("dark");
+      copyProfileField(state, "default", "source", "tui_theme");
+      // 默认 profile 未设 tui_theme，复制后 source 仍为 undefined
+      expect(state.profiles.source.tui_theme).toBe(undefined);
     });
 
     it("throws when source profile is missing", () => {
       const state = createState();
-      expect(() => copyProfileField(state, "missing", "default", "theme")).toThrow(/Profile not found: missing/);
+      expect(() => copyProfileField(state, "missing", "default", "tui_theme")).toThrow(/Profile not found: missing/);
     });
 
     it("throws when target profile is missing", () => {
       const state = createState();
-      expect(() => copyProfileField(state, "default", "missing", "theme")).toThrow(/Profile not found: missing/);
+      expect(() => copyProfileField(state, "default", "missing", "tui_theme")).toThrow(/Profile not found: missing/);
     });
   });
 
@@ -731,13 +721,16 @@ url = "https://mcp.context7.com/mcp"
 function createMemoryFs(initial: Record<string, string>) {
   const store = { ...initial };
   const ensured: string[] = [];
+  const writes: string[] = [];
   return {
     store,
     ensured,
+    writes,
     async readText(path: string): Promise<string | null> {
       return store[path] ?? null;
     },
     async writeText(path: string, content: string): Promise<void> {
+      writes.push(path);
       store[path] = content;
     },
     async ensureDir(path: string): Promise<void> {
@@ -1106,8 +1099,9 @@ default_thinking = false
     expect(state.profilesPath).toBe("");
     expect(state.mcpConfigPath).toBe("~/.kimi-code-switch-gui/.env/default/mcp.json");
     expect(state.activeProfile).toBe("work");
-    expect(state.profiles.work.default_thinking).toBe(false);
-    expect(state.panelSettings.profiles.work.default_thinking).toBe(false);
+    // 旧 default_thinking 迁移为 thinking_enabled
+    expect(state.profiles.work.thinking_enabled).toBe(false);
+    expect(state.panelSettings.profiles.work.thinking_enabled).toBe(false);
   });
 
   it("keeps Kimi Code defaults even when historical target is present", () => {
@@ -1447,6 +1441,174 @@ max_context_size = 8192
     expect(files.store["~/.kimi-code-switch-gui/.env/default/config.toml"]).toBeDefined();
     expect(files.store["~/.kimi-code-switch-gui/.env/default/config.profiles.toml"]).toBeUndefined();
     expect(files.store["/tmp/config.panel.toml"]).toContain("active_profile");
+  });
+
+  it("migrates legacy dead profile keys into tui/thinking fields via loadAppState", async () => {
+    const files = createMemoryFs({
+      "~/.kimi-code-switch-gui/.env/default/config.toml": `
+default_model = "test-model"
+[providers.test]
+type = "openai"
+base_url = "https://api.test.com"
+api_key = "sk-test"
+[models.test-model]
+provider = "test"
+model = "gpt-4"
+max_context_size = 8192
+[thinking]
+enabled = true
+`,
+      "~/.kimi-code-switch-gui/.env/default/config.profiles.toml": `
+version = 1
+active_profile = "work"
+[profiles.work]
+label = "Work"
+default_model = "test-model"
+default_thinking = true
+default_yolo = false
+default_plan_mode = false
+default_editor = "vim"
+theme = "dark"
+show_thinking_stream = false
+merge_all_available_skills = false
+`,
+    });
+
+    const state = await loadAppState(files, { configTarget: "kimi-code" });
+    const profile = state.profiles.work;
+    // 旧死键访问需类型透明（新版 schema 已删除这些字段），断言其被迁移后为 undefined
+    const legacyProfile = profile as Profile & Record<string, unknown>;
+
+    // 旧死键迁移为新字段
+    expect(legacyProfile.theme).toBeUndefined();
+    expect(profile.tui_theme).toBe("dark");
+    expect(legacyProfile.default_editor).toBeUndefined();
+    expect(profile.tui_editor_command).toBe("vim");
+    expect(legacyProfile.default_yolo).toBeUndefined();
+    expect(profile.default_permission_mode).toBe("manual");
+    expect(legacyProfile.show_thinking_stream).toBeUndefined();
+    expect(legacyProfile.default_thinking).toBeUndefined();
+    // default_thinking -> thinking_enabled（旧键布尔进 profile 的 thinking_enabled）
+    expect(profile.thinking_enabled).toBe(true);
+
+    // 顶层 [thinking] 经透传进 mainConfig.extra，不写回 profile 字段
+    expect((state.mainConfig.extra as Record<string, unknown>).thinking).toEqual({ enabled: true });
+    // show_thinking_stream 这类死键不进 mainConfig 顶层、也不进 extra
+    const legacyMainConfig = state.mainConfig as MainConfig & Record<string, unknown>;
+    expect(legacyMainConfig.show_thinking_stream).toBeUndefined();
+    expect(legacyMainConfig.theme).toBeUndefined();
+    expect(legacyMainConfig.default_editor).toBeUndefined();
+  });
+
+  it("writes tui.toml next to the active environment config when the active profile sets tui fields", async () => {
+    const state = createState();
+    state.configTarget = "kimi-code";
+    state.configPath = "~/.kimi-code-switch-gui/.env/default/config.toml";
+    state.profilesPath = "";
+    state.profiles.default = {
+      ...state.profiles.default,
+      tui_theme: "dark",
+      tui_editor_command: "nvim",
+    };
+    state.activeProfile = "default";
+    const files = createMemoryFs({});
+
+    await saveAppState(files, state);
+
+    const tuiPath = getKimiCodeTuiConfigPath("~/.kimi-code-switch-gui/.env/default");
+    const document = files.store[tuiPath];
+    expect(document).toBeDefined();
+    expect(document).toContain('theme = "dark"');
+    expect(document).toContain("[editor]");
+    expect(document).toContain('command = "nvim"');
+    // tui.toml 可解析回同值
+    expect(parseTuiConfigDocument(document)).toEqual({
+      theme: "dark",
+      editorCommand: "nvim",
+    });
+  });
+
+  it("skips writing tui.toml when the active profile sets no tui fields (no overwrite of unrelated sections)", async () => {
+    const state = createState();
+    state.configTarget = "kimi-code";
+    state.configPath = "~/.kimi-code-switch-gui/.env/default/config.toml";
+    state.profilesPath = "";
+    const files = createMemoryFs({
+      "~/.kimi-code-switch-gui/.env/default/tui.toml": `[notifications]\nenabled = false\n[upgrade]\nauto_install = true\n`,
+    });
+
+    await saveAppState(files, state);
+
+    const tuiPath = getKimiCodeTuiConfigPath("~/.kimi-code-switch-gui/.env/default");
+    // 未传播 tui 字段时不写，保留用户原文档
+    expect(files.store[tuiPath]).toBeDefined();
+    expect(files.store[tuiPath]).toContain("[notifications]");
+    expect(files.store[tuiPath]).toContain("[upgrade]");
+  });
+
+  it("merges GUI tui fields into an existing tui.toml, preserving unrelated sections", async () => {
+    const state = createState();
+    state.configTarget = "kimi-code";
+    state.configPath = "~/.kimi-code-switch-gui/.env/default/config.toml";
+    state.profilesPath = "";
+    state.profiles.default = {
+      ...state.profiles.default,
+      tui_theme: "dark",
+    };
+    state.activeProfile = "default";
+    const existingTui = `disable_paste_burst = true\n\n[notifications]\nenabled = false\nnotification_condition = "always"\n\n[upgrade]\nauto_install = true\n`;
+    const files = createMemoryFs({
+      "~/.kimi-code-switch-gui/.env/default/tui.toml": existingTui,
+    });
+
+    await saveAppState(files, state);
+
+    const tuiPath = getKimiCodeTuiConfigPath("~/.kimi-code-switch-gui/.env/default");
+    const document = files.store[tuiPath];
+    expect(document).toContain('theme = "dark"');
+    // 无关 section 原样保留
+    expect(document).toContain("disable_paste_burst = true");
+    expect(document).toContain("enabled = false");
+    expect(document).toContain('notification_condition = "always"');
+    expect(document).toContain("auto_install = true");
+  });
+
+  it("removes stale GUI-managed TUI values when switching to an unconfigured profile", async () => {
+    const state = createState();
+    state.configPath = "~/.kimi-code-switch-gui/.env/default/config.toml";
+    state.profiles.default = {
+      ...state.profiles.default,
+      tui_theme: undefined,
+      tui_editor_command: undefined,
+    };
+    const tuiPath = getKimiCodeTuiConfigPath("~/.kimi-code-switch-gui/.env/default");
+    const files = createMemoryFs({
+      [tuiPath]: 'theme = "dark"\n\n[editor]\ncommand = "vim"\n\n[notifications]\nenabled = false\n',
+    });
+
+    await saveAppState(files, state);
+
+    expect(files.store[tuiPath]).not.toContain("theme =");
+    expect(files.store[tuiPath]).not.toContain("command =");
+    expect(files.store[tuiPath]).toContain("[notifications]");
+    expect(files.store[tuiPath]).toContain("enabled = false");
+  });
+
+  it("does not overwrite an invalid existing tui.toml", async () => {
+    const state = createState();
+    state.configPath = "~/.kimi-code-switch-gui/.env/default/config.toml";
+    state.profiles.default = {
+      ...state.profiles.default,
+      tui_theme: "light",
+    };
+    const tuiPath = getKimiCodeTuiConfigPath("~/.kimi-code-switch-gui/.env/default");
+    const invalidDocument = 'theme = \n[notifications]\nenabled = false\n';
+    const files = createMemoryFs({ [tuiPath]: invalidDocument });
+
+    await saveAppState(files, state);
+
+    expect(files.store[tuiPath]).toBe(invalidDocument);
+    expect(files.writes).not.toContain(tuiPath);
   });
 
   it("persists configTarget in panelSettings", () => {

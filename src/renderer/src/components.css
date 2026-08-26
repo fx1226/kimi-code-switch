@@ -4489,6 +4489,50 @@ textarea:focus-visible {
   line-height: 1.35;
 }
 
+.advanced-collapse {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-quiet);
+  overflow: hidden;
+}
+
+.advanced-collapse>summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+}
+
+.advanced-collapse>summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-collapse-icon {
+  color: var(--muted);
+  transition: transform 180ms ease;
+}
+
+.advanced-collapse-icon.is-open {
+  transform: rotate(180deg);
+}
+
+.advanced-collapse-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.json-field.is-invalid textarea {
+  border-color: var(--danger);
+}
+
 .mcp-line-editor {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Tauri (Rust + WebView) desktop app for managing `kimi-code-cli` configuration — providers, models, and profiles. Reads/writes TOML config files (`config.toml`, `config.profiles.toml`, `config.panel.toml`) from `~/.kimi/`. Supports zh-CN and en-US locales, dark/light themes. Migrated from Electron (see git history on `feat/migrate-to-tauri`).
+Tauri (Rust + WebView) desktop app for managing `kimi-code-cli` configuration — providers, models, profiles, MCP servers, skills, shortcuts, and usage insights. Reads/writes config under `~/.kimi-code/` (`config.toml`, `mcp.json`, `tui.toml`); panel state lives in `~/.kimi-code-switch-gui/` (SQLite). `~/.kimi/` is the legacy kimi-cli directory, used only as a migration source. Supports zh-CN and en-US locales, dark/light themes. Migrated from Electron (see git history on `feat/migrate-to-tauri`).
 
 ## Commands
 

@@ -20,6 +20,7 @@ import type {
 
 export const REDACTION_MASK = "[REDACTED]";
 const SECRET_NAME_PATTERN = /token|secret|password|api[_-]?key|access[_-]?token|cookie|auth|authorization/i;
+const GENERIC_KEY_SEGMENT_PATTERN = /(^|[._-])key($|[._-])/i;
 const SECRET_QUERY_PARAM_PATTERN = /^(token|api[_-]?key|access[_-]?token|key)$/i;
 const URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
 const VALID_BACKUP_FREQUENCIES = new Set(["hourly", "daily", "weekly"]);
@@ -289,12 +290,12 @@ function validateMcpServers(servers: Record<string, McpServerConfig>, issues: Do
     if (isUnsupportedSseServer(server)) {
       issues.push(
         createDoctorIssue(
-          `mcp.sse-unsupported.${serverName}`,
-          "error",
+          `mcp.sse-legacy.${serverName}`,
+          "info",
           "mcp",
-          `MCP server "${serverName}" uses an SSE endpoint. Kimi Code supports stdio and Streamable HTTP MCP only.`,
+          `MCP server "${serverName}" uses a legacy SSE endpoint. It still works, but Kimi Code recommends Streamable HTTP.`,
           `mcpConfig.mcpServers.${serverName}.url`,
-          "Replace it with a Streamable HTTP MCP URL, or use a local stdio bridge.",
+          "Prefer Streamable HTTP MCP; keep SSE only if the provider has no HTTP endpoint.",
         ),
       );
       continue;
@@ -579,20 +580,29 @@ function shouldRedactPath(path: string[]): boolean {
   }
   const key = path[path.length - 1] ?? "";
   const parent = path[path.length - 2] ?? "";
-  if (parent === "headers" && /^(authorization|cookie)$/i.test(key)) {
+  if (parent === "headers" && isSecretName(key)) {
     return true;
   }
-  if (parent === "env" && SECRET_NAME_PATTERN.test(key)) {
+  // providers.<name>.custom_headers 里的敏感 header 同样需屏蔽
+  if (parent === "custom_headers" && /^(authorization|cookie)$/i.test(key)) {
     return true;
   }
-  if (path.includes("extra") && SECRET_NAME_PATTERN.test(key)) {
+  // providers.<name>.env / custom_headers 中凭据回退键
+  if ((parent === "env" || parent === "custom_headers") && isSecretName(key)) {
+    return true;
+  }
+  if (path.includes("extra") && isSecretName(key)) {
     return true;
   }
   return false;
 }
 
 function shouldRedactLooseSecretKey(key: string): boolean {
-  return /^(api_key|backup_webdav_password|authorization|cookie|access_token|token|secret|password|key)$/i.test(key);
+  return isSecretName(key);
+}
+
+function isSecretName(key: string): boolean {
+  return SECRET_NAME_PATTERN.test(key) || GENERIC_KEY_SEGMENT_PATTERN.test(key);
 }
 
 function redactStringContent(value: string, path: string, summary: RedactionSummary): string {
@@ -657,19 +667,26 @@ interface FieldNode {
   open?: boolean;
 }
 
-const PROVIDER_NODE: FieldNode = { known: ["type", "base_url", "api_key"] };
+const PROVIDER_NODE: FieldNode = { known: ["type", "base_url", "api_key", "env", "custom_headers"] };
 const MODEL_NODE: FieldNode = {
-  known: ["provider", "model", "max_context_size", "capabilities", "auth_mode", "official_account_scope", "pricing"],
+  known: [
+    "provider", "model", "max_context_size", "max_output_size", "capabilities",
+    "support_efforts", "default_effort", "display_name", "reasoning_key",
+    "adaptive_thinking", "auth_mode", "official_account_scope", "pricing", "overrides",
+  ],
 };
 
 const KNOWN_FIELD_SCHEMA: Partial<Record<ManagedFileId, FieldNode>> = {
   config: {
     known: [
-      "default_model", "default_thinking", "default_yolo", "default_plan_mode",
-      "profile_label", "default_editor", "theme", "show_thinking_stream", "merge_all_available_skills",
+      "default_model", "default_plan_mode", "default_permission_mode",
+      "merge_all_available_skills", "extra_skill_dirs", "telemetry",
       "hooks", "models", "providers", "loop_control", "background",
       "notifications", "services", "mcp",
     ],
+    // 顶层 open：未知 section（[thinking]/[permission]/[image]/[subagent] 等）作为透传保留，
+    // 不报 drift；providers/models 子字段仍精确校验。
+    open: true,
     children: {
       providers: { wildcard: PROVIDER_NODE },
       models: { wildcard: MODEL_NODE },
@@ -678,6 +695,10 @@ const KNOWN_FIELD_SCHEMA: Partial<Record<ManagedFileId, FieldNode>> = {
       notifications: { open: true },
       services: { open: true },
       mcp: { open: true },
+      thinking: { open: true },
+      permission: { open: true },
+      image: { open: true },
+      subagent: { open: true },
     },
   },
   mcp: {
@@ -686,7 +707,9 @@ const KNOWN_FIELD_SCHEMA: Partial<Record<ManagedFileId, FieldNode>> = {
       mcpServers: {
         wildcard: {
           known: [
-            "enabled", "transport", "url", "headers", "command", "args", "env",
+            "enabled", "transport", "type", "url", "headers", "command", "args", "env",
+            "cwd", "bearerTokenEnvVar", "startupTimeoutMs", "toolTimeoutMs",
+            "enabledTools", "disabledTools", "auth",
           ],
           // unknown MCP server keys are preserved via McpServerConfig.extra, so treat as open
           open: true,
@@ -717,7 +740,11 @@ function walkUnknownFields(
   path: string,
   drift: ConfigDriftEntry[],
 ): void {
-  if (node.open || !isRecord(value)) {
+  if (!isRecord(value)) {
+    return;
+  }
+  // 纯 open 节点（无 children/wildcard）：整个子树视为透传，停止下钻。
+  if (node.open && !node.wildcard && !node.children) {
     return;
   }
   const known = new Set(node.known ?? []);
@@ -728,6 +755,10 @@ function walkUnknownFields(
       continue;
     }
     if (!known.has(key)) {
+      // open 节点容忍未知键（GUI 通过 extra 原样透传，保存不丢失）
+      if (node.open) {
+        continue;
+      }
       drift.push({ file, path: path || "(root)", key });
       continue;
     }

@@ -668,7 +668,17 @@ export const kimiSwitchTauri = {
   },
   scanSkills: (state: AppState) => {
     const normalized = normalizeStatePaths(state);
-    return scanSkills(skillFileAccess, { mergeAllAvailableSkills: normalized.mainConfig.merge_all_available_skills });
+    const activeEnvironmentId = normalized.panelSettings.active_kimi_code_environment_id ?? "default";
+    const activeEnvironment = normalizeKimiCodeEnvironments(normalized.panelSettings.kimi_code_environments)
+      .find((environment) => environment.id === activeEnvironmentId);
+    return scanSkills(skillFileAccess, {
+      mergeAllAvailableSkills: normalized.mainConfig.merge_all_available_skills,
+      // 用户技能与 workspaces.json 都跟随当前 KIMI_CODE_HOME，避免自定义环境串读默认环境。
+      envHome: activeEnvironment?.homePath ?? getKimiCodeEnvironmentHomePath(activeEnvironmentId),
+      readJson: async (path) => tauriFileAccess.readText(path),
+      // config.toml extra_skill_dirs 追加目录。
+      extraSkillDirs: normalized.mainConfig.extra_skill_dirs ?? [],
+    });
   },
   defaultSettings: (): Promise<PanelSettings> => Promise.resolve(createDefaultPanelSettings()),
 

@@ -104,13 +104,10 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
                   name: profileName,
                   label: profileName,
                   default_model: modelName,
-                  default_thinking: true,
-                  default_yolo: false,
                   default_plan_mode: false,
-                  default_editor: "",
-                  theme: state.profiles[state.activeProfile]?.theme ?? "dark",
-                  show_thinking_stream: false,
+                  default_permission_mode: "manual",
                   merge_all_available_skills: false,
+                  thinking_enabled: true,
                 });
                 if (activate) {
                   applyProfile(draft, profileName);

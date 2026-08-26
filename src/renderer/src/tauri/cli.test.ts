@@ -133,19 +133,27 @@ describe("getCliVersion", () => {
     });
   });
 
-  it("checks Homebrew for the latest version and flags an available update", async () => {
+  it("reads the CDN manifest for the latest version and flags an available update", async () => {
     mockedInvoke
-      .mockResolvedValueOnce(exec(0, "kimi-code 1.0.0") as unknown as never)
-      .mockResolvedValueOnce(http(200, JSON.stringify({ versions: { stable: "2.0.0" } })) as unknown as never);
+      .mockResolvedValueOnce(exec(0, "kimi-code 1.0.0") as unknown as never) // brew list
+      .mockResolvedValueOnce(null) // 无本地更新缓存
+      .mockResolvedValueOnce('"global"') // region
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "2.0.0" })) as unknown as never); // CDN manifest
     const result = await getCliVersion({ checkLatest: true });
     expect(result.latestVersion).toBe("2.0.0");
     expect(result.hasUpdate).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("read_text", { path: "~/.kimi-code/updates/latest.json" });
+    expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
+      url: "https://code.kimi.ai/kimi-code/latest.json",
+    }));
   });
 
   it("does not flag an update when already current", async () => {
     mockedInvoke
       .mockResolvedValueOnce(exec(0, "kimi-code 2.0.0") as unknown as never)
-      .mockResolvedValueOnce(http(200, JSON.stringify({ versions: { stable: "2.0.0" } })) as unknown as never);
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('"global"')
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "2.0.0" })) as unknown as never);
     const result = await getCliVersion({ checkLatest: true });
     expect(result.hasUpdate).toBe(false);
   });
@@ -170,10 +178,12 @@ describe("getCliVersion", () => {
     expect(result.latestVersion).toBeUndefined();
   });
 
-  it("checks Homebrew for kimi-code latest version on non-Windows platforms", async () => {
+  it("reads the CDN manifest for kimi-code latest version on non-Windows platforms", async () => {
     mockedInvoke
       .mockResolvedValueOnce(exec(0, "kimi-code 1.2.0") as unknown as never)
-      .mockResolvedValueOnce(http(200, JSON.stringify({ versions: { stable: "1.3.0" } })) as unknown as never);
+      .mockResolvedValueOnce(null) // 无缓存
+      .mockResolvedValueOnce('"zh-cn"') // region
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
     const result = await getTargetCliVersion("kimi-code", { checkLatest: true });
     expect(result).toMatchObject({
       target: "kimi-code",
@@ -183,6 +193,7 @@ describe("getCliVersion", () => {
       hasUpdate: true,
       installCommand: "brew install kimi-code",
       updateCommand: "brew upgrade kimi-code",
+      installSource: "homebrew",
     });
     expect(mockedInvoke).toHaveBeenCalledWith("exec_command", {
       program: "brew",
@@ -190,7 +201,46 @@ describe("getCliVersion", () => {
       timeoutMs: 3000,
     });
     expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
-      url: "https://formulae.brew.sh/api/formula/kimi-code.json",
+      url: "https://code.kimi.com/kimi-code/latest.json",
+    }));
+  });
+
+  it("prefers the local ~/.kimi-code/updates/latest.json cache for the latest version", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:30:00Z"));
+    mockedInvoke
+      .mockResolvedValueOnce(exec(0, "kimi-code 1.0.0") as unknown as never)
+      .mockResolvedValueOnce(JSON.stringify({
+        source: "cdn",
+        checkedAt: "2026-01-01T00:00:00Z",
+        latest: "2.5.0",
+        manifest: { version: "2.5.0" },
+      }))
+      .mockRejectedValueOnce(new Error("should not hit the network"));
+    const result = await getCliVersion({ checkLatest: true });
+    expect(result.latestVersion).toBe("2.5.0");
+    expect(result.hasUpdate).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("http_request", expect.objectContaining({
+      url: expect.stringContaining("latest.json"),
+    }));
+  });
+
+  it("refreshes the latest version from CDN when the local cache is stale", async () => {
+    vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));
+    mockedInvoke
+      .mockResolvedValueOnce(exec(0, "kimi-code 1.0.0") as unknown as never)
+      .mockResolvedValueOnce(JSON.stringify({
+        source: "cdn",
+        checkedAt: "2026-01-01T00:00:00Z",
+        latest: "2.0.0",
+      }))
+      .mockResolvedValueOnce('"global"')
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "2.5.0" })) as unknown as never);
+
+    const result = await getCliVersion({ checkLatest: true });
+
+    expect(result.latestVersion).toBe("2.5.0");
+    expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
+      url: "https://code.kimi.ai/kimi-code/latest.json",
     }));
   });
 
@@ -199,7 +249,9 @@ describe("getCliVersion", () => {
       .mockResolvedValueOnce(exec(1, "", "Error: No such keg: /opt/homebrew/Cellar/kimi-code") as unknown as never)
       .mockResolvedValueOnce(exec(1, "", "") as unknown as never)
       .mockResolvedValueOnce(exec(0, "/usr/local/bin/kimi\n---KIMI_RESOLVED---\n/usr/local/bin/kimi\n---KIMI_CANDIDATES---\n/usr/local/bin/kimi\n---KIMI_VERSION---\nkimi, version 1.47.0\n") as unknown as never)
-      .mockResolvedValueOnce(http(200, JSON.stringify({ versions: { stable: "1.3.0" } })) as unknown as never);
+      .mockResolvedValueOnce(null) // 无缓存
+      .mockResolvedValueOnce('"global"') // region
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
     const result = await getTargetCliVersion("kimi-code", { checkLatest: true });
     expect(result).toMatchObject({
       target: "kimi-code",
@@ -224,7 +276,7 @@ describe("getCliVersion", () => {
       installed: true,
       version: "1.2.0",
       installCommand: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
-      updateCommand: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+      updateCommand: "kimi upgrade",
       installSource: "official-script",
     });
     expect(mockedInvoke).toHaveBeenCalledWith("exec_command", {
@@ -234,7 +286,7 @@ describe("getCliVersion", () => {
     });
   });
 
-  it("checks GitHub latest release for kimi-code on Windows", async () => {
+  it("checks the CDN manifest for kimi-code latest version on Windows", async () => {
     vi.stubGlobal("navigator", { platform: "Win32", userAgent: "Windows" });
     mockedInvoke
       .mockResolvedValueOnce(exec(1, "", "") as unknown as never)
@@ -243,7 +295,9 @@ describe("getCliVersion", () => {
           "@moonshot-ai/kimi-code": { version: "1.2.0" },
         },
       })) as unknown as never)
-      .mockResolvedValueOnce(http(200, JSON.stringify({ tag_name: "@moonshot-ai/kimi-code@1.3.0" })) as unknown as never);
+      .mockResolvedValueOnce(null) // 无缓存
+      .mockResolvedValueOnce('"global"') // region
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
     const result = await getTargetCliVersion("kimi-code", { checkLatest: true });
     expect(result).toMatchObject({
       target: "kimi-code",
@@ -251,9 +305,10 @@ describe("getCliVersion", () => {
       hasUpdate: true,
       installCommand: "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
       updateCommand: "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
+      installSource: "npm",
     });
     expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
-      url: "https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest",
+      url: "https://code.kimi.ai/kimi-code/latest.json",
     }));
   });
 
@@ -340,6 +395,20 @@ describe("upgradeKimiCli / runKimiMcpServerTest", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("exec_command", {
       program: "brew",
       args: ["install", "kimi-code"],
+      timeoutMs: 120000,
+    });
+  });
+
+  it("upgrades a non-Homebrew install via the built-in kimi upgrade command", async () => {
+    // brew list 失败（非 Homebrew 安装）→ 脚本安装命中 → kimi upgrade
+    mockedInvoke
+      .mockResolvedValueOnce(exec(1, "Error: No such keg: kimi-code", "") as unknown as never)
+      .mockResolvedValueOnce(exec(0, "kimi, version 1.2.0") as unknown as never)
+      .mockResolvedValueOnce(exec(0, "updated", "") as unknown as never);
+    await expect(upgradeKimiCli()).resolves.toEqual({ ok: true, stdout: "updated", stderr: "" });
+    expect(mockedInvoke).toHaveBeenCalledWith("exec_command", {
+      program: "sh",
+      args: ["-lc", "kimi upgrade"],
       timeoutMs: 120000,
     });
   });

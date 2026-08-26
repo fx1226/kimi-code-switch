@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Boxes, Check, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileText, FolderOpen, LoaderCircle,
@@ -12,7 +12,7 @@ import type {
   AppState,
   AppearanceMode, AppearanceTheme, BackupDestinationType, BackupFrequency, BackupStrategy,
   CloseBehavior, ConfigDriftEntry, DisplayOpenMode, Locale,
-  McpServerConfig, McpTransport, ModelPricing, Profile, ProfileConnectivityTestResult, UiFontSize,
+  McpServerConfig, McpTransport, ModelPricing, PermissionMode, Profile, ProfileConnectivityTestResult, UiFontSize,
   OfficialAccount,
 } from "@shared/types";
 import type { McpToolInfo } from "./tauri/cli";
@@ -20,14 +20,14 @@ import { resolveModelPricing } from "@shared/pricing";
 
 import { getApi } from "./appHelpers";
 import {
-  labelForLocale, MODEL_CAPABILITY_OPTIONS,
-  PROVIDER_TYPE_OPTIONS, UI_FONT_SIZE_OPTIONS,
+  labelForLocale, MODEL_CAPABILITY_OPTIONS, PERMISSION_MODE_OPTIONS,
+  PROVIDER_TYPE_OPTIONS, THINKING_EFFORT_OPTIONS, UI_FONT_SIZE_OPTIONS,
 } from "./appOptions";
 import { useDialogEscape, useFocusTrap } from "./dialogs";
 import { parseEndpointUrl } from "./endpointUtils";
 import { t, translateError } from "./i18n";
 import {
-  ActionFooter, CompactSelect, Field, MultiSelectField,
+  ActionFooter, CompactSelect, Field, KeyValueListField, MultiSelectField,
   ReadOnlyField, SelectField, Toggle,
 } from "./formControls";
 
@@ -657,8 +657,14 @@ export function ProviderForm(props: {
   locale: Locale;
   name: string;
   nameEditable: boolean;
-  value: { type: string; base_url: string; api_key: string };
-  onChange: (name: string, patch: { type?: string; base_url?: string; api_key?: string }) => void;
+  value: {
+    type: string;
+    base_url: string;
+    api_key: string;
+    env?: Record<string, string>;
+    custom_headers?: Record<string, string>;
+  };
+  onChange: (name: string, patch: { type?: string; base_url?: string; api_key?: string; env?: Record<string, string>; custom_headers?: Record<string, string> }) => void;
   onSave: () => void;
   onDelete: () => void;
 }): JSX.Element {
@@ -769,6 +775,7 @@ export function ProviderForm(props: {
         showLabel={t(props.locale, "showSecret")}
         hideLabel={t(props.locale, "hideSecret")}
       />
+      <ProviderAdvancedSection locale={props.locale} name={props.name} value={props.value} onChange={props.onChange} />
       <ActionFooter
         onSave={() => {
           if (endpointUrl === null) {
@@ -783,6 +790,44 @@ export function ProviderForm(props: {
         deleteLabel={t(props.locale, "delete")}
       />
     </section>
+  );
+}
+
+function ProviderAdvancedSection(props: {
+  locale: Locale;
+  name: string;
+  value: { env?: Record<string, string>; custom_headers?: Record<string, string> };
+  onChange: (name: string, patch: { env?: Record<string, string>; custom_headers?: Record<string, string> }) => void;
+}): JSX.Element {
+  const updateEnv = (next: Record<string, string>): void => {
+    props.onChange(props.name, { env: next });
+  };
+  const updateHeaders = (next: Record<string, string>): void => {
+    props.onChange(props.name, { custom_headers: next });
+  };
+  return (
+    <AdvancedCollapse label={t(props.locale, "providerAdvanced")}>
+      <KeyValueListField
+        locale={props.locale}
+        label={t(props.locale, "formEnv")}
+        value={props.value.env ?? {}}
+        addLabel={t(props.locale, "addEnv")}
+        keyPlaceholder={t(props.locale, "variableNamePlaceholder")}
+        valuePlaceholder={t(props.locale, "variableValuePlaceholder")}
+        onChange={updateEnv}
+      />
+      <p className="form-hint">{t(props.locale, "providerEnvHint")}</p>
+      <KeyValueListField
+        locale={props.locale}
+        label={t(props.locale, "formHeaders")}
+        value={props.value.custom_headers ?? {}}
+        addLabel={t(props.locale, "addHeader")}
+        keyPlaceholder={t(props.locale, "headerNamePlaceholder")}
+        valuePlaceholder={t(props.locale, "headerValuePlaceholder")}
+        onChange={updateHeaders}
+      />
+      <p className="form-hint">{t(props.locale, "providerHeadersHint")}</p>
+    </AdvancedCollapse>
   );
 }
 
@@ -832,6 +877,13 @@ export function ModelForm(props: {
     auth_mode?: "api-key" | "official-account";
     official_account_scope?: "global";
     pricing?: ModelPricing;
+    max_output_size?: number;
+    display_name?: string;
+    support_efforts?: string[];
+    default_effort?: string;
+    reasoning_key?: string;
+    adaptive_thinking?: boolean;
+    overrides?: Record<string, unknown>;
   };
   onChange: (
     name: string,
@@ -843,6 +895,13 @@ export function ModelForm(props: {
       auth_mode?: "api-key" | "official-account";
       official_account_scope?: "global";
       pricing?: ModelPricing;
+      max_output_size?: number;
+      display_name?: string;
+      support_efforts?: string[];
+      default_effort?: string;
+      reasoning_key?: string;
+      adaptive_thinking?: boolean;
+      overrides?: Record<string, unknown>;
     }>,
   ) => void;
   onSave: () => void;
@@ -911,6 +970,23 @@ export function ModelForm(props: {
         emptyLabel={t(props.locale, "formCapabilitiesEmpty")}
         popoverClassName="field-select-popover-full"
       />
+      <Field
+        label={t(props.locale, "formDisplayName")}
+        value={props.value.display_name || ""}
+        onChange={(value) => props.onChange(props.name, { display_name: value || undefined })}
+      />
+      <Field
+        label={t(props.locale, "formMaxOutputSize")}
+        inputMode="numeric"
+        value={props.value.max_output_size !== undefined ? String(props.value.max_output_size) : ""}
+        onChange={(value) => props.onChange(props.name, { max_output_size: value ? Number(value) || undefined : undefined })}
+      />
+      <ModelAdvancedSection
+        locale={props.locale}
+        name={props.name}
+        value={props.value}
+        onChange={props.onChange}
+      />
       <ModelPricingEditor
         locale={props.locale}
         model={props.value.model}
@@ -924,6 +1000,142 @@ export function ModelForm(props: {
         deleteLabel={t(props.locale, "delete")}
       />
     </section>
+  );
+}
+
+function ModelAdvancedSection(props: {
+  locale: Locale;
+  name: string;
+  value: {
+    support_efforts?: string[];
+    default_effort?: string;
+    reasoning_key?: string;
+    adaptive_thinking?: boolean;
+    overrides?: Record<string, unknown>;
+  };
+  onChange: (
+    name: string,
+    patch: Partial<{
+      support_efforts?: string[];
+      default_effort?: string;
+      reasoning_key?: string;
+      adaptive_thinking?: boolean;
+      overrides?: Record<string, unknown>;
+    }>,
+  ) => void;
+}): JSX.Element {
+  const effortOptions = THINKING_EFFORT_OPTIONS.map((option) => ({
+    value: option.value,
+    label: labelForLocale(option.label, props.locale),
+  }));
+  return (
+    <AdvancedCollapse label={t(props.locale, "modelAdvanced")}>
+      <MultiSelectField
+        label={t(props.locale, "formSupportEfforts")}
+        value={props.value.support_efforts ?? []}
+        onChange={(value) => props.onChange(props.name, { support_efforts: value.length ? value : undefined })}
+        options={effortOptions}
+        emptyLabel={t(props.locale, "formSupportEffortsEmpty")}
+        popoverClassName="field-select-popover-full"
+      />
+      <SelectField
+        label={t(props.locale, "formDefaultEffort")}
+        value={props.value.default_effort || ""}
+        onChange={(value) => props.onChange(props.name, { default_effort: value || undefined })}
+        options={[
+          { value: "", label: t(props.locale, "formEffortDefault") },
+          ...effortOptions,
+        ]}
+        popoverClassName="field-select-popover-full"
+      />
+      <Field
+        label={t(props.locale, "formReasoningKey")}
+        value={props.value.reasoning_key || ""}
+        onChange={(value) => props.onChange(props.name, { reasoning_key: value || undefined })}
+      />
+      <Toggle
+        label={t(props.locale, "formAdaptiveThinking")}
+        checked={props.value.adaptive_thinking === true}
+        onChange={(checked) => props.onChange(props.name, { adaptive_thinking: checked })}
+      />
+      <JsonAdvancedField
+        label={t(props.locale, "formOverrides")}
+        hint={t(props.locale, "modelOverridesHint")}
+        locale={props.locale}
+        value={props.value.overrides}
+        placeholder={'{\n  "temperature": 1\n}'}
+        onCommit={(next) => props.onChange(props.name, { overrides: next })}
+      />
+    </AdvancedCollapse>
+  );
+}
+
+function AdvancedCollapse(props: { label: string; children: ReactNode }): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <details
+      className="advanced-collapse"
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <ChevronDown size={14} className={isOpen ? "advanced-collapse-icon is-open" : "advanced-collapse-icon"} />
+        <span>{props.label}</span>
+      </summary>
+      <div className="advanced-collapse-body">{props.children}</div>
+    </details>
+  );
+}
+
+function JsonAdvancedField(props: {
+  label: string;
+  hint: string;
+  locale: Locale;
+  value?: Record<string, unknown>;
+  placeholder?: string;
+  onCommit: (next: Record<string, unknown> | undefined) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState(() => props.value ? JSON.stringify(props.value, null, 2) : "");
+  const serialized = props.value ? JSON.stringify(props.value, null, 2) : "";
+
+  useEffect(() => {
+    setDraft(serialized);
+  }, [serialized]);
+
+  const parsed = ((): { ok: true; value: Record<string, unknown> } | { ok: false } => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      return { ok: true, value: {} };
+    }
+    try {
+      const value = JSON.parse(trimmed) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ok: false };
+      }
+      return { ok: true, value: value as Record<string, unknown> };
+    } catch {
+      return { ok: false };
+    }
+  })();
+
+  return (
+    <label className={parsed.ok ? "field json-field" : "field json-field is-invalid"}>
+      <span>{props.label}</span>
+      <small>{props.hint}</small>
+      <textarea
+        rows={5}
+        value={draft}
+        placeholder={props.placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (parsed.ok) {
+            const hasEntries = Object.keys(parsed.value).length > 0;
+            props.onCommit(hasEntries ? parsed.value : undefined);
+          }
+        }}
+      />
+      {!parsed.ok ? <span className="field-error">{t(props.locale, "jsonInvalid")}</span> : null}
+    </label>
   );
 }
 
@@ -1317,11 +1529,23 @@ export function ProfileForm(props: {
         onChange={(next) => props.onChange(props.name, { ...value, default_model: next })}
         options={props.models.map((model) => ({ value: model, label: model }))}
       />
-      <Toggle label={t(props.locale, "formThinking")} checked={value.default_thinking} onChange={(checked) => props.onChange(props.name, { ...value, default_thinking: checked })} />
-      <Toggle label={t(props.locale, "formYolo")} checked={value.default_yolo} onChange={(checked) => props.onChange(props.name, { ...value, default_yolo: checked })} />
+      <SelectField
+        label={t(props.locale, "formPermissionMode")}
+        value={value.default_permission_mode || "manual"}
+        onChange={(next) => props.onChange(props.name, { ...value, default_permission_mode: next as PermissionMode })}
+        options={PERMISSION_MODE_OPTIONS.map((option) => ({ value: option.value, label: labelForLocale(option.label, props.locale) }))}
+      />
+      <Toggle label={t(props.locale, "formThinking")} checked={value.thinking_enabled !== false} onChange={(checked) => props.onChange(props.name, { ...value, thinking_enabled: checked })} />
+      <SelectField
+        label={t(props.locale, "formEffort")}
+        value={value.thinking_effort || ""}
+        onChange={(next) => props.onChange(props.name, { ...value, thinking_effort: next || undefined })}
+        options={[{ value: "", label: t(props.locale, "formEffortDefault") }, ...THINKING_EFFORT_OPTIONS.map((option) => ({ value: option.value, label: labelForLocale(option.label, props.locale) }))]}
+      />
       <Toggle label={t(props.locale, "formPlanMode")} checked={value.default_plan_mode} onChange={(checked) => props.onChange(props.name, { ...value, default_plan_mode: checked })} />
-      <Toggle label={t(props.locale, "formStream")} checked={value.show_thinking_stream} onChange={(checked) => props.onChange(props.name, { ...value, show_thinking_stream: checked })} />
       <Toggle label={t(props.locale, "formMergeSkills")} checked={value.merge_all_available_skills} onChange={(checked) => props.onChange(props.name, { ...value, merge_all_available_skills: checked })} />
+      <Field label={t(props.locale, "formTuiTheme")} value={value.tui_theme || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_theme: next || undefined })} />
+      <Field label={t(props.locale, "formTuiEditor")} value={value.tui_editor_command || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_editor_command: next || undefined })} />
       <ActionFooter
         onSave={props.onSave}
         onDelete={props.onDelete}
@@ -1630,12 +1854,8 @@ export function createFallbackState(): AppState {
     mcpConfigPath: "~/.kimi-code/mcp.json",
     mainConfig: {
       default_model: "",
-      default_thinking: true,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: "",
-      theme: "dark",
-      show_thinking_stream: false,
+      default_permission_mode: "",
       merge_all_available_skills: false,
       hooks: [],
       models: {},

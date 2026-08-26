@@ -14,7 +14,16 @@ function basename(path: string): string {
 
 export type SkillType = "prompt" | "flow";
 export type SkillDiscoveryMode = "auto";
-export type SkillPathGroup = "builtin" | "user-brand" | "user-common";
+/**
+ * 发现目录的类别。
+ * - "builtin"：CLI 内置技能，仅作说明项，不扫描磁盘。
+ * - "user-brand"：Kimi Code 用户级技能目录（$KIMI_CODE_HOME/skills）。
+ * - "user-common"：通用代理技能目录（~/.agents/skills）。
+ * - "project"：工作区（workspaces.json 根）下的项目级技能目录。
+ * - "extra"：config.toml extra_skill_dirs 追加目录。
+ * UI 只对 "builtin" 特判，其余组共用同一渲染路径。
+ */
+export type SkillPathGroup = "builtin" | "user-brand" | "user-common" | "project" | "extra";
 
 export interface SkillFileAccess {
   readText(path: string): Promise<string | null>;
@@ -82,16 +91,33 @@ export interface SkillsScanReport {
   summary: SkillsScanSummary;
 }
 
+/**
+ * 扫描选项。注入项用于对接真实运行时：
+ * - userHome: 默认缩略主目录路径（如 "~"），用于展开 ~ 起始的 extra_skill_dirs 与 workspaces.json。
+ *   缺省按 "~" 处理，方可与纯 ~ 路径断言共存。
+ * - envHome: KIMI_CODE_HOME 生效时的用户级技能主目录路径（如 "~/.my-kimi-home"）。
+ *   缺失时回退 `~/.kimi-code`。
+ * - projectRoots: 工作区根列表（来自 workspaces.json 的 root 字段）。每个根下扫描
+ *   `.kimi-code/skills` + `.agents/skills`。
+ * - readJson: 用于读取并解析 workspaces.json 等轻量 JSON 文档的钩子（Tauri 适配器注入，
+ *   测试注入内存 FS）。缺失时不解析任何 JSON。
+ * - extraSkillDirs: config.toml extra_skill_dirs（绝对或 ~ 起始路径）。缺省为空。
+ */
+export interface ScanSkillsOptions {
+  mergeAllAvailableSkills: boolean;
+  userHome?: string;
+  envHome?: string;
+  projectRoots?: string[];
+  extraSkillDirs?: string[];
+  readJson?: (path: string) => Promise<string | null>;
+}
+
 export async function scanSkills(
   files: SkillFileAccess,
-  options: {
-    mergeAllAvailableSkills: boolean;
-  },
+  options: ScanSkillsOptions,
 ): Promise<SkillsScanReport> {
   const discoveryMode: SkillDiscoveryMode = "auto";
-  const paths = await buildDiscoveryPaths(files, {
-    mergeAllAvailableSkills: options.mergeAllAvailableSkills,
-  });
+  const paths = await buildDiscoveryPaths(files, options);
   const scannedPaths = paths
     .filter((entry) => entry.group !== "builtin" && entry.exists)
     .sort((left, right) => left.priority - right.priority);
@@ -132,20 +158,52 @@ export async function scanSkills(
   };
 }
 
+/**
+ * 构造 0.38.0 技能发现目录集，回到 CLI 的真实扫描行为：
+ * - 用户级 brand：$KIMI_CODE_HOME/skills（默认 ~/.kimi-code/skills）。
+ * - 用户级 common：~/.agents/skills。
+ * - 项目级：每个工作区根（workspaces.json）下的 .kimi-code/skills 与 .agents/skills。
+ * - extra_skill_dirs：config.toml 追加目录。
+ * `~/.claude/skills`、`~/.codex/skills`、`~/.config/agents/skills` 不再扫描（CLI 不扫）。
+ *
+ * 优先级（priority 越小越先加载，同名技能以先加载者有效）：
+ * 项目级 > 用户级 > extra_skill_dirs。
+ */
 async function buildDiscoveryPaths(
   files: SkillFileAccess,
-  options: {
-    mergeAllAvailableSkills: boolean;
-  },
+  options: ScanSkillsOptions,
 ): Promise<SkillDiscoveryPath[]> {
-  const candidates = [
+  const userHome = options.userHome ?? "~";
+  const kimiCodeHome = options.envHome ?? "~/.kimi-code";
+  const workspacesFile = join(kimiCodeHome, "workspaces.json");
+
+  // 显式注入的工作区根优先；未注入时从 workspaces.json 读取（CLI 真实来源）。
+  const fileRoots = await readWorkspacesRoots(workspacesFile, options.readJson);
+  const workspacesRoots = dedupe([...(options.projectRoots ?? []), ...fileRoots]);
+
+  const candidates: SkillDiscoveryPath[] = [
     createCandidate("builtin", "builtin", "(managed by CLI package)"),
-    createCandidate("user-brand-kimi", "user-brand", "~/.kimi-code/skills"),
-    createCandidate("user-brand-claude", "user-brand", "~/.claude/skills"),
-    createCandidate("user-brand-codex", "user-brand", "~/.codex/skills"),
-    createCandidate("user-common-config", "user-common", "~/.config/agents/skills"),
-    createCandidate("user-common-legacy", "user-common", "~/.agents/skills"),
+    // 用户级 brand：KIMI_CODE_HOME 优先，否则默认 ~/.kimi-code。
+    createCandidate("user-brand-kimi", "user-brand", join(kimiCodeHome, "skills")),
+    // 用户级 common：通用代理技能目录。
+    createCandidate("user-common-agents", "user-common", join(userHome, ".agents", "skills")),
   ];
+
+  // 项目级：每个工作区根下的 .kimi-code/skills 与 .agents/skills。
+  for (const root of workspacesRoots) {
+    candidates.push(createCandidate(`project-${slugify(root)}-kimi`, "project", join(root, ".kimi-code", "skills")));
+    candidates.push(createCandidate(`project-${slugify(root)}-agents`, "project", join(root, ".agents", "skills")));
+  }
+
+  // extra_skill_dirs：config.toml 追加目录（绝对或 ~ 起始路径）。
+  for (const dir of options.extraSkillDirs ?? []) {
+    const trimmed = dir.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const resolved = normalizedUserPath(trimmed, userHome);
+    candidates.push(createCandidate(`extra-${slugify(resolved)}`, "extra", resolved));
+  }
 
   const candidatesWithExistence = await Promise.all(
     candidates.map(async (candidate) => ({
@@ -160,18 +218,28 @@ async function buildDiscoveryPaths(
   let priority = 0;
   const paths: SkillDiscoveryPath[] = [];
 
+  const mark = (entry: SkillDiscoveryPath, builder: () => void): void => {
+    const target = candidatesWithExistence.find((item) => item.id === entry.id);
+    if (!target) {
+      return;
+    }
+    if (!target.exists) {
+      target.reason = "Directory not found.";
+      return;
+    }
+    target.selected = true;
+    target.priority = priority;
+    priority += 1;
+    builder();
+  };
+
   const selectGroup = (group: SkillPathGroup, mode: "single" | "all"): void => {
     const groupCandidates = candidatesWithExistence.filter((entry) => entry.group === group);
     if (mode === "all") {
       for (const entry of groupCandidates) {
-        if (!entry.exists) {
-          entry.reason = "Directory not found.";
-          continue;
-        }
-        entry.selected = true;
-        entry.priority = priority;
-        priority += 1;
-        entry.reason = "Loaded because merge_all_available_skills is enabled for brand directories.";
+        mark(entry, () => {
+          entry.reason = "Loaded because merge_all_available_skills is enabled for brand directories.";
+        });
       }
       return;
     }
@@ -179,10 +247,9 @@ async function buildDiscoveryPaths(
     const selected = groupCandidates.find((entry) => entry.exists);
     for (const entry of groupCandidates) {
       if (entry === selected) {
-        entry.selected = true;
-        entry.priority = priority;
-        priority += 1;
-        entry.reason = "First existing directory in this priority group.";
+        mark(entry, () => {
+          entry.reason = "First existing directory in this priority group.";
+        });
       } else if (entry.exists) {
         entry.reason = "Skipped because a higher-priority directory in the same group already exists.";
       } else {
@@ -191,11 +258,113 @@ async function buildDiscoveryPaths(
     }
   };
 
+  // 项目级：每个工作区根为独立优先组。同一根下 .kimi-code/skills 与 .agents/skills
+  // 是两种独立来源，彼此不互斥——只要存在都加载（既不跟随 merge_all_available_skills，
+  // 也不同根内二选一）。
+  for (const root of workspacesRoots) {
+    const rootCandidates = candidatesWithExistence.filter(
+      (entry) => entry.group === "project" && entry.id.startsWith(`project-${slugify(root)}-`),
+    );
+    for (const entry of rootCandidates) {
+      mark(entry, () => {
+        entry.reason = "Project-level directory inside this workspace root.";
+      });
+    }
+  }
+
+  // 用户级：brand 遵循 merge_all_available_skills（同一品牌多目录合并），common 仅取第一个存在的目录。
   selectGroup("user-brand", options.mergeAllAvailableSkills ? "all" : "single");
   selectGroup("user-common", "single");
 
+  // extra_skill_dirs：全部追加加载（无互斥）。
+  for (const entry of candidatesWithExistence) {
+    if (entry.group === "extra") {
+      mark(entry, () => {
+        entry.reason = "Loaded because it is listed in config.toml extra_skill_dirs.";
+      });
+    }
+  }
+
   paths.push(...candidatesWithExistence);
   return paths;
+}
+
+/**
+ * 读取并解析 ~/.kimi-code/workspaces.json，返回各工作区 root 列表。
+ * 形如 {"version":1,"workspaces":{"<key>":{"root":"/abs/path","name":"..."}}}。
+ */
+async function readWorkspacesRoots(
+  workspacesFile: string,
+  readJson?: ScanSkillsOptions["readJson"],
+): Promise<string[]> {
+  if (!readJson) {
+    return [];
+  }
+  let raw: string | null = null;
+  try {
+    raw = await readJson(workspacesFile);
+  } catch {
+    return [];
+  }
+  if (!raw?.trim()) {
+    return [];
+  }
+  try {
+    return parseWorkspacesRoots(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+function parseWorkspacesRoots(data: unknown): string[] {
+  if (!data || typeof data !== "object") {
+    return [];
+  }
+  const workspaces = (data as { workspaces?: unknown }).workspaces;
+  if (!workspaces || typeof workspaces !== "object") {
+    return [];
+  }
+  const roots: string[] = [];
+  for (const value of Object.values(workspaces as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+    const root = (value as { root?: unknown }).root;
+    if (typeof root === "string" && root.trim()) {
+      roots.push(root.trim());
+    }
+  }
+  return roots;
+}
+
+/** ~ 起始路径按 userHome 展开为绝对路径；绝对路径原样保留。 */
+function normalizedUserPath(path: string, userHome: string): string {
+  if (path === "~") {
+    return userHome;
+  }
+  if (path.startsWith("~/")) {
+    return join(userHome, path.slice(2));
+  }
+  return path.replace(/\/+$/, "");
+}
+
+/** 去重并保留顺序。 */
+function dedupe(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+/** 用于生成稳定 candidate id/label：保留绝对路径可读性但去掉斜杠，供 slug 化 id 使用。 */
+function slugify(path: string): string {
+  const normalized = path.replace(/\/+$/, "");
+  return normalized.replace(/[/~]/g, "-") || "root";
 }
 
 async function loadSkillsFromPath(
@@ -424,7 +593,11 @@ function pathLabel(group: SkillPathGroup, path: string): string {
   const prefix =
     group === "user-brand"
       ? "User Brand"
-      : "User Common";
+      : group === "user-common"
+        ? "User Common"
+        : group === "project"
+          ? "Project"
+          : "Extra";
   return `${prefix} · ${path}`;
 }
 

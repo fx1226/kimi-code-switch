@@ -6,6 +6,8 @@ import {
   canDeleteModel,
   getCascadePreview,
 } from './configRelations';
+import { createDefaultPanelSettings } from './configStore';
+import { createDefaultShortcuts } from './shortcutStore';
 import type { AppState, ModelConfig, Profile } from './types';
 
 // 辅助函数：创建测试用 AppState
@@ -13,15 +15,23 @@ function createTestState(
   models: Record<string, ModelConfig> = {},
   profiles: Record<string, Profile> = {}
 ): AppState {
+  const panelSettings = createDefaultPanelSettings(
+    '/tmp/config.toml',
+    '/tmp/config.panel.toml',
+  );
+  panelSettings.shortcuts = createDefaultShortcuts();
+  panelSettings.profiles = profiles;
+  panelSettings.active_profile = 'default';
+
   return {
+    configPath: '/tmp/config.toml',
+    profilesPath: '/tmp/config.profiles.toml',
+    panelSettingsPath: '/tmp/config.panel.toml',
+    mcpConfigPath: '/tmp/mcp.json',
     mainConfig: {
       default_model: 'test-model',
-      default_thinking: false,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: 'vscode',
-      theme: 'aurora',
-      show_thinking_stream: false,
+      default_permission_mode: 'manual',
       merge_all_available_skills: false,
       hooks: [],
       models,
@@ -32,30 +42,11 @@ function createTestState(
       services: {},
       mcp: {},
     },
-    profiles: profiles,
-    panelSettings: {
-      locale: 'zh-CN',
-      theme: 'auto',
-      appearance: 'aurora',
-      fontSize: 'standard',
-      displayOpenMode: 'active-display',
-      closeBehavior: 'quit',
-      enableShortcuts: true,
-      enableTray: true,
-      enableTerminal: true,
-      terminalApp: 'system-terminal',
-      backupFrequency: 'daily',
-      backupDestinationType: 'local',
-      backupStrategy: 'manual',
-    },
-    skills: {},
+    profiles,
+    activeProfile: 'default',
+    panelSettings,
     mcpConfig: { mcpServers: {} },
-    backupSettings: {
-      local: { destination: '' },
-      webdav: { url: '', username: '', password: '' },
-    },
-    shortcuts: [],
-  } as AppState;
+  };
 }
 
 describe('configRelations', () => {
@@ -106,17 +97,13 @@ describe('configRelations', () => {
     });
 
     it('应该返回空数组当没有 Profile 引用该 Model 时', () => {
-      const profiles = {
+      const profiles: Record<string, Profile> = {
         profile1: {
           name: 'profile1',
           label: 'Profile 1',
           default_model: 'model1',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'aurora',
-          show_thinking_stream: false,
+          default_permission_mode: 'manual',
           merge_all_available_skills: false,
         },
       };
@@ -126,17 +113,13 @@ describe('configRelations', () => {
     });
 
     it('应该返回单个 Profile 当有 1 个引用时', () => {
-      const profiles = {
+      const profiles: Record<string, Profile> = {
         profile1: {
           name: 'profile1',
           label: 'Profile 1',
           default_model: 'model1',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'aurora',
-          show_thinking_stream: false,
+          default_permission_mode: 'manual',
           merge_all_available_skills: false,
         },
       };
@@ -147,41 +130,29 @@ describe('configRelations', () => {
     });
 
     it('应该返回多个 Profile 当有多个引用时', () => {
-      const profiles = {
+      const profiles: Record<string, Profile> = {
         profile1: {
           name: 'profile1',
           label: 'Profile 1',
           default_model: 'model1',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'aurora',
-          show_thinking_stream: false,
+          default_permission_mode: 'manual',
           merge_all_available_skills: false,
         },
         profile2: {
           name: 'profile2',
           label: 'Profile 2',
           default_model: 'model1',
-          default_thinking: true,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'ocean',
-          show_thinking_stream: false,
+          default_permission_mode: 'yolo',
           merge_all_available_skills: false,
         },
         profile3: {
           name: 'profile3',
           label: 'Profile 3',
           default_model: 'model2',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'violet',
-          show_thinking_stream: false,
+          default_permission_mode: 'yolo',
           merge_all_available_skills: false,
         },
       };
@@ -231,17 +202,13 @@ describe('configRelations', () => {
     });
 
     it('应该返回 canDelete=false 当有引用时', () => {
-      const profiles = {
+      const profiles: Record<string, Profile> = {
         profile1: {
           name: 'profile1',
           label: 'Profile 1',
           default_model: 'model1',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'aurora',
-          show_thinking_stream: false,
+          default_permission_mode: 'manual',
           merge_all_available_skills: false,
         },
       };
@@ -252,29 +219,21 @@ describe('configRelations', () => {
     });
 
     it('应该返回所有引用的 Profile', () => {
-      const profiles = {
+      const profiles: Record<string, Profile> = {
         profile1: {
           name: 'profile1',
           label: 'Profile 1',
           default_model: 'model1',
-          default_thinking: false,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'aurora',
-          show_thinking_stream: false,
+          default_permission_mode: 'manual',
           merge_all_available_skills: false,
         },
         profile2: {
           name: 'profile2',
           label: 'Profile 2',
           default_model: 'model1',
-          default_thinking: true,
-          default_yolo: false,
           default_plan_mode: false,
-          default_editor: 'vscode',
-          theme: 'ocean',
-          show_thinking_stream: false,
+          default_permission_mode: 'yolo',
           merge_all_available_skills: false,
         },
       };
@@ -290,12 +249,8 @@ describe('configRelations', () => {
       name,
       label: name,
       default_model: model,
-      default_thinking: false,
-      default_yolo: false,
       default_plan_mode: false,
-      default_editor: '',
-      theme: 'dark',
-      show_thinking_stream: false,
+      default_permission_mode: 'manual',
       merge_all_available_skills: false,
     });
 

@@ -39,6 +39,13 @@ export interface ProviderConfig {
   base_url: string;
   api_key: string;
   /**
+   * 0.38.0：凭据回退变量名 → 环境变量名 的映射（config-file-only）。
+   * 用于在 api_key 缺省或需要时从指定环境变量取凭据，不写入 config.toml。
+   */
+  env?: Record<string, string>;
+  /** 0.38.0：自定义请求头（子表，例如 Authorization / Cookie 等）。 */
+  custom_headers?: Record<string, string>;
+  /**
    * 是否启用。SQLite 为唯一真源，此开关决定是否投影写入 Kimi Code config.toml。
    * 缺省（旧数据）视为 true。
    */
@@ -66,6 +73,22 @@ export interface ModelConfig {
   auth_mode?: ModelAuthMode;
   official_account_scope?: "global";
   pricing?: ModelPricing;
+  /**
+   * 0.38.0：最大输出 token 数。仅 anthropic 系生效（其余 provider 忽略）。
+   */
+  max_output_size?: number;
+  /** 0.38.0：模型显示名（UI 向）。 */
+  display_name?: string;
+  /** 0.38.0：支持的 thinking effort 值域（low/medium/high/xhigh/max）。 */
+  support_efforts?: string[];
+  /** 0.38.0：默认 effort（openai 系为 default_reasoning_effort）。 */
+  default_effort?: string;
+  /** 0.38.0：openai 系 reasoning 字段键名（替换默认 reasoning_effort 键）。 */
+  reasoning_key?: string;
+  /** 0.38.0：anthropic 系自适应 thinking 开关。 */
+  adaptive_thinking?: boolean;
+  /** 0.38.0：任意子表透传（能存活 registry refresh）。 */
+  overrides?: Record<string, unknown>;
   /**
    * 是否启用。仅当自身启用且其 Provider 也启用时，才投影写入 config.toml。
    * 缺省（旧数据）视为 true。
@@ -100,16 +123,28 @@ export interface OfficialAccountOperationResult {
   credentials_present: boolean;
 }
 
+/**
+ * Kimi Code config.toml 权限模式（0.38.0 取代旧 default_yolo 布尔）。
+ */
+export type PermissionMode = "manual" | "auto" | "yolo";
+
 export interface MainConfig {
-  profile_label?: string;
   default_model: string;
-  default_thinking: boolean;
-  default_yolo: boolean;
   default_plan_mode: boolean;
-  default_editor: string;
-  theme: string;
-  show_thinking_stream: boolean;
+  /**
+   * 0.38.0 取代 default_yolo。缺省视为 manual（沿用默认配置时为空串，由 CLI 兜底）。
+   */
+  default_permission_mode: PermissionMode | "";
   merge_all_available_skills: boolean;
+  /**
+   * 只读遗留字段：0.38.0 引擎忽略 profile_label，GUI 不再写入 config.toml，
+   * 仅用于在加载时作为默认 profile 的显示名提示。
+   */
+  profile_label?: string;
+  /** 0.38.0：extra_skill_dirs，追加的技能目录列表。 */
+  extra_skill_dirs?: string[];
+  /** 0.38.0：telemetry（默认 true）。 */
+  telemetry?: boolean;
   hooks: Array<Record<string, unknown>>;
   models: Record<string, ModelConfig>;
   providers: Record<string, ProviderConfig>;
@@ -118,19 +153,32 @@ export interface MainConfig {
   notifications: Record<string, unknown>;
   services: Record<string, unknown>;
   mcp: Record<string, unknown>;
+  /**
+   * 未知顶层 section 透传。Kimi Code 0.38.0 新增的思考/权限/镜像/子代理等节
+   * （[thinking]/[permission]/[image]/[subagent] 等）在此原样保存，避免 GUI 保存时抹掉
+   * CLI 能识别而 GUI 尚未管理的字段。
+   */
+  extra?: Record<string, unknown>;
 }
 
 export interface Profile {
   name: string;
   label: string;
   default_model: string;
-  default_thinking: boolean;
-  default_yolo: boolean;
   default_plan_mode: boolean;
-  default_editor: string;
-  theme: string;
-  show_thinking_stream: boolean;
+  default_permission_mode: PermissionMode | "";
   merge_all_available_skills: boolean;
+  /**
+   * 0.38.0 起 thinking 配置在 [thinking] 表。true = thinking.enabled。
+   * 缺省（undefined）= CLI 默认（enabled=true），避免误关闭用户显式配置。
+   */
+  thinking_enabled?: boolean;
+  /** [thinking].effort：low|medium|high|xhigh|max。缺省 = 沿用 CLI 默认。 */
+  thinking_effort?: string;
+  /** tui.toml theme（Kimi Code 0.38.0 中主题迁移至 tui.toml）。 */
+  tui_theme?: string;
+  /** tui.toml [editor].command。 */
+  tui_editor_command?: string;
 }
 
 export interface McpServerConfig {

@@ -30,6 +30,9 @@ describe("mcpStore", () => {
 
     expect(config.mcpServers.linear.transport).toBe("sse");
     expect(config.mcpServers.linear.headers).toEqual({});
+    // auth 标记经 extra 保留，写回时不再丢弃
+    expect(config.mcpServers.linear.extra?.auth).toBe("oauth");
+    expect(buildMcpConfigDocument(config)).toContain('"auth": "oauth"');
   });
 
   it("accepts type as an alias of transport for imported configs", () => {
@@ -48,7 +51,7 @@ describe("mcpStore", () => {
     );
   });
 
-  it("serializes only Kimi Code supported MCP transports", () => {
+  it("serializes stdio and streamable-http servers and keeps legacy SSE servers", () => {
     const document = buildMcpConfigDocument({
       mcpServers: {
         context7: {
@@ -70,9 +73,6 @@ describe("mcpStore", () => {
           command: "",
           args: [],
           env: {},
-          extra: {
-            transport: "sse",
-          },
         },
         chrome_devtools: {
           enabled: true,
@@ -92,10 +92,11 @@ describe("mcpStore", () => {
     expect(document).toContain('"url": "https://mcp.context7.com/mcp"');
     expect(document).toContain('"chrome_devtools"');
     expect(document).toContain('"command": "npx"');
-    expect(document).not.toContain('"linear"');
-    expect(document).not.toContain('"transport"');
-    expect(document).not.toContain('"type"');
-    expect(document).not.toContain("/sse");
+    // 0.38.0：sse legacy 服务器原样写回（保留 transport:"sse"）
+    expect(document).toContain('"linear"');
+    expect(document).toContain('"transport": "sse"');
+    // 默认传输（stdio / 推断 streamable-http）不显式写 transport，保持稳定输出
+    expect(document).not.toContain('"transport": "stdio"');
   });
 
   it("keeps streamable-http servers whose URL path contains /sse", () => {
@@ -139,6 +140,35 @@ describe("mcpStore", () => {
       oauth: {
         audience: "ctx",
       },
+    });
+  });
+
+  it("preserves Kimi Code 0.38.0 MCP runtime fields across parse and serialize", () => {
+    const config = parseMcpConfigStrict(`{
+      "mcpServers": {
+        "context7": {
+          "command": "npx",
+          "args": ["-y", "@upstash/context7-mcp"],
+          "cwd": "/tmp/context7",
+          "bearerTokenEnvVar": "CONTEXT7_TOKEN",
+          "startupTimeoutMs": 15000,
+          "toolTimeoutMs": 60000,
+          "enabledTools": ["resolve-library-id", "query-docs"],
+          "disabledTools": ["delete-library"]
+        }
+      }
+    }`);
+
+    const serialized = JSON.parse(buildMcpConfigDocument(config)) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    expect(serialized.mcpServers.context7).toMatchObject({
+      cwd: "/tmp/context7",
+      bearerTokenEnvVar: "CONTEXT7_TOKEN",
+      startupTimeoutMs: 15000,
+      toolTimeoutMs: 60000,
+      enabledTools: ["resolve-library-id", "query-docs"],
+      disabledTools: ["delete-library"],
     });
   });
 

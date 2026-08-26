@@ -52,6 +52,33 @@ const KIMI_CODE_WIRE_LOG = [
   }),
 ].join("\n");
 
+const WIRE_MAIN = [
+  JSON.stringify({
+    type: "usage.record",
+    model: "kimi/main-model",
+    usage: { inputOther: 100, output: 10, inputCacheRead: 5, inputCacheCreation: 0 },
+    usageScope: "turn",
+    time: 1781448319664,
+  }),
+  JSON.stringify({
+    type: "usage.record",
+    model: "kimi/main-model",
+    usage: { inputOther: 200, output: 20, inputCacheRead: 0, inputCacheCreation: 0 },
+    usageScope: "turn",
+    time: 1781448319665,
+  }),
+].join("\n");
+
+const WIRE_SUB = [
+  JSON.stringify({
+    type: "usage.record",
+    model: "kimi/sub-model",
+    usage: { inputOther: 300, output: 30, inputCacheRead: 0, inputCacheCreation: 7 },
+    usageScope: "subagent",
+    time: 1781448319666,
+  }),
+].join("\n");
+
 /** Drives a watcher through one historical-ingest pass over SAMPLE_LOG. */
 function primeInvokeForHistoricalIngest(log: string): void {
   mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
@@ -93,6 +120,40 @@ function primeInvokeForKimiCodeSessionLog(log: string): void {
   });
 }
 
+/**
+ * Session with two agent wire files: y/agents/{main,agent-1}/wire.jsonl — the union of
+ * every wire path (plus a per-wire read_file_slice matching readNewLines' per-file
+ * read), while logs/kimi-code.log does not exist. list_dir must not be invoked for the
+ * roots-walk of ingestHistoricalLogs (it is not, since running is already true by then).
+ */
+function primeInvokeForMultiAgentWireLogs(mainLog: string, subLog: string): void {
+  const MAIN_WIRE = "~/.kimi-code/sessions/wd_project/y/agents/main/wire.jsonl";
+  const SUB_WIRE = "~/.kimi-code/sessions/wd_project/y/agents/agent-1/wire.jsonl";
+  mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+    const a = (args ?? {}) as { path?: string };
+    if (cmd === "list_dir") {
+      if (a.path === "~/.kimi-code/sessions") return ["wd_project"] as never;
+      if (a.path === "~/.kimi-code/sessions/wd_project") return ["y"] as never;
+      if (a.path === "~/.kimi-code/sessions/wd_project/y/agents") return ["main", "agent-1"] as never;
+      return [] as never;
+    }
+    if (cmd === "file_stat") {
+      if (a.path === "~/.kimi-code/sessions/wd_project/y/logs/kimi-code.log") return null as never;
+      if (a.path === MAIN_WIRE) return { size: mainLog.length, mtime_ms: 100, ino: 2 } as never;
+      if (a.path === SUB_WIRE) return { size: subLog.length, mtime_ms: 200, ino: 3 } as never;
+      return null as never;
+    }
+    if (cmd === "read_file_slice") {
+      if (a.path === MAIN_WIRE) return mainLog as never;
+      if (a.path === SUB_WIRE) return subLog as never;
+      return "" as never;
+    }
+    if (cmd === "usage_query") return [] as never;
+    if (cmd === "usage_exec") return 1 as never;
+    return undefined as never;
+  });
+}
+
 function primeInvokeForKimiCodeWireLog(log: string): void {
   mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
     const a = (args ?? {}) as { path?: string };
@@ -100,6 +161,7 @@ function primeInvokeForKimiCodeWireLog(log: string): void {
       if (a.path === "~/.kimi-code/logs") return [] as never;
       if (a.path === "~/.kimi-code/sessions") return ["wd_project"] as never;
       if (a.path === "~/.kimi-code/sessions/wd_project") return ["session_abc"] as never;
+      if (a.path === "~/.kimi-code/sessions/wd_project/session_abc/agents") return ["main"] as never;
       return [] as never;
     }
     if (cmd === "file_stat") {
@@ -221,6 +283,44 @@ describe("UsageLogWatcher parsing", () => {
     });
     expect(events[0].request_id).toMatch(/^log-/);
     expect(watcher.getStats()).toMatchObject({ eventsIngested: 1 });
+  });
+
+  it("ingests usage from subagent wire logs alongside the main agent", async () => {
+    primeInvokeForMultiAgentWireLogs(WIRE_MAIN, WIRE_SUB);
+    const events: UsageEvent[] = [];
+    const watcher = new UsageLogWatcher({ getActiveProfile: () => "work", onEvent: (e) => events.push(e) });
+
+    await watcher.start();
+    watcher.stop();
+
+    expect(events).toHaveLength(3);
+    expect(mockedInsert).toHaveBeenCalledTimes(3);
+
+    // main agent: both usage.record events ingested
+    expect(events[0]).toMatchObject({ model: "kimi/main-model", prompt_tokens: 100, completion_tokens: 10, cache_read_tokens: 5, session_hint: "y" });
+    expect(events[1]).toMatchObject({ model: "kimi/main-model", prompt_tokens: 200, completion_tokens: 20, session_hint: "y" });
+    // subagent: agents/agent-1/wire.jsonl also ingested, not duplicated with main
+    expect(events[2]).toMatchObject({
+      model: "kimi/sub-model",
+      prompt_tokens: 300,
+      completion_tokens: 30,
+      cache_creation_tokens: 7,
+      session_hint: "y",
+    });
+    expect(new Set(events.map((e) => e.request_id)).size).toBe(3);
+
+    // per-file offset persistence: main and subagent wire files each get their own row
+    expect(mockedSetIngestState).toHaveBeenCalledWith(
+      "~/.kimi-code/sessions/wd_project/y/agents/main/wire.jsonl",
+      expect.any(Number),
+      expect.any(String),
+    );
+    expect(mockedSetIngestState).toHaveBeenCalledWith(
+      "~/.kimi-code/sessions/wd_project/y/agents/agent-1/wire.jsonl",
+      expect.any(Number),
+      expect.any(String),
+    );
+    expect(watcher.getStats()).toMatchObject({ eventsIngested: 3 });
   });
 
   it("start() is idempotent and isRunning reflects lifecycle", async () => {

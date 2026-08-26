@@ -1122,13 +1122,10 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   name,
                   label: t(locale, "newProfileLabel"),
                   default_model: firstModel,
-                  default_thinking: true,
-                  default_yolo: false,
                   default_plan_mode: false,
-                  default_editor: "",
-                  theme: "dark",
-                  show_thinking_stream: false,
+                  default_permission_mode: "manual",
                   merge_all_available_skills: false,
+                  thinking_enabled: true,
                 });
                 setSelectedProfile(name);
               }, {
@@ -1245,8 +1242,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       : currentName;
                     const normalizedProfile = {
                       ...nextProfile,
-                      default_editor: "",
-                      theme: "dark",
                     };
                     const nextProfiles = { ...draft.profiles };
                     delete nextProfiles[currentName];

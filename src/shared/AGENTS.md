@@ -14,7 +14,7 @@ Shared TypeScript layer for typed app state, config parsing/serialization, valid
 | Secret redaction / doctor | `configSafety.ts` | Preview bundle, managed documents, risk reports. |
 | Entry names | `nameRules.ts` | Normalize and ensure provider/model/profile/MCP uniqueness. |
 | Shortcuts | `shortcutStore.ts` | Action catalog, conflict detection, platform formatting. |
-| Skill scanning | `skillsStore.ts` | Skill path groups, metadata parsing, summaries. |
+| Skill scanning | `skillsStore.ts` | 0.38.0 目录集（$KIMI_CODE_HOME/skills + ~/.agents/skills + 工作区 project 目录 + extra_skill_dirs）、SKILL.md 元数据解析、摘要。 |
 | Release version comparison | `versionUtils.ts` | Normalize and compare `vX.Y.Z` / semver-like strings. |
 
 ## CONVENTIONS

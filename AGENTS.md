@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Tauri v2 桌面应用，用于管理 `kimi-code-cli` 的 providers、models、profiles、MCP servers、skills、backups、shortcuts、usage insights 和更新检查。应用读写 `~/.kimi/` 下的 TOML/JSON 配置，并将面板设置迁移到 `~/.kimi/.panel/app.db` 的 SQLite 结构化表中。
+Tauri v2 桌面应用，用于管理 `kimi-code-cli` 的 providers、models、profiles、MCP servers、skills、backups、shortcuts、usage insights 和更新检查。应用读写 `~/.kimi-code/` 下的 TOML/JSON 配置（`config.toml`、`mcp.json`、`tui.toml`、`skills/`），面板设置存于 `~/.kimi-code-switch-gui/` 的 SQLite（panel_settings / usage events）。`~/.kimi/` 是上一代 kimi-cli 遗产目录，仅作迁移来源。
 
 当前技术栈：Tauri 2 + Rust、React 18、TypeScript 5、Vite 6、Vitest、rusqlite、reqwest。项目已经从 Electron 迁移到 Tauri；不要再按 Electron 目录和 IPC 模型实现新功能。
 
@@ -90,7 +90,7 @@ kimi-code-switch-gui/
 - Shared logic uses small exported functions and plain records, not classes.
 - State/config transforms belong in `src/shared/` unless they require native/Tauri capabilities.
 - Renderer feature code should call `window.kimiSwitch` or the established `src/renderer/src/tauri/*` adapters; avoid scattering raw `invoke()` calls through UI components.
-- `FileAccess` abstracts config filesystem I/O; tests should prefer in-memory implementations over real `~/.kimi/` files.
+- `FileAccess` abstracts config filesystem I/O; tests should prefer in-memory implementations over real `~/.kimi-code/` files.
 - i18n remains a simple key-value lookup in `src/renderer/src/i18n.ts`; add all supported locales when adding user-facing keys.
 - CSS theming uses custom properties and root `data-theme`; preserve the mechanism when changing visual behavior.
 - Main window is designed around a 1500 x 980 baseline/minimum; topbar and dense settings layouts assume this width.
@@ -113,7 +113,7 @@ kimi-code-switch-gui/
 - Do not weaken redaction in `src/shared/configSafety.ts`; preview and doctor surfaces may contain secrets.
 - Do not put config parse/serialize/mutation rules in renderer-only files.
 - Do not use Terminal.app AppleScript via `System Events` keystrokes or clipboard paste. Use direct `do script`/iTerm-safe approaches; tests assert against this class of failure.
-- Do not commit real `~/.kimi/` configs, API keys, WebDAV credentials, `.env`, `credentials.*`, or unredacted preview output.
+- Do not commit real `~/.kimi-code/` configs (or legacy `~/.kimi/`), API keys, WebDAV credentials, `.env`, `credentials.*`, or unredacted preview output.
 
 ## Commands
 

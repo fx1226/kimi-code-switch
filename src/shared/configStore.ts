@@ -7,6 +7,7 @@ import { SUPPORTED_CURRENCIES } from "./currency";
 import { buildMcpConfigDocument, DEFAULT_MCP_CONFIG_PATH, loadMcpConfig, parseMcpConfigStrict } from "./mcpStore";
 import { normalizeEntryName } from "./nameRules";
 import { createDefaultShortcuts, normalizeShortcuts } from "./shortcutStore";
+import { TUI_CONFIG_FILENAME, buildTuiConfigDocument, hasTuiConfigValues, mergeTuiConfigDocument, TuiConfigFromProfile } from "./tuiStore";
 import type {
   AppState,
   BackupDestinationType,
@@ -23,6 +24,7 @@ import type {
   McpServerConfig,
   ModelConfig,
   PanelSettings,
+  PermissionMode,
   PreviewBundle,
   Profile,
   ProfileDiff,
@@ -81,6 +83,14 @@ export function getKimiCodeSkillsPath(homePath = defaultKimiCodeHomePath()): str
   return joinPath(sanitizePath(homePath, defaultKimiCodeHomePath()), "skills");
 }
 
+/**
+ * tui.toml 位于 <homePath>/tui.toml（默认环境 ~/.kimi-code/tui.toml）。
+ * 文件名统一取 tuiStore 的 TUI_CONFIG_FILENAME，避免两处常量漂移。
+ */
+export function getKimiCodeTuiConfigPath(homePath = defaultKimiCodeHomePath()): string {
+  return joinPath(sanitizePath(homePath, defaultKimiCodeHomePath()), TUI_CONFIG_FILENAME);
+}
+
 export function createDefaultKimiCodeEnvironment(): KimiCodeEnvironment {
   return {
     id: DEFAULT_KIMI_CODE_ENVIRONMENT_ID,
@@ -105,28 +115,61 @@ const LEGACY_MCP_JSON_PATH = "~/.kimi/mcp.json";
 const LEGACY_MIGRATION_MARKER_PATH = `${DEFAULT_PANEL_DIRECTORY}/legacy-kimi-cli-config.migrated.json`;
 const SUPPORTED_LOCALES = new Set<PanelSettings["locale"]>(["zh-CN", "zh-TW", "en-US", "ja-JP", "de-DE", "es-ES"]);
 
+/**
+ * Kimi Code config.toml 顶层键中 GUI 已识别的规范化字段。
+ * 其余未知顶层 section 通过 MainConfig.extra 原样透传（避免保存时抹掉 CLI 新键）。
+ * 已废弃的死键（profile_label/default_thinking/default_yolo/default_editor/theme/
+ * show_thinking_stream）不再生成、保存时剔除、加载时忽略。
+ */
+export const KNOWN_MAIN_CONFIG_KEYS: readonly string[] = [
+  "default_model",
+  "default_plan_mode",
+  "default_permission_mode",
+  "merge_all_available_skills",
+  "extra_skill_dirs",
+  "telemetry",
+  "hooks",
+  "models",
+  "providers",
+  "loop_control",
+  "background",
+  "notifications",
+  "services",
+  "mcp",
+];
+
+/** 已废弃的顶层死键：0.38.0 由 v2 引擎忽略，save 时从 config.toml 剔除。 */
+export const DEAD_MAIN_CONFIG_KEYS: readonly string[] = [
+  "profile_label",
+  "default_thinking",
+  "default_yolo",
+  "default_editor",
+  "theme",
+  "show_thinking_stream",
+];
+
+const ACTIVE_MAIN_CONFIG_KEYS = new Set([
+  ...KNOWN_MAIN_CONFIG_KEYS,
+  ...DEAD_MAIN_CONFIG_KEYS,
+]);
+
 type ProfileConfigKey = Exclude<keyof Profile, "name" | "label">;
 
 const PROFILE_KEYS: readonly ProfileConfigKey[] = [
   "default_model",
-  "default_thinking",
-  "default_yolo",
   "default_plan_mode",
-  "default_editor",
-  "theme",
-  "show_thinking_stream",
+  "default_permission_mode",
   "merge_all_available_skills",
+  "thinking_enabled",
+  "thinking_effort",
+  "tui_theme",
+  "tui_editor_command",
 ];
 
 const DEFAULTS = {
-  profile_label: "Default",
   default_model: "",
-  default_thinking: true,
-  default_yolo: false,
   default_plan_mode: false,
-  default_editor: "",
-  theme: "dark",
-  show_thinking_stream: false,
+  default_permission_mode: "",
   merge_all_available_skills: false,
 } as const;
 
@@ -185,6 +228,7 @@ export function projectEnabledMainConfig(config: MainConfig): MainConfig {
   }
   projected.providers = providers;
   projected.models = models;
+  // extra（含 [thinking]/[permission] 等未知节透传）直接保留
   return projected;
 }
 
@@ -660,6 +704,26 @@ export async function saveAppState(files: FileAccess, state: AppState): Promise<
   }
 
   await files.writeText(stateToPersist.mcpConfigPath, buildMcpConfigDocument(stateToPersist.mcpConfig));
+
+  // tui.toml：把激活 profile 的两个 GUI 管理字段合并进现有文档。未设置的字段会从
+  // 现有文档删除，确保清空字段或切换 profile 后不会遗留旧 theme/editor.command；
+  // [notifications]/[upgrade] 等 GUI 不管理的内容继续保留。解析失败时合并函数原样
+  // 返回旧文档，且下面通过内容比较跳过写入，避免覆盖损坏文档造成数据丢失。
+  // 路径与 config.toml 同目录（<activeEnvHome>/tui.toml）：normalizeStatePaths 已把
+  // configPath 归一到激活环境受管目录，其 dirname 即 activeEnvHome。
+  const activeProfileName = stateForConfig.activeProfile;
+  const tuiConfig = TuiConfigFromProfile(stateForConfig.profiles[activeProfileName]);
+  const tuiConfigPath = getKimiCodeTuiConfigPath(dirnamePath(stateForConfig.configPath));
+  const existingTuiDocument = await safeReadText(files, tuiConfigPath);
+  if (existingTuiDocument !== null || hasTuiConfigValues(tuiConfig)) {
+    const nextTuiDocument = existingTuiDocument?.trim()
+      ? mergeTuiConfigDocument(existingTuiDocument, tuiConfig)
+      : buildTuiConfigDocument(tuiConfig);
+    if (nextTuiDocument !== existingTuiDocument) {
+      await files.ensureDir(dirnamePath(tuiConfigPath));
+      await files.writeText(tuiConfigPath, nextTuiDocument);
+    }
+  }
 }
 
 export interface LegacyKimiCliMigrationResult {
@@ -740,7 +804,49 @@ export function buildConfigDocument(state: AppState): string {
   // enabled 标记。这里统一投影，保证「写盘内容 / 预览 / 外部变更检测的 draft」三者一致，
   // 避免 enabled 标记或禁用项造成 draft 与磁盘不一致而误报外部修改。
   const projected = projectEnabledMainConfig(state.mainConfig);
-  return normalizeTomlIndentation(stringify(projected as unknown as Record<string, unknown>));
+  return normalizeTomlIndentation(stringify(serializeMainConfigToRaw(projected) as Record<string, unknown>));
+}
+
+/**
+ * 把 MainConfig 重建为待序列化的扁平记录：
+ * - 规范化字段直接放置；
+ * - extra（含 [thinking]/[permission]/[image]/[subagent] 等未知节透传）原样写回；
+ * - 死键桶（extra.__dead__）整体剔除，实现保存时净化 0.38.0 忽略的废弃键。
+ */
+function serializeMainConfigToRaw(config: MainConfig): Record<string, unknown> {
+  const raw: Record<string, unknown> = {
+    default_model: config.default_model,
+    default_plan_mode: config.default_plan_mode,
+    default_permission_mode: config.default_permission_mode || "manual",
+    merge_all_available_skills: config.merge_all_available_skills,
+  };
+  if (config.extra_skill_dirs && config.extra_skill_dirs.length > 0) {
+    raw.extra_skill_dirs = config.extra_skill_dirs;
+  }
+  if (config.telemetry !== undefined) {
+    raw.telemetry = config.telemetry;
+  }
+  if (config.hooks.length > 0) {
+    raw.hooks = config.hooks;
+  }
+  if (Object.keys(config.models).length > 0) {
+    raw.models = config.models;
+  }
+  if (Object.keys(config.providers).length > 0) {
+    raw.providers = config.providers;
+  }
+  for (const section of ["loop_control", "background", "notifications", "services", "mcp"] as const) {
+    if (Object.keys(config[section]).length > 0) {
+      raw[section] = config[section];
+    }
+  }
+  if (config.extra) {
+    for (const [key, value] of Object.entries(config.extra)) {
+      if (key === "__dead__") continue;
+      raw[key] = value;
+    }
+  }
+  return raw;
 }
 
 export function buildProfilesDocument(state: AppState): string {
@@ -799,18 +905,17 @@ export function bootstrapProfiles(mainConfig: MainConfig): Record<string, Profil
   if (!mainConfig.default_model || !mainConfig.models[mainConfig.default_model]) {
     return {};
   }
+  // 仅在有显式模型时可提升默认 profile；每个 profile 都能在编辑时补齐值，
+  // 无模型时不生成。
   return {
     [DEFAULT_PROFILE_NAME]: normalizeProfile({
       name: DEFAULT_PROFILE_NAME,
-      label: mainConfig.profile_label || DEFAULTS.profile_label,
+      label: mainConfig.profile_label || DEFAULT_PROFILE_NAME,
       default_model: String(mainConfig.default_model ?? DEFAULTS.default_model),
-      default_thinking: Boolean(mainConfig.default_thinking),
-      default_yolo: Boolean(mainConfig.default_yolo),
       default_plan_mode: Boolean(mainConfig.default_plan_mode),
-      default_editor: String(mainConfig.default_editor ?? DEFAULTS.default_editor),
-      theme: String(mainConfig.theme ?? DEFAULTS.theme),
-      show_thinking_stream: Boolean(mainConfig.show_thinking_stream),
+      default_permission_mode: mainConfig.default_permission_mode || "manual",
       merge_all_available_skills: Boolean(mainConfig.merge_all_available_skills),
+      thinking_enabled: true,
     }),
   };
 }
@@ -827,10 +932,44 @@ export function applyProfile(state: AppState, profileName: string): void {
       }),
     );
   }
-  for (const key of PROFILE_KEYS) {
-    state.mainConfig[key] = profile[key] as never;
-  }
+  // 写往 config.toml 的直接键
+  state.mainConfig.default_model = profile.default_model;
+  state.mainConfig.default_plan_mode = profile.default_plan_mode;
+  state.mainConfig.default_permission_mode = profile.default_permission_mode || "manual";
+  state.mainConfig.merge_all_available_skills = profile.merge_all_available_skills;
+  // thinking 配置映射到 [thinking] extra 节
+  setMainConfigThinking(state.mainConfig, profile.thinking_enabled, profile.thinking_effort);
+  // tui_theme / tui_editor_command 由 tuiStore 在写 tui.toml 时从激活 profile 读取
   state.activeProfile = profileName;
+}
+
+/**
+ * 把 profile 的 thinking 设置投影到 mainConfig.extra.thinking（0.38.0 [thinking] 表）。
+ * 保留 extra.thinking 里用户未接管的其他键（如 keep）。
+ */
+function setMainConfigThinking(
+  mainConfig: MainConfig,
+  enabled: boolean | undefined,
+  effort: string | undefined,
+): void {
+  const extra = mainConfig.extra ?? {};
+  const thinking = isRecord(extra.thinking) ? { ...(extra.thinking as Record<string, unknown>) } : {};
+  if (enabled !== undefined) {
+    thinking.enabled = enabled;
+  } else {
+    delete thinking.enabled;
+  }
+  if (effort && effort.trim()) {
+    thinking.effort = effort;
+  } else {
+    delete thinking.effort;
+  }
+  if (Object.keys(thinking).length > 0) {
+    extra.thinking = thinking;
+  } else {
+    delete extra.thinking;
+  }
+  mainConfig.extra = Object.keys(extra).length > 0 ? extra : undefined;
 }
 
 export function upsertProvider(
@@ -1038,23 +1177,34 @@ export function parseProfiles(
 
 function profileFromUnknown(name: string, raw: unknown): Profile {
   const data = isRecord(raw) ? raw : {};
+  const deadYolo = typeof data.default_yolo === "boolean" ? data.default_yolo : undefined;
+  const deadThinking = typeof data.default_thinking === "boolean" ? data.default_thinking : undefined;
+  const deadEditor = asString(data.default_editor, "");
+  const deadTheme = asString(data.theme, "");
   return normalizeProfile({
     name,
     label: asString(data.label, name),
     default_model: asString(data.default_model, DEFAULTS.default_model),
-    default_thinking: asBoolean(data.default_thinking, DEFAULTS.default_thinking),
-    default_yolo: asBoolean(data.default_yolo, DEFAULTS.default_yolo),
     default_plan_mode: asBoolean(data.default_plan_mode, DEFAULTS.default_plan_mode),
-    default_editor: asString(data.default_editor, DEFAULTS.default_editor),
-    theme: asString(data.theme, DEFAULTS.theme),
-    show_thinking_stream: asBoolean(
-      data.show_thinking_stream,
-      DEFAULTS.show_thinking_stream,
-    ),
+    // 旧 default_yolo -> default_permission_mode 迁移
+    default_permission_mode:
+      typeof data.default_permission_mode === "string" && data.default_permission_mode
+        ? data.default_permission_mode as PermissionMode
+        : (deadYolo === true ? "yolo" : (deadYolo === false ? "manual" : "manual")),
     merge_all_available_skills: asBoolean(
       data.merge_all_available_skills,
       DEFAULTS.merge_all_available_skills,
     ),
+    // 旧 default_thinking -> thinking_enabled（旧值缺失视为 CLI 默认 true）
+    thinking_enabled: data.thinking_enabled !== undefined
+      ? asBoolean(data.thinking_enabled, false)
+      : (deadThinking === undefined ? undefined : deadThinking),
+    thinking_effort: typeof data.thinking_effort === "string" ? data.thinking_effort : undefined,
+    // 旧 theme/default_editor -> tui 目标（迁移后由 tuiStore 应用）
+    tui_theme: typeof data.tui_theme === "string" ? data.tui_theme : (deadTheme || undefined),
+    tui_editor_command: typeof data.tui_editor_command === "string"
+      ? data.tui_editor_command
+      : (deadEditor || undefined),
   });
 }
 
@@ -1067,7 +1217,11 @@ function pickActiveProfile(mainConfig: MainConfig, profiles: Record<string, Prof
     if (profile.default_model !== mainConfig.default_model) {
       continue;
     }
-    const matches = PROFILE_KEYS.every((key) => mainConfig[key] === profile[key]);
+    // 仅对比直接落在 config.toml 顶层的活键；thinking/tui 相关键由各自的合并逻辑负责
+    const matches =
+      (profile.default_plan_mode || false) === (mainConfig.default_plan_mode || false)
+      && (profile.default_permission_mode || "manual") === (mainConfig.default_permission_mode || "manual")
+      && (profile.merge_all_available_skills || false) === (mainConfig.merge_all_available_skills || false);
     if (matches) {
       return name;
     }
@@ -1137,7 +1291,7 @@ function shouldIgnoreEmptyDefaultEnvironmentProfile(
   }
   const profile = profiles[DEFAULT_PROFILE_NAME];
   return profile.default_model === DEFAULTS.default_model
-    && profile.label === DEFAULTS.profile_label;
+    && profile.label.toLowerCase() === DEFAULT_PROFILE_NAME;
 }
 
 function getEnvironmentMcpServers(
@@ -1158,7 +1312,9 @@ function getEnvironmentMcpServers(
 }
 
 function cloneMainConfig(config: MainConfig): MainConfig {
-  return structuredClone(config) as MainConfig;
+  const clone = structuredClone(config) as MainConfig;
+  // structuredClone 会保留 extra 普通对象；若为空记录则不设字段，保持空记录透传一致性。
+  return clone;
 }
 
 function parseEnvironmentMainConfig(value: unknown): MainConfig | undefined {
@@ -1295,13 +1451,11 @@ function mergeLegacyMainConfig(
 
   for (const key of [
     "default_model",
-    "default_editor",
-    "theme",
-    "show_thinking_stream",
     "merge_all_available_skills",
-    "default_thinking",
-    "default_yolo",
     "default_plan_mode",
+    "default_permission_mode",
+    "extra_skill_dirs",
+    "telemetry",
   ]) {
     if (legacy[key] !== undefined && isMissingOrBlank(next[key])) {
       next[key] = legacy[key];
@@ -1309,12 +1463,21 @@ function mergeLegacyMainConfig(
     }
   }
 
-  for (const key of ["hooks", "loop_control", "background", "notifications", "services"]) {
+  // 旧 default_yolo 布尔迁移为 default_permission_mode（仅在二者都缺失时）。
+  if (legacy.default_yolo !== undefined && next.default_permission_mode === undefined) {
+    next.default_permission_mode = legacy.default_yolo === true ? "yolo" : "manual";
+    changed = true;
+  }
+
+  for (const key of ["hooks", "loop_control", "background", "notifications", "services", "mcp", "thinking", "permission", "image", "subagent"]) {
     if (legacy[key] !== undefined && (next[key] === undefined || isEmptyRecordValue(next[key]) || (Array.isArray(next[key]) && next[key].length === 0))) {
       next[key] = legacy[key];
       changed = true;
     }
   }
+
+  // legacy 死键（profile_label/default_thinking/default_editor/theme/show_thinking_stream）
+  // 不再迁移进 0.38.0 配置；default_yolo 已按上面对应迁移。
 
   return { value: next, changed };
 }
@@ -1367,21 +1530,21 @@ function formatErrorMessage(error: unknown): string {
 
 function normalizeMainConfig(input: Record<string, unknown>): MainConfig {
   return {
-    profile_label: asString(input.profile_label, ""),
     default_model: asString(input.default_model, DEFAULTS.default_model),
-    default_thinking: asBoolean(input.default_thinking, DEFAULTS.default_thinking),
-    default_yolo: asBoolean(input.default_yolo, DEFAULTS.default_yolo),
+    // profile_label 为只读遗留字段：0.38.0 忽略，不写回 config.toml，仅作默认 profile 显示名
+    profile_label: asString(input.profile_label, ""),
     default_plan_mode: asBoolean(input.default_plan_mode, DEFAULTS.default_plan_mode),
-    default_editor: asString(input.default_editor, DEFAULTS.default_editor),
-    theme: asString(input.theme, DEFAULTS.theme),
-    show_thinking_stream: asBoolean(
-      input.show_thinking_stream,
-      DEFAULTS.show_thinking_stream,
+    default_permission_mode: asPermissionMode(
+      input.default_permission_mode,
+      input.default_yolo,
+      DEFAULTS.default_permission_mode,
     ),
     merge_all_available_skills: asBoolean(
       input.merge_all_available_skills,
       DEFAULTS.merge_all_available_skills,
     ),
+    extra_skill_dirs: asStringArray(input.extra_skill_dirs),
+    telemetry: typeof input.telemetry === "boolean" ? input.telemetry : undefined,
     hooks: Array.isArray(input.hooks) ? input.hooks : [],
     models: isRecord(input.models) ? (input.models as MainConfig["models"]) : {},
     providers: isRecord(input.providers) ? (input.providers as MainConfig["providers"]) : {},
@@ -1390,7 +1553,53 @@ function normalizeMainConfig(input: Record<string, unknown>): MainConfig {
     notifications: isRecord(input.notifications) ? input.notifications : {},
     services: isRecord(input.services) ? input.services : {},
     mcp: isRecord(input.mcp) ? input.mcp : {},
+    // 0.38.0 新增/未管理的顶层 section（thinking/permission/image/subagent 等）原样透传，
+    // 保存时写回，避免 GUI 保存抹掉 CLI 可识别的字段。
+    extra: collectMainConfigExtra(input),
   };
+}
+
+/**
+ * 收集白名单（含死键）之外的所有顶层键进 MainConfig.extra，作为不透明记录透传。
+ * 死键单独收进 extra 里的 __dead__ 桶，便于保存时整体剔除。
+ */
+function collectMainConfigExtra(input: Record<string, unknown>): Record<string, unknown> | undefined {
+  const extra: Record<string, unknown> = {};
+  const dead: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (ACTIVE_MAIN_CONFIG_KEYS.has(key)) continue;
+    if (DEAD_MAIN_CONFIG_KEYS.includes(key)) {
+      dead[key] = value;
+    } else {
+      extra[key] = value;
+    }
+  }
+  if (Object.keys(dead).length > 0) {
+    extra.__dead__ = dead;
+  }
+  return Object.keys(extra).length > 0 ? extra : undefined;
+}
+
+function asPermissionMode(value: unknown, legacyYolo: unknown, fallback: PermissionMode | ""): PermissionMode | "" {
+  if (value === "manual" || value === "auto" || value === "yolo") {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    return fallback;
+  }
+  // 旧 default_yolo 布尔迁移：true -> yolo，false/缺省 -> manual（0.38.0 默认 manual）
+  if (typeof legacyYolo === "boolean") {
+    return legacyYolo ? "yolo" : "manual";
+  }
+  return fallback;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  return items.length > 0 ? items : undefined;
 }
 
 

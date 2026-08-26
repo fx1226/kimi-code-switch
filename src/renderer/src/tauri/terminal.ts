@@ -81,8 +81,12 @@ function buildProfileKimiArgs(request: OpenKimiTerminalRequest, profileName: str
   if (draft.mainConfig.default_model.trim()) {
     args.push("-m", draft.mainConfig.default_model.trim());
   }
-  if (draft.mainConfig.default_yolo) {
+  // 0.38.0 权限模式：yolo -> --yolo，auto -> --auto，manual 不传
+  const mode = draft.mainConfig.default_permission_mode || "manual";
+  if (mode === "yolo") {
     args.push("--yolo");
+  } else if (mode === "auto") {
+    args.push("--auto");
   }
   if (draft.mainConfig.default_plan_mode) {
     args.push("--plan");

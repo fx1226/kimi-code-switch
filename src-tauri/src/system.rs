@@ -434,19 +434,15 @@ fn parse_device_login_line(target: KimiOAuthTarget, line: &str) -> KimiOAuthLogi
             message: None,
         };
     }
-    if let Some(rest) = line.strip_prefix("Logged in to ") {
-        return KimiOAuthLoginEvent {
-            kind: "success".to_string(),
-            target: target.as_config_target().to_string(),
-            stream: None,
-            line: Some(line.to_string()),
-            url: None,
-            user_code: None,
-            expires_in: None,
-            message: Some(format!("Logged in to {}", rest.trim_end_matches('.'))),
+    // 成功判定：0.38.0 输出 "Logged in to <provider>." / "Logged in."；
+    // 旧版输出 "Logged in successfully."。统一以 "Logged in" 开头判定成功
+    //（"Login failed" 不以该前缀开头，不会被误判）。
+    if line.trim().starts_with("Logged in") {
+        let message = if let Some(rest) = line.trim().strip_prefix("Logged in to ") {
+            format!("Logged in to {}", rest.trim_end_matches('.'))
+        } else {
+            line.trim().to_string()
         };
-    }
-    if line.trim() == "Logged in successfully." {
         return KimiOAuthLoginEvent {
             kind: "success".to_string(),
             target: target.as_config_target().to_string(),
@@ -455,7 +451,7 @@ fn parse_device_login_line(target: KimiOAuthTarget, line: &str) -> KimiOAuthLogi
             url: None,
             user_code: None,
             expires_in: None,
-            message: Some("Logged in successfully.".to_string()),
+            message: Some(message),
         };
     }
     if is_oauth_models_payment_required(line) {
@@ -468,6 +464,32 @@ fn parse_device_login_line(target: KimiOAuthTarget, line: &str) -> KimiOAuthLogi
             user_code: None,
             expires_in: None,
             message: Some(kimi_oauth_account_required_message()),
+        };
+    }
+    // 0.38.0 备用/取消分支：登录被用户中止输出 "Login cancelled."，
+    // 已登录状态输出 "Already logged in. <msg>"。前者按失败处理，后者按成功处理。
+    if line.trim() == "Login cancelled." {
+        return KimiOAuthLoginEvent {
+            kind: "error".to_string(),
+            target: target.as_config_target().to_string(),
+            stream: None,
+            line: Some(line.to_string()),
+            url: None,
+            user_code: None,
+            expires_in: None,
+            message: Some("Login cancelled.".to_string()),
+        };
+    }
+    if let Some(rest) = line.trim().strip_prefix("Already logged in.") {
+        return KimiOAuthLoginEvent {
+            kind: "success".to_string(),
+            target: target.as_config_target().to_string(),
+            stream: None,
+            line: Some(line.to_string()),
+            url: None,
+            user_code: None,
+            expires_in: None,
+            message: Some(format!("Already logged in. {}", rest.trim_start())),
         };
     }
     if let Some(rest) = line.strip_prefix("Login failed: ") {
@@ -1121,7 +1143,7 @@ mod tests {
     fn validate_http_url_rejects_suffix_spoofing() {
         // evilgithub.com 不是 github.com 的子域，应落到 SSRF 校验而非白名单放行
         assert!(validate_http_url("https://evilgithub.com/x").is_ok()); // 公网域名，WebDAV 兜底放行
-        // 但不能因白名单后缀匹配而被当成 github.com
+                                                                        // 但不能因白名单后缀匹配而被当成 github.com
         assert!(validate_http_url("https://github.com.attacker.com/x").is_ok());
     }
 
@@ -1421,6 +1443,46 @@ mod tests {
 
         assert_eq!(event.kind, "success");
         assert_eq!(event.message.as_deref(), Some("Logged in successfully."));
+    }
+
+    #[test]
+    fn parse_device_login_line_marks_bare_success_prefix() {
+        // 0.38.0 备用流程直接输出 "Logged in."；按 "Logged in" 前缀判定成功。
+        let event = parse_device_login_line(KimiOAuthTarget::KimiCode, "Logged in.");
+
+        assert_eq!(event.kind, "success");
+        assert_eq!(event.message.as_deref(), Some("Logged in."));
+    }
+
+    #[test]
+    fn parse_device_login_line_does_not_confuse_login_failed_with_success() {
+        // "Login failed" 不以 "Logged in" 开头，不应误判为成功。
+        let event = parse_device_login_line(KimiOAuthTarget::KimiCode, "Login failed: bad");
+
+        assert_eq!(event.kind, "error");
+        assert_eq!(event.message.as_deref(), Some("bad"));
+    }
+
+    #[test]
+    fn parse_device_login_line_marks_login_cancelled_as_error() {
+        let event = parse_device_login_line(KimiOAuthTarget::KimiCode, "Login cancelled.");
+
+        assert_eq!(event.kind, "error");
+        assert_eq!(event.message.as_deref(), Some("Login cancelled."));
+    }
+
+    #[test]
+    fn parse_device_login_line_marks_already_logged_in_as_success() {
+        let event = parse_device_login_line(
+            KimiOAuthTarget::KimiCode,
+            "Already logged in. Model configuration refreshed.",
+        );
+
+        assert_eq!(event.kind, "success");
+        assert_eq!(
+            event.message.as_deref(),
+            Some("Already logged in. Model configuration refreshed.")
+        );
     }
 
     #[test]
