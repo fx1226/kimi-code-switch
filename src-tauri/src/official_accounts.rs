@@ -469,7 +469,7 @@ pub fn prepare_official_account_login(
     let account =
         get_account(&conn, &safe_id)?.ok_or_else(|| "Official account not found.".to_string())?;
     if let Some(active) = get_active_account(&conn)? {
-        let _ = sync_current_credentials_to_slot(&active);
+        sync_current_credentials_to_slot(&active)?;
     }
     clear_current_credentials()?;
     Ok(OfficialAccountOperationResult {

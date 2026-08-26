@@ -382,11 +382,7 @@ pub fn migrate_legacy_database(state: tauri::State<UsageState>) -> Result<String
     for table in &tables {
         // 表名将被拼接进 SQL，校验其为合法标识符（仅字母数字下划线），
         // 防御异常/构造的旧库中含引号等字符的表名破坏语句。
-        if table.is_empty()
-            || !table
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if table.is_empty() || !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             log::warn!("Skipping table with non-identifier name: {}", table);
             continue;
         }

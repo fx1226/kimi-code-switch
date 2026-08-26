@@ -5220,6 +5220,62 @@ textarea:focus-visible {
   grid-column: 1 / -1;
 }
 
+.about-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.about-compat-baseline,
+.about-compat-local {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.about-compat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.about-compat-table th,
+.about-compat-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.about-compat-table th {
+  color: var(--text-muted);
+  font-weight: var(--fw-semi);
+}
+
+.about-compat-capability {
+  color: var(--text);
+}
+
+.about-compat-risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--danger-line, var(--line));
+  background: var(--danger-bg, var(--surface-quiet));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.about-compat-risk strong {
+  color: var(--danger, inherit);
+  white-space: nowrap;
+}
+
+.about-compat-risk p {
+  margin: 0;
+}
+
 .about-section-title {
   display: inline-flex;
   align-items: center;

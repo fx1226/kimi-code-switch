@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type { AppState, BackupDestinationType, BackupRecord, Locale } from "@shared/types";
-import type { BackupRecordsDialogState } from "./dialogs";
+import type { BackupRecordsDialogState, ConfirmDialogState } from "./dialogs";
 import { getApi } from "./appHelpers";
 import { t, translateError } from "./i18n";
 import { formatMessage } from "./tabComponents";
@@ -18,6 +18,7 @@ interface BackupActionsContext {
   setBackupRecordsDialog: Dispatch<SetStateAction<BackupRecordsDialogState | null>>;
   confirmDeleteResource: (label: string, name: string) => Promise<boolean>;
   restoreWithDryRun: (state: AppState, backupName: string) => Promise<void>;
+  requestConfirm: (options: ConfirmDialogState) => Promise<boolean>;
 }
 
 export function useBackupActions(ctx: BackupActionsContext) {
@@ -33,6 +34,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     setBackupRecordsDialog,
     confirmDeleteResource,
     restoreWithDryRun,
+    requestConfirm,
   } = ctx;
 
   const runManualBackup = (): void => {
@@ -232,6 +234,38 @@ export function useBackupActions(ctx: BackupActionsContext) {
     })();
   };
 
+  const migrateLegacyBackupRecord = (record: BackupRecord, legacyEncryptionPassword: string): void => {
+    const api = getApi();
+    if (!api || typeof api.migrateLegacyWebDavBackup !== "function") {
+      setNotice("");
+      setError(t(locale, "backupRuntimeOutdated"));
+      return;
+    }
+    void (async () => {
+      const confirmed = await requestConfirm({
+        title: t(locale, "backupLegacyMigrateTitle"),
+        description: t(locale, "backupLegacyMigrateDescription"),
+        confirmLabel: t(locale, "backupLegacyMigrateAction"),
+        cancelLabel: t(locale, "cancel"),
+        tone: "primary",
+        kind: "unsaved",
+      });
+      if (!confirmed) return;
+      try {
+        setBackupRecordsDialog((current) => current ? { ...current, migratingName: record.name } : current);
+        const result = await api.migrateLegacyWebDavBackup(state, record.name, legacyEncryptionPassword);
+        setError("");
+        setNotice(formatMessage(t(locale, "backupLegacyMigrateSuccess"), { count: result.migratedFiles }));
+        await loadBackupRecords("webdav");
+      } catch (migrationError) {
+        const message = migrationError instanceof Error ? migrationError.message : String(migrationError);
+        setNotice("");
+        setError(translateError(locale, message));
+        setBackupRecordsDialog((current) => current ? { ...current, migratingName: undefined } : current);
+      }
+    })();
+  };
+
   return {
     runManualBackup,
     runWebDavTest,
@@ -239,5 +273,6 @@ export function useBackupActions(ctx: BackupActionsContext) {
     openBackupRecords,
     deleteBackupRecord,
     restoreBackupRecord,
+    migrateLegacyBackupRecord,
   };
 }

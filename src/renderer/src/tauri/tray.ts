@@ -7,6 +7,7 @@ import { applyProfile, loadAppState, saveAppState } from "@shared/configStore";
 import type { AppState, Locale } from "@shared/types";
 
 import { tauriFileAccess } from "./fileAccess";
+import { savePanelSettings } from "./panelSettingsStore";
 
 interface MenuItemSpec {
   id?: string;
@@ -115,20 +116,23 @@ export async function setupTray(
         await exit(0);
       } else if (action.startsWith("profile:")) {
         const name = action.slice("profile:".length);
-        applyProfile(cur, name);
-        await saveAppState(tauriFileAccess, cur);
+        // Reload immediately before applying the profile so a CLI-side provider/model/MCP
+        // update is not replaced by a stale tray snapshot.
+        const latest = await loadAppState(tauriFileAccess);
+        applyProfile(latest, name);
+        await saveAppState(tauriFileAccess, latest);
         const reloaded = await loadAppState(tauriFileAccess);
         Object.assign(cur, reloaded);
         await invoke("set_tray", { enabled: true, menu: buildMenu(cur), tooltip: "Kimi Code Switch GUI" });
         currentOnReload?.();
       } else if (action.startsWith("locale:")) {
         cur.panelSettings.locale = action.slice("locale:".length) as Locale;
-        await saveAppState(tauriFileAccess, cur);
+        await savePanelSettings(cur.panelSettings);
         await invoke("set_tray", { enabled: true, menu: buildMenu(cur), tooltip: "Kimi Code Switch GUI" });
         currentOnReload?.();
       } else if (action.startsWith("theme:")) {
         cur.panelSettings.theme = action.slice("theme:".length) as AppState["panelSettings"]["theme"];
-        await saveAppState(tauriFileAccess, cur);
+        await savePanelSettings(cur.panelSettings);
         await invoke("set_tray", { enabled: true, menu: buildMenu(cur), tooltip: "Kimi Code Switch GUI" });
         currentOnReload?.();
       }

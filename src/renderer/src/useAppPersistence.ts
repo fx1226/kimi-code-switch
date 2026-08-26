@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { MutableRefObject } from "react";
 
@@ -12,6 +12,23 @@ import { applyAppearanceMode, applyAppearanceTheme, applyUiFontSize, createFallb
 import { isExternalChangeConflict } from "./useSafetyActions";
 import { initBackupBaseline, maybeBackupAfterSave, maybeRunScheduledBackup } from "./backupAuto";
 import { recordStartupTiming, startupTimingNow } from "./startupTiming";
+import { createSaveCoordinator } from "./saveCoordinator";
+import type { PendingSave } from "./saveCoordinator";
+
+/** B1：把已持久化的用户偏好目录重登记为 Rust 侧 durable grant（跨重启可用）。 */
+function reconcileUserDirectories(
+  normalized: AppState,
+  api: NonNullable<ReturnType<typeof getApi>>,
+): Promise<void> {
+  const directories = new Set<string>();
+  const backupPath = normalized.panelSettings.backup_local_path?.trim();
+  if (backupPath) directories.add(backupPath);
+  for (const environment of normalized.panelSettings.kimi_code_environments ?? []) {
+    const home = environment.homePath?.trim();
+    if (home) directories.add(home);
+  }
+  return api.reconcileDurableGrants?.([...directories]) ?? Promise.resolve();
+}
 
 interface AppPersistenceContext {
   state: AppState;
@@ -66,6 +83,19 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setSelectedProfile,
     setSelectedMcpServer,
   } = ctx;
+
+  // C1 保存协调器：单一队列，latest-wins 合并即时偏好，显式保存保留结果。
+  const persistCoreRef = useRef<(state: AppState) => Promise<boolean>>(async () => false);
+  const persistImmediateCoreRef = useRef<(visible: AppState, saved?: AppState) => Promise<void>>(async () => {});
+  const coordinatorRef = useRef<ReturnType<typeof createSaveCoordinator> | null>(null);
+  coordinatorRef.current ??= createSaveCoordinator(async (save: PendingSave) => {
+    if (save.kind === "explicit") {
+      return persistCoreRef.current(save.state);
+    }
+    await persistImmediateCoreRef.current(save.visible, save.saved);
+    return true;
+  });
+  const saveCoordinator = coordinatorRef.current;
 
   useEffect(() => {
     const onKimiTargetDetection = (event: Event): void => {
@@ -194,6 +224,11 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
           }));
         }
       }
+      // B1：把已持久化的用户偏好目录（备份目录、注册环境 home、项目根）重登记为
+      // Rust 侧 durable grant，确保非受管根的备份/项目写入在重启后仍可用。
+      if (api.reconcileDurableGrants) {
+        void reconcileUserDirectories(normalized, api);
+      }
       runPostLoadTasks(normalized, api);
       recordStartupTiming("useAppPersistence.loadState.total", loadStartedAt);
     } catch (loadError) {
@@ -227,13 +262,13 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setState,
   ]);
 
-  const persistState = useCallback(async (nextState: AppState): Promise<void> => {
+  const persistState = useCallback(async (nextState: AppState): Promise<boolean> => {
     const api = getApi();
     if (!api) {
       const message = "Electron preload API is unavailable. Save operation cannot continue.";
       setError(message);
       setDiagnostics((current) => ({ ...current, preload: "unavailable", lastError: message }));
-      return;
+      return false;
     }
     try {
       const normalized = normalizeStatePaths(nextState);
@@ -246,7 +281,7 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
         if (!overwrite) {
           setFileSnapshot(saveResult.snapshot);
           setDoctorReport(saveResult.doctor);
-          return;
+          return false;
         }
         const overwriteResult = api.saveStateSafe
           ? await api.saveStateSafe(normalized, { expectedSnapshot, allowOverwrite: true })
@@ -276,11 +311,13 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
       setNotice("");
       // 修改后备份：核心配置指纹变化时静默触发（指纹去重使纯 UI 操作成为 no-op）。
       void maybeBackupAfterSave(normalized);
+      return true;
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : String(saveError);
       setError(translateError(locale, message));
       setNotice("");
       setDiagnostics((current) => ({ ...current, lastError: message }));
+      return false;
     }
   }, [
     confirmExternalOverwrite,
@@ -298,13 +335,6 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setSavedState,
     setState,
   ]);
-
-  const onSave = useCallback(async (): Promise<void> => {
-    if (!state) {
-      return;
-    }
-    await persistState(state);
-  }, [persistState, state]);
 
   const persistConfigTarget = useCallback(async (configTarget: ConfigTarget): Promise<void> => {
     const api = getApi();
@@ -453,12 +483,37 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setState,
   ]);
 
+  // C1：把最新 core 挂到协调器用到的 ref；返回给外部的函数改为经协调器进队。
+  persistCoreRef.current = persistState;
+  persistImmediateCoreRef.current = persistImmediateState;
+
+  const enqueuedPersistState = useCallback(
+    (nextState: AppState): Promise<boolean> =>
+      saveCoordinator.submit({ kind: "explicit", state: nextState }) as Promise<boolean>,
+    [saveCoordinator],
+  );
+
+  const enqueuedPersistImmediate = useCallback(
+    (nextVisibleState: AppState, nextSavedStateOverride?: AppState): void => {
+      saveCoordinator.submit({
+        kind: "immediate",
+        visible: nextVisibleState,
+        saved: nextSavedStateOverride ?? nextVisibleState,
+      });
+    },
+    [saveCoordinator],
+  );
+
   return {
     loadState,
-    persistState,
-    onSave,
+    persistState: enqueuedPersistState,
+    onSave: async (): Promise<void> => {
+      if (!state) return;
+      await enqueuedPersistState(state);
+    },
     persistConfigTarget,
-    persistImmediateState,
+    persistImmediateState: enqueuedPersistImmediate,
     restoreSavedState,
+    saveCoordinator,
   };
 }

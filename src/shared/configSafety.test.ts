@@ -1,8 +1,11 @@
 import {
   bootstrapProfiles,
   createDefaultPanelSettings,
+  extractSecondaryModel,
+  setSecondaryModel,
 } from "./configStore";
 import {
+  assessRestoreDocumentsRisk,
   buildConfigDoctorReport,
   buildManagedDocuments,
   buildRedactedPreviewBundle,
@@ -250,8 +253,6 @@ describe("configSafety", () => {
               model: "kimi-k2.5",
               max_context_size: 1024,
               capabilities: [],
-              auth_mode: "official-account",
-              official_account_scope: "global",
             },
           },
           providers: { kimi_gateway: { type: "kimi", base_url: "https://api.example.test", api_key: "sk-x" } },
@@ -265,6 +266,23 @@ describe("configSafety", () => {
       });
 
       expect(drift).toEqual([]);
+    });
+
+    it("flags GUI-only model metadata when it leaks into official config", () => {
+      const drift = detectUnknownFields({
+        config: {
+          models: {
+            "provider/model": {
+              provider: "provider",
+              model: "model",
+              auth_mode: "official-account",
+              pricing: { input_per_mtok: 1 },
+            },
+          },
+        },
+      });
+
+      expect(drift.map((entry) => entry.key).sort()).toEqual(["auth_mode", "pricing"]);
     });
 
     it("does not flag unknown top-level config keys (they pass through)", () => {
@@ -505,3 +523,126 @@ describe("configSafety", () => {
     });
   });
 });
+
+describe("assessRestoreDocumentsRisk (B4)", () => {
+  it("flags stdio MCP commands, remote endpoints, hooks and AGENTS documents", () => {
+    const summary = assessRestoreDocumentsRisk({
+      configDocument: "[hooks.test]\ncommand = \"/usr/bin/curl\"\nmatchers = [\"error\"]\n",
+      mcpDocument: JSON.stringify({
+        mcpServers: {
+          local: { type: "stdio", command: "node", args: ["server.js"] },
+          remote: { type: "http", url: "https://example.com/mcp?token=SECRET_TOKEN" },
+        },
+      }),
+      agentsDocument: "# Agent\nUse the API key to access resources.\n",
+    });
+
+    expect(summary.tiers.stdioMcpCommands).toContain("MCP local: node");
+    expect(summary.tiers.remoteMcpEndpoints.length).toBeGreaterThan(0);
+    const remote = summary.tiers.remoteMcpEndpoints[0];
+    expect(remote).not.toContain("SECRET_TOKEN");
+    expect(summary.tiers.agentsDocuments.length).toBe(1);
+    expect(summary.items.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("returns no risk for benign documents", () => {
+    const summary = assessRestoreDocumentsRisk({
+      configDocument: "[models.main]\nname = \"gpt-4o\"\nprovider = \"openai\"\n",
+      mcpDocument: JSON.stringify({ mcpServers: {} }),
+      agentsDocument: "",
+    });
+    expect(summary.items).toEqual([]);
+    expect(summary.tiers.configHooks).toEqual([]);
+  });
+
+  it("reports invalid mcp.json as risky", () => {
+    const summary = assessRestoreDocumentsRisk({
+      configDocument: "",
+      mcpDocument: "{not-valid-json",
+      agentsDocument: "",
+    });
+    expect(summary.items.some((item) => item.includes("not a valid JSON"))).toBe(true);
+  });
+});
+
+describe("E1: advanced config structured checks", () => {
+  const baseState = (overrides: { secondaryDefaultModel?: string; builtinFalse?: boolean }): AppState => {
+    const state = createDefaultAppState();
+    state.mainConfig.models = {
+      main: { name: "main", provider: "p" } as unknown as AppState["mainConfig"]["models"][string],
+    };
+    if (overrides.secondaryDefaultModel !== undefined) {
+      state.mainConfig.extra = {
+        ...(state.mainConfig.extra ?? {}),
+        secondary_model: { default_model: overrides.secondaryDefaultModel },
+      };
+    }
+    if (overrides.builtinFalse) {
+      state.mainConfig.extra = { ...(state.mainConfig.extra ?? {}), builtin_product_skills: false };
+    }
+    return state;
+  };
+
+  it("flags a secondary_model that references a missing model alias", () => {
+    const state = baseState({ secondaryDefaultModel: "missing-model" });
+    const report = buildConfigDoctorReport(state);
+    expect(report.issues.some((issue) => issue.id === "config.secondary-model.missing")).toBe(true);
+    expect(report.issues.find((issue) => issue.id === "config.secondary-model.missing")?.severity).toBe("error");
+  });
+
+  it("does not flag a secondary_model referencing an existing model", () => {
+    const state = baseState({ secondaryDefaultModel: "main" });
+    const report = buildConfigDoctorReport(state);
+    expect(report.issues.some((issue) => issue.id === "config.secondary-model.missing")).toBe(false);
+  });
+
+  it("surfaces explicitly-disabled builtin_product_skills as info", () => {
+    const state = baseState({ builtinFalse: true });
+    const report = buildConfigDoctorReport(state);
+    expect(report.issues.some((issue) => issue.id === "config.builtin-product-skills.disabled")).toBe(true);
+    const issue = report.issues.find((item) => item.id === "config.builtin-product-skills.disabled");
+    expect(issue?.severity).toBe("info");
+  });
+
+  it("does not flag builtin_product_skills when absent (official default true)", () => {
+    const state = baseState({});
+    const report = buildConfigDoctorReport(state);
+    expect(report.issues.some((issue) => issue.id === "config.builtin-product-skills.disabled")).toBe(false);
+  });
+
+  it("extract/setSecondaryModel round-trips the official [secondary_model] shape", () => {
+    const mainConfig = createDefaultAppState().mainConfig;
+    setSecondaryModel(mainConfig, { default_model: "main", force: true });
+    expect(extractSecondaryModel(mainConfig.extra)).toEqual({ default_model: "main", force: true });
+    // 清空回官方默认（无 secondary_model 表）
+    setSecondaryModel(mainConfig, { default_model: "  " });
+    expect(extractSecondaryModel(mainConfig.extra)).toBeUndefined();
+  });
+});
+
+/** 最小可用 AppState（复用 createDefaultPanelSettings + 空 config 骨架）。 */
+function createDefaultAppState(): AppState {
+  return {
+    configPath: "/cfg/config.toml",
+    panelSettingsPath: "/cfg/panel.json",
+    mcpConfigPath: "/cfg/mcp.json",
+    panelSettings: createDefaultPanelSettings(),
+    mainConfig: {
+      default_model: "",
+      default_plan_mode: false,
+      default_permission_mode: "",
+      merge_all_available_skills: false,
+      hooks: [],
+      models: {},
+      providers: {},
+      loop_control: {},
+      background: {},
+      notifications: {},
+      services: {},
+      mcp: {},
+    } as unknown as AppState["mainConfig"],
+    profiles: {},
+    activeProfile: "",
+    mcpConfig: createDefaultMcpConfig(),
+  } as unknown as AppState;
+}

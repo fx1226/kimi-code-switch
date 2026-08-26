@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Activity, Braces, Bug, CircleCheckBig, Copy, Download, ExternalLink, FileInput, FolderOpen, History, LoaderCircle, LogIn, Plus, Power, RefreshCw, RotateCcw, Save, Star, Terminal, Trash2, Upload, X } from "lucide-react";
-import { applyProfile, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, setModelEnabled, setProviderEnabled, toggleFavorite, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
+import { applyProfile, assessFullBackupRisk, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, setModelEnabled, setProviderEnabled, toggleFavorite, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
 import { buildMcpConfigDocument } from "@shared/mcpStore";
 import { buildModelName, ensureUniqueEntryName, normalizeEntryName } from "@shared/nameRules";
 import { getCascadePreview } from "@shared/configRelations";
@@ -30,6 +30,7 @@ import type {
   ShortcutBinding,
   ConfigDoctorReport,
   TerminalApp,
+  TuiConfig,
 } from "@shared/types";
 
 import { AboutPage } from "../aboutPage";
@@ -49,7 +50,13 @@ import { EmptyState, SplitLayout } from "../layoutComponents";
 import { ProviderHealthBanner } from "../providerHealthBanner";
 import { OverviewDashboard } from "../overviewDashboard";
 import { SkillsWorkspace } from "../skillsWorkspace";
-import type { KimiOAuthLoginEvent, ProviderHealthResult } from "../tauri/cli";
+import type { KimiOAuthLoginEvent, ProviderCatalogSummary, ProviderHealthResult } from "../tauri/cli";
+import {
+  assignLegacySnapshotEnvironment,
+  listSnapshots,
+  restoreSnapshot,
+  type SnapshotRecord,
+} from "../tauri/configHistory";
 import type { AppContext } from "./appContext";
 import {
   ProviderForm, ModelForm, ProfileForm, McpServerForm,
@@ -142,12 +149,13 @@ type TabPanelsProps = Pick<
 };
 
 type SettingsSubTab = "general" | "kimi-code" | "shortcuts" | "backup" | "doctor" | "insights" | "history";
-type KimiCodeSubTab = "instance" | "accounts" | "environment";
+type KimiCodeSubTab = "instance" | "accounts" | "environment" | "plugins";
 
 type CreateEnvironmentDraft = {
   id: string;
   name: string;
   description: string;
+  workingDirectory: string;
   sourceEnvironmentId: string;
 };
 
@@ -159,6 +167,40 @@ type KimiOAuthLoginState = {
   message: string;
   messageKey: string;
 };
+
+type ProviderCatalogDialogState = {
+  open: boolean;
+  loading: boolean;
+  items: ProviderCatalogSummary[];
+  filter: string;
+  catalogUrl: string;
+  selectedId: string;
+  apiKey: string;
+  baseUrl: string;
+  defaultModel: string;
+  registryUrl: string;
+  registryApiKey: string;
+  registryTrusted: boolean;
+  error: string;
+};
+
+function createProviderCatalogDialogState(): ProviderCatalogDialogState {
+  return {
+    open: false,
+    loading: false,
+    items: [],
+    filter: "",
+    catalogUrl: "",
+    selectedId: "",
+    apiKey: "",
+    baseUrl: "",
+    defaultModel: "",
+    registryUrl: "",
+    registryApiKey: "",
+    registryTrusted: false,
+    error: "",
+  };
+}
 
 function isOAuthAccountRequiredMessage(message: string | undefined): boolean {
   return Boolean(message?.includes("402 Payment Required") || message?.includes("Payment Required"));
@@ -350,7 +392,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         return targetDetection?.installed ? t(locale, "configTargetInstallSourceUnknown") : t(locale, "overviewCliNotFound");
     }
   };
-  const [environmentDrafts, setEnvironmentDrafts] = useState<Record<string, Pick<KimiCodeEnvironment, "name" | "homePath" | "description">>>({});
+  const [environmentDrafts, setEnvironmentDrafts] = useState<Record<string, Pick<KimiCodeEnvironment, "name" | "homePath" | "description" | "workingDirectory">>>({});
   const [createEnvironmentDraft, setCreateEnvironmentDraft] = useState<CreateEnvironmentDraft | null>(null);
   const [selectedKimiCodeEnvironmentId, setSelectedKimiCodeEnvironmentId] = useState<string | null>(null);
   const kimiCodeEnvironments = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments);
@@ -385,6 +427,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       id: buildKimiCodeEnvironmentId(kimiCodeEnvironments),
       name: formatMessage(t(locale, "kimiCodeEnvironmentDefaultName"), { index: suffix }),
       description: "",
+      workingDirectory: "",
       sourceEnvironmentId: "",
     };
   };
@@ -407,63 +450,45 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       const sourceEnvironment = draft.sourceEnvironmentId
         ? kimiCodeEnvironments.find((environment) => environment.id === draft.sourceEnvironmentId)
         : undefined;
+      const { assertKimiCodeHomeEmpty, copyKimiCodeConfiguration } = await import("../tauri/fileAccess");
       if (sourceEnvironment) {
-        const { copyDir } = await import("../tauri/fileAccess");
-        await copyDir(sourceEnvironment.homePath, homePath);
+        await copyKimiCodeConfiguration(sourceEnvironment.homePath, homePath);
+      } else {
+        await assertKimiCodeHomeEmpty(homePath);
       }
       const sourceSnapshot = sourceEnvironment?.id === activeKimiCodeEnvironment.id
         ? {
-            mainConfig: state.mainConfig,
             profiles: state.profiles,
             activeProfile: state.activeProfile,
-            mcpServers: state.mcpConfig.mcpServers,
           }
         : sourceEnvironment;
-      // Provider/Model 以 SQLite 为唯一真源：复制环境时必须显式复制 DB 行，
-      // 否则新环境的 env_config 为空（copyDir 只搬运文件投影，不含 DB）。
-      if (sourceEnvironment) {
-        const { getEnvConfig, saveEnvConfig } = await import("../tauri/envConfigStore");
-        let providers = sourceSnapshot?.mainConfig?.providers;
-        let models = sourceSnapshot?.mainConfig?.models;
-        // 来源非激活环境：内存快照可能为空，回退读取来源环境的 DB 行。
-        if (!providers || Object.keys(providers).length === 0) {
-          const sourceDb = await getEnvConfig(sourceEnvironment.id);
-          if (sourceDb) {
-            providers = sourceDb.providers;
-            models = sourceDb.models;
-          }
-        }
-        await saveEnvConfig(id, {
-          providers: providers ? structuredClone(providers) : {},
-          models: models ? structuredClone(models) : {},
-        });
-      }
       const nextEnvironment: KimiCodeEnvironment = {
         id,
         name: draft.name.trim(),
         homePath,
+        kind: "managed",
         description: draft.description.trim(),
+        workingDirectory: draft.workingDirectory.trim() || sourceEnvironment?.workingDirectory || "",
         createdAt: timestamp,
         updatedAt: timestamp,
         sourceEnvironmentId: sourceEnvironment?.id,
-        mainConfig: sourceSnapshot?.mainConfig ? structuredClone(sourceSnapshot.mainConfig) : undefined,
         profiles: sourceSnapshot?.profiles ? structuredClone(sourceSnapshot.profiles) : {},
         activeProfile: sourceSnapshot?.activeProfile ?? "",
-        mcpServers: sourceSnapshot?.mcpServers ? structuredClone(sourceSnapshot.mcpServers) : {},
       };
       await saveKimiCodeEnvironments([...kimiCodeEnvironments, nextEnvironment], nextEnvironment.id);
       setCreateEnvironmentDraft(null);
       setNotice(t(locale, "kimiCodeEnvironmentSaved"));
     })().catch((error) => setError(error instanceof Error ? error.message : String(error)));
   };
-  const environmentDraftFor = (environment: KimiCodeEnvironment): Pick<KimiCodeEnvironment, "name" | "homePath" | "description"> => (
+  const environmentDraftFor = (environment: KimiCodeEnvironment): Pick<KimiCodeEnvironment, "name" | "homePath" | "description" | "workingDirectory"> => (
     environmentDrafts[environment.id] ?? {
       name: environment.name,
       homePath: environment.homePath,
       description: environment.description ?? "",
+      workingDirectory: environment.workingDirectory ?? "",
     }
   );
-  const updateEnvironmentDraft = (id: string, patch: Partial<Pick<KimiCodeEnvironment, "name" | "homePath" | "description">>): void => {
+  const updateEnvironmentDraft = (id: string, patch: Partial<Pick<KimiCodeEnvironment, "name" | "homePath" | "description" | "workingDirectory">>): void => {
     setEnvironmentDrafts((current) => {
       const environment = kimiCodeEnvironments.find((item) => item.id === id);
       if (!environment) {
@@ -475,6 +500,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           name: environment.name,
           homePath: environment.homePath,
           description: environment.description ?? "",
+          workingDirectory: environment.workingDirectory ?? "",
           ...current[id],
           ...patch,
         },
@@ -496,6 +522,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           ...environment,
           name: draft.name.trim(),
           description: draft.description?.trim() ?? "",
+          workingDirectory: draft.workingDirectory?.trim() ?? "",
           updatedAt: new Date().toISOString(),
         }
         : environment);
@@ -542,8 +569,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         ? (next[0]?.id ?? "default")
         : activeKimiCodeEnvironment.id;
       await saveKimiCodeEnvironments(next, nextActiveId);
-      const { removeDir } = await import("../tauri/fileAccess");
-      await removeDir(environment.homePath);
+      const expectedManagedPath = getKimiCodeEnvironmentHomePath(environment.id);
+      if (environment.kind === "managed" && environment.homePath === expectedManagedPath) {
+        const { removeDir } = await import("../tauri/fileAccess");
+        await removeDir(environment.homePath);
+      }
       setNotice(t(locale, "kimiCodeEnvironmentDeleted"));
     })().catch((error) => setError(error instanceof Error ? error.message : String(error)));
   };
@@ -581,7 +611,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
 
   const [activeSettingsSubTab, setActiveSettingsSubTab] = useState<SettingsSubTab>("kimi-code");
   const [kimiCodeSubTab, setKimiCodeSubTab] = useState<KimiCodeSubTab>("instance");
-  const [fullBackupImportDialog, setFullBackupImportDialog] = useState<{ open: boolean; data: FullBackupBundle | null; envCount: number; hasRedactedSecrets: boolean }>({ open: false, data: null, envCount: 0, hasRedactedSecrets: false });
+  const [fullBackupImportDialog, setFullBackupImportDialog] = useState<{ open: boolean; data: FullBackupBundle | null; envCount: number; hasRedactedSecrets: boolean; riskItems: string[] }>({ open: false, data: null, envCount: 0, hasRedactedSecrets: false, riskItems: [] });
+  const [providerCatalogDialog, setProviderCatalogDialog] = useState<ProviderCatalogDialogState>(createProviderCatalogDialogState);
   const [isImportingFullBackup, setIsImportingFullBackup] = useState(false);
   const [isMcpJsonViewerOpen, setIsMcpJsonViewerOpen] = useState(false);
   const [providerHealthResults, setProviderHealthResults] = useState<ProviderHealthResult[] | null>(null);
@@ -716,6 +747,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         return t(locale, "providerHealthMissingBaseUrl");
       case "missing-api-key":
         return t(locale, "providerHealthMissingApiKey");
+      case "oauth-unverified":
+        return t(locale, "providerHealthOauthUnverified");
       case "rate-limited":
         return t(locale, "providerHealthRateLimited");
       case "http-error":
@@ -724,6 +757,90 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         return t(locale, "providerHealthNetworkError");
     }
   };
+
+  const refreshProviderCatalog = (filter = providerCatalogDialog.filter, catalogUrl = providerCatalogDialog.catalogUrl): void => {
+    const api = getApi();
+    if (!api || typeof api.listProviderCatalog !== "function") {
+      setProviderCatalogDialog((current) => ({ ...current, error: t(locale, "backupRuntimeOutdated") }));
+      return;
+    }
+    setProviderCatalogDialog((current) => ({ ...current, open: true, loading: true, error: "" }));
+    void api.listProviderCatalog(filter, catalogUrl || undefined)
+      .then((items) => setProviderCatalogDialog((current) => ({
+        ...current,
+        items,
+        selectedId: items.some((item) => item.id === current.selectedId)
+          ? current.selectedId
+          : items[0]?.id ?? "",
+        loading: false,
+      })))
+      .catch((error) => setProviderCatalogDialog((current) => ({
+        ...current,
+        loading: false,
+        error: error instanceof Error ? error.message : String(error),
+      })));
+  };
+
+  const openProviderCatalog = (): void => {
+    setProviderCatalogDialog({ ...createProviderCatalogDialogState(), open: true, loading: true });
+    refreshProviderCatalog("", "");
+  };
+
+  const importSelectedCatalogProvider = (): void => {
+    const api = getApi();
+    if (!api || typeof api.importProviderCatalog !== "function" || !providerCatalogDialog.selectedId) return;
+    runAfterUnsavedHandled(async () => {
+      setProviderCatalogDialog((current) => ({ ...current, loading: true, error: "" }));
+      try {
+        await api.importProviderCatalog({
+          providerId: providerCatalogDialog.selectedId,
+          apiKey: providerCatalogDialog.apiKey,
+          defaultModel: providerCatalogDialog.defaultModel || undefined,
+          baseUrl: providerCatalogDialog.baseUrl || undefined,
+          url: providerCatalogDialog.catalogUrl || undefined,
+        });
+        setProviderCatalogDialog(createProviderCatalogDialogState());
+        setNotice(t(locale, "providerCatalogImportSuccess"));
+        await loadState();
+      } catch (error) {
+        setProviderCatalogDialog((current) => ({
+          ...current,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+
+  const importCustomProviderRegistry = (): void => {
+    const api = getApi();
+    if (!api || typeof api.importProviderRegistry !== "function") return;
+    runAfterUnsavedHandled(async () => {
+      setProviderCatalogDialog((current) => ({ ...current, loading: true, error: "" }));
+      try {
+        await api.importProviderRegistry({
+          url: providerCatalogDialog.registryUrl,
+          apiKey: providerCatalogDialog.registryApiKey,
+        });
+        setProviderCatalogDialog(createProviderCatalogDialogState());
+        setNotice(t(locale, "providerRegistryImportSuccess"));
+        await loadState();
+      } catch (error) {
+        setProviderCatalogDialog((current) => ({
+          ...current,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+  };
+
+  const updateTuiConfig = (patch: Partial<TuiConfig>): void => {
+    updateState((draft) => {
+      draft.tuiConfig = { ...(draft.tuiConfig ?? {}), ...patch };
+    }, { persist: false });
+  };
+
   const settingsSubTabs: Array<{ id: SettingsSubTab; label: string; description: string }> = [
     {
       id: "kimi-code",
@@ -791,16 +908,26 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         {activeTab === "providers" ? (
           <SplitLayout
             headerActions={
-              <button
-                className={isProviderHealthChecking ? "action-button compact icon-only is-loading" : "action-button compact icon-only"}
-                type="button"
-                disabled={isProviderHealthChecking || providerEntries.length === 0}
-                aria-label={t(locale, "providerHealthCheck")}
-                title={t(locale, "providerHealthCheck")}
-                onClick={runProvidersHealthCheck}
-              >
-                {isProviderHealthChecking ? <LoaderCircle size={15} className="button-spinner" /> : <Activity size={15} />}
-              </button>
+              <>
+                <button
+                  className="action-button compact"
+                  type="button"
+                  onClick={openProviderCatalog}
+                >
+                  <Download size={15} />
+                  <span>{t(locale, "providerCatalogOpen")}</span>
+                </button>
+                <button
+                  className={isProviderHealthChecking ? "action-button compact icon-only is-loading" : "action-button compact icon-only"}
+                  type="button"
+                  disabled={isProviderHealthChecking || providerEntries.length === 0}
+                  aria-label={t(locale, "providerHealthCheck")}
+                  title={t(locale, "providerHealthCheck")}
+                  onClick={runProvidersHealthCheck}
+                >
+                  {isProviderHealthChecking ? <LoaderCircle size={15} className="button-spinner" /> : <Activity size={15} />}
+                </button>
+              </>
             }
             listBanner={
               providerHealthBannerOpen && providerHealthResults ? (
@@ -1131,7 +1258,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   default_model: firstModel,
                   default_plan_mode: false,
                   default_permission_mode: "manual",
-                  merge_all_available_skills: false,
+                  merge_all_available_skills: draft.mainConfig.merge_all_available_skills,
                   thinking_enabled: true,
                 });
                 setSelectedProfile(name);
@@ -1429,6 +1556,52 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             }}
           >
             <div className="mcp-workspace">
+              {state.pluginInventory && Object.keys(state.pluginInventory.mcpServers).length > 0 ? (
+                <section className="glass-panel form-panel">
+                  <div className="section-title">{t(locale, "mcpPluginScopeTitle")}</div>
+                  <p className="settings-note">{t(locale, "mcpPluginScopeDescription")}</p>
+                  <div className="kimi-environment-path-grid">
+                    {Object.entries(state.pluginInventory.mcpServers).map(([name, server]) => (
+                      <div key={name}>
+                        <span>{server.enabled === false ? t(locale, "overviewOff") : t(locale, "overviewOn")}</span>
+                        <code title={name}>{name} · {server.transport}</code>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              {state.projectMcpConfig ? (
+                <section className="glass-panel form-panel">
+                  <div className="section-title">{t(locale, "mcpProjectScopeTitle")}</div>
+                  <p className="settings-note">
+                    {t(locale, "mcpProjectScopeDescription")} <code>{state.projectMcpConfig.configPath}</code>
+                  </p>
+                  {!state.projectMcpConfig.trusted ? (
+                    <p className="settings-note error-text">{t(locale, "mcpProjectScopeUntrusted")}</p>
+                  ) : null}
+                  {state.projectMcpConfig.error ? (
+                    <p className="settings-note error-text">{state.projectMcpConfig.error}</p>
+                  ) : null}
+                  {Object.keys(state.projectMcpConfig.declaredMcpServers).length > 0 ? (
+                    <div className="kimi-environment-path-grid">
+                      {Object.entries(state.projectMcpConfig.declaredMcpServers).map(([name, server]) => (
+                        <div key={name}>
+                          <span>
+                            {!state.projectMcpConfig?.trusted
+                              ? t(locale, "mcpProjectDeclaredInactive")
+                              : state.mcpConfig.mcpServers[name]
+                              ? t(locale, "mcpProjectOverridesUser")
+                              : t(locale, "mcpProjectOnly")}
+                          </span>
+                          <code title={name}>{name} · {server.transport}</code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="settings-note">{t(locale, "mcpProjectScopeEmpty")}</p>
+                  )}
+                </section>
+              ) : null}
               {selectedMcpServerData ? (
                 <McpServerForm
                   locale={locale}
@@ -1452,7 +1625,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       if (action === "test") {
                         setMcpTestingName(serverName);
                       }
-                      await persistState(state);
+                      const persisted = await persistState(state);
+                      if (!persisted) return;
                       await runAction(serverName);
                       setError("");
                       setNotice(getMcpActionNotice(locale, action));
@@ -1614,7 +1788,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             {activeSettingsSubTab === "kimi-code" ? (
               <div className="settings-tab-panel">
                 <div className="settings-inner-tabs-nav">
-                  {([["instance", "settingsGroupConfigTarget"], ["accounts", "officialAccountsTitle"], ["environment", "kimiCodeEnvironmentTitle"]] as const).map(([tab, key]) => (
+                  {([["instance", "settingsGroupConfigTarget"], ["accounts", "officialAccountsTitle"], ["environment", "kimiCodeEnvironmentTitle"], ["plugins", "pluginsTitle"]] as const).map(([tab, key]) => (
                     <button
                       key={tab}
                       type="button"
@@ -1630,7 +1804,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                     ? "kimiCodeSubTabInstanceDesc"
                     : kimiCodeSubTab === "accounts"
                       ? "kimiCodeSubTabAccountsDesc"
-                      : "kimiCodeSubTabEnvironmentDesc"))}
+                      : kimiCodeSubTab === "environment"
+                        ? "kimiCodeSubTabEnvironmentDesc"
+                        : "kimiCodeSubTabPluginsDesc"))}
                 </p>
                 {kimiCodeSubTab === "instance" ? (
                 <SettingsGroup>
@@ -1674,6 +1850,119 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       </p>
                     ) : null}
                   </div>
+                  <div className="section-title">{t(locale, "tuiEffectiveConfigTitle")}</div>
+                  <p className="settings-note">{t(locale, "tuiEffectiveConfigDescription")}</p>
+                  {state.tuiDiagnostics && (state.tuiDiagnostics.errors.length > 0 || state.tuiDiagnostics.warnings.length > 0) ? (
+                    <div className="import-preview-warning" role="alert">
+                      {[...state.tuiDiagnostics.errors, ...state.tuiDiagnostics.warnings].map((message) => (
+                        <div key={message}>{message}</div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="kimi-environment-path-grid">
+                    <div><span>{t(locale, "tuiTheme")}</span><code>{state.tuiConfig?.theme ?? "auto"}</code></div>
+                    <div><span>{t(locale, "tuiEditor")}</span><code>{state.tuiConfig?.editorCommand || "$VISUAL / $EDITOR"}</code></div>
+                    <div><span>{t(locale, "tuiRenderLatex")}</span><code>{String(state.tuiConfig?.renderLatex ?? true)}</code></div>
+                    <div><span>{t(locale, "tuiCacheExpiryHint")}</span><code>{String(state.tuiConfig?.cacheExpiryHint ?? true)}</code></div>
+                    <div><span>{t(locale, "tuiNotifications")}</span><code>{String(state.tuiConfig?.notificationsEnabled ?? true)} · {state.tuiConfig?.notificationCondition ?? "unfocused"}</code></div>
+                    <div><span>{t(locale, "tuiUpgradeAutoInstall")}</span><code>{String(state.tuiConfig?.upgradeAutoInstall ?? true)}</code></div>
+                    <div><span>{t(locale, "tuiStatusLine")}</span><code>{state.tuiConfig?.statusLine?.command || state.tuiConfig?.statusLine?.items?.join(", ") || "-"}</code></div>
+                  </div>
+                  <div className="section-title">{t(locale, "tuiAdvancedEditTitle")}</div>
+                  <div className="settings-inline-fields">
+                    <label className="toggle-field">
+                      <input type="checkbox" checked={state.tuiConfig?.renderLatex ?? true} onChange={(event) => updateTuiConfig({ renderLatex: event.target.checked })} />
+                      <span>{t(locale, "tuiRenderLatex")}</span>
+                    </label>
+                    <label className="toggle-field">
+                      <input type="checkbox" checked={state.tuiConfig?.cacheExpiryHint ?? true} onChange={(event) => updateTuiConfig({ cacheExpiryHint: event.target.checked })} />
+                      <span>{t(locale, "tuiCacheExpiryHint")}</span>
+                    </label>
+                    <label className="toggle-field">
+                      <input type="checkbox" checked={state.tuiConfig?.notificationsEnabled ?? true} onChange={(event) => updateTuiConfig({ notificationsEnabled: event.target.checked })} />
+                      <span>{t(locale, "tuiNotifications")}</span>
+                    </label>
+                    <label className="toggle-field">
+                      <input type="checkbox" checked={state.tuiConfig?.upgradeAutoInstall ?? true} onChange={(event) => updateTuiConfig({ upgradeAutoInstall: event.target.checked })} />
+                      <span>{t(locale, "tuiUpgradeAutoInstall")}</span>
+                    </label>
+                    <label className="toggle-field">
+                      <input type="checkbox" checked={state.tuiConfig?.disable_paste_burst ?? false} onChange={(event) => updateTuiConfig({ disable_paste_burst: event.target.checked })} />
+                      <span>{t(locale, "tuiDisablePasteBurst")}</span>
+                    </label>
+                  </div>
+                  <SelectField
+                    label={t(locale, "tuiNotificationCondition")}
+                    value={state.tuiConfig?.notificationCondition ?? "unfocused"}
+                    onChange={(value) => updateTuiConfig({ notificationCondition: value as "unfocused" | "always" })}
+                    options={[
+                      { value: "unfocused", label: t(locale, "tuiNotificationUnfocused") },
+                      { value: "always", label: t(locale, "tuiNotificationAlways") },
+                    ]}
+                  />
+                  <div className="settings-inline-fields">
+                    <Field
+                      label={t(locale, "tuiStatusItems")}
+                      value={state.tuiConfig?.statusLine?.items?.join(", ") ?? ""}
+                      onChange={(value) => updateTuiConfig({
+                        statusLine: {
+                          ...(state.tuiConfig?.statusLine ?? {}),
+                          items: value.split(",").map((item) => item.trim()).filter(Boolean),
+                        },
+                      })}
+                    />
+                    <Field
+                      label={t(locale, "tuiStatusCommand")}
+                      value={state.tuiConfig?.statusLine?.command ?? ""}
+                      onChange={(value) => updateTuiConfig({
+                        statusLine: { ...(state.tuiConfig?.statusLine ?? {}), command: value },
+                      })}
+                    />
+                  </div>
+                  {state.projectLocalConfig ? (
+                    <div className="glass-panel form-panel">
+                      <div className="section-title">{t(locale, "projectLocalConfigTitle")}</div>
+                      <p className="settings-note">{t(locale, "projectLocalConfigDescription")} <code>{state.projectLocalConfig.path}</code></p>
+                      {state.projectLocalConfig.error ? (
+                        <div className="import-preview-warning" role="alert">{state.projectLocalConfig.error}</div>
+                      ) : (
+                        <>
+                          <label className="field">
+                            <span>{t(locale, "projectAdditionalDirs")}</span>
+                            <textarea
+                              rows={4}
+                              value={state.projectLocalConfig.additionalDirs.join("\n")}
+                              placeholder={t(locale, "projectAdditionalDirsHint")}
+                              onChange={(event) => updateState((draft) => {
+                                if (!draft.projectLocalConfig) return;
+                                draft.projectLocalConfig.additionalDirs = event.target.value
+                                  .split(/\r?\n/)
+                                  .map((entry) => entry.trim())
+                                  .filter(Boolean);
+                              }, { persist: false })}
+                            />
+                          </label>
+                          <button
+                            className="action-button compact"
+                            type="button"
+                            onClick={() => {
+                              const api = getApi();
+                              if (!api || typeof api.saveProjectAdditionalDirs !== "function") return;
+                              void api.saveProjectAdditionalDirs(state.projectLocalConfig!.additionalDirs)
+                                .then(async () => {
+                                  setNotice(t(locale, "projectAdditionalDirsSaved"));
+                                  await loadState();
+                                })
+                                .catch((error) => setError(error instanceof Error ? error.message : String(error)));
+                            }}
+                          >
+                            <Save size={14} />
+                            <span>{t(locale, "projectAdditionalDirsSave")}</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                 </SettingsGroup>
                 ) : null}
                 {kimiCodeSubTab === "accounts" ? (
@@ -1809,7 +2098,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                             const isActive = environment.id === activeKimiCodeEnvironment.id;
                             const isSelected = environment.id === selectedKimiCodeEnvironment.id;
                             const isDirty = draft.name !== environment.name
-                              || (draft.description ?? "") !== (environment.description ?? "");
+                              || (draft.description ?? "") !== (environment.description ?? "")
+                              || (draft.workingDirectory ?? "") !== (environment.workingDirectory ?? "");
                             return (
                               <tr
                                 className={`${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`.trim()}
@@ -1891,7 +2181,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                           const draft = environmentDraftFor(selectedKimiCodeEnvironment);
                           const isActiveSelected = selectedKimiCodeEnvironment.id === activeKimiCodeEnvironment.id;
                           const isDirty = draft.name !== selectedKimiCodeEnvironment.name
-                            || (draft.description ?? "") !== (selectedKimiCodeEnvironment.description ?? "");
+                            || (draft.description ?? "") !== (selectedKimiCodeEnvironment.description ?? "")
+                            || (draft.workingDirectory ?? "") !== (selectedKimiCodeEnvironment.workingDirectory ?? "");
                           return isDirty && !isActiveSelected ? (
                             <button className="action-button compact" type="button" onClick={() => saveKimiCodeEnvironment(selectedKimiCodeEnvironment.id)}>
                               <Save size={13} />
@@ -1925,6 +2216,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                               readOnly={isActiveSelected}
                               onChange={(value) => updateEnvironmentDraft(selectedKimiCodeEnvironment.id, { description: value })}
                             />
+                            <Field
+                              label={t(locale, "kimiCodeEnvironmentWorkingDirectory")}
+                              value={draft.workingDirectory ?? ""}
+                              onChange={(value) => updateEnvironmentDraft(selectedKimiCodeEnvironment.id, { workingDirectory: value })}
+                            />
                             <div className="kimi-environment-path-grid">
                               <div>
                                 <span>{t(locale, "configPath")}</span>
@@ -1945,6 +2241,53 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                     </div>
                   </div>
                 </SettingsGroup>
+                ) : null}
+                {kimiCodeSubTab === "plugins" ? (
+                  <SettingsGroup title={t(locale, "pluginsInventoryTitle")} className="settings-group-wide">
+                    <p className="settings-group-description">
+                      {t(locale, "pluginsInventoryDescription")} <code>{state.pluginInventory?.installedPath ?? "-"}</code>
+                    </p>
+                    {state.pluginInventory?.diagnostics.length ? (
+                      <div className="import-preview-warning" role="alert">
+                        {state.pluginInventory.diagnostics.map((diagnostic, index) => (
+                          <div key={`${index}-${diagnostic.message}`}>{diagnostic.severity}: {diagnostic.message}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {state.pluginInventory?.plugins.length ? (
+                      <div className="backup-records-list">
+                        {state.pluginInventory.plugins.map((plugin) => (
+                          <article className="backup-record-card" key={plugin.id}>
+                            <div className="backup-record-meta">
+                              <div>
+                                <strong>{plugin.displayName || plugin.id}</strong>
+                                <small>{plugin.version ?? "-"} · {plugin.source}</small>
+                              </div>
+                              <div>
+                                <span>{plugin.enabled ? t(locale, "overviewOn") : t(locale, "overviewOff")}</span>
+                                <small>{plugin.state}</small>
+                              </div>
+                              <div>
+                                <span>{formatMessage(t(locale, "pluginsCapabilitySummary"), {
+                                  skills: plugin.skillRoots.length,
+                                  mcp: Object.keys(plugin.mcpServers).length,
+                                  hooks: plugin.hookCount,
+                                })}</span>
+                              </div>
+                            </div>
+                            <code title={plugin.root}>{plugin.root}</code>
+                            {plugin.diagnostics.length ? (
+                              <div className="settings-note">
+                                {plugin.diagnostics.map((diagnostic) => `${diagnostic.severity}: ${diagnostic.message}`).join(" · ")}
+                              </div>
+                            ) : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="command-palette-empty">{t(locale, "pluginsInventoryEmpty")}</div>
+                    )}
+                  </SettingsGroup>
                 ) : null}
               </div>
             ) : null}
@@ -2255,11 +2598,24 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                           const validation = validateFullBackup(parsed);
                           if (!validation.valid) { setError(validation.errors.join(" ")); return; }
                           const data = parsed as FullBackupBundle;
+                          const risk = assessFullBackupRisk(data);
                           setFullBackupImportDialog({
                             open: true,
                             data,
                             envCount: data.environments.length,
                             hasRedactedSecrets: fullBackupContainsRedactedSecrets(data),
+                            riskItems: [
+                              ...risk.stdioMcpCommands.map((item) => `MCP stdio · ${item}`),
+                              ...risk.remoteMcpEndpoints.map((item) => `MCP remote · ${item}`),
+                              ...risk.providerEndpoints.map((item) => `Provider · ${item}`),
+                              ...risk.configHooks.map((item) => `Hook · ${item}`),
+                              ...risk.agentsDocuments.map((item) => `AGENTS · ${item}`),
+                              ...risk.executableSkillFiles.map((item) => `Executable Skill · ${item}`),
+                              ...risk.skillDocumentsAndScripts.map((item) => `Skill content/script · ${item}`),
+                              ...risk.pluginDirectories.map((item) => `Plugins · ${item}`),
+                              ...risk.pluginExecutableFiles.map((item) => `Plugin executable · ${item}`),
+                              ...risk.pluginCapabilities.map((item) => `Plugin capability · ${item}`),
+                            ],
                           });
                         } catch { setError(t(locale, "importInvalidFile")); }
                       }}
@@ -2379,6 +2735,61 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       })
                     }
                   />
+                  <p className="settings-note">{t(locale, "backupRecoveryKeyDescription")}</p>
+                  <div className="button-row settings-action-row">
+                    <button
+                      className="action-button"
+                      type="button"
+                      onClick={() => {
+                        const api = getApi();
+                        if (!api || typeof api.exportBackupEncryptionKey !== "function") {
+                          setError(t(locale, "backupRuntimeOutdated"));
+                          return;
+                        }
+                        void api.exportBackupEncryptionKey()
+                          .then((result) => {
+                            if (!result.canceled) {
+                              setError("");
+                              setNotice(t(locale, "backupRecoveryKeyExported"));
+                            }
+                          })
+                          .catch((error) => setError(error instanceof Error ? error.message : String(error)));
+                      }}
+                    >
+                      <Download size={16} />
+                      <span>{t(locale, "backupRecoveryKeyExport")}</span>
+                    </button>
+                    <button
+                      className="action-button"
+                      type="button"
+                      onClick={() => {
+                        const api = getApi();
+                        if (!api || typeof api.importBackupEncryptionKey !== "function") {
+                          setError(t(locale, "backupRuntimeOutdated"));
+                          return;
+                        }
+                        void (async () => {
+                          const confirmed = await requestConfirm({
+                            title: t(locale, "backupRecoveryKeyImportTitle"),
+                            description: t(locale, "backupRecoveryKeyImportDescription"),
+                            confirmLabel: t(locale, "backupRecoveryKeyImport"),
+                            cancelLabel: t(locale, "cancel"),
+                            tone: "danger",
+                            kind: "unsaved",
+                          });
+                          if (!confirmed) return;
+                          const result = await api.importBackupEncryptionKey();
+                          if (!result.canceled) {
+                            setError("");
+                            setNotice(t(locale, "backupRecoveryKeyImported"));
+                          }
+                        })().catch((error) => setError(error instanceof Error ? error.message : String(error)));
+                      }}
+                    >
+                      <Upload size={16} />
+                      <span>{t(locale, "backupRecoveryKeyImport")}</span>
+                    </button>
+                  </div>
                 </>
               )}
               <div className="button-row settings-action-row">
@@ -2419,7 +2830,16 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             ) : null}
             {activeSettingsSubTab === "history" ? (
               <SettingsGroup title={t(locale, "historyTitle")} className="settings-group-wide">
-                <HistoryPanel locale={locale} state={state} updateState={updateState} />
+                <HistoryPanel
+                  locale={locale}
+                  state={state}
+                  updateState={updateState}
+                  requestConfirm={requestConfirm}
+                  loadState={loadState}
+                  setNotice={setNotice}
+                  setError={setError}
+                  runAfterUnsavedHandled={runAfterUnsavedHandled}
+                />
               </SettingsGroup>
             ) : null}
             {activeSettingsSubTab === "insights" ? (
@@ -2429,11 +2849,23 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           </SplitLayout>
         ) : null}
         {activeTab === "about" ? <AboutPage locale={locale} /> : null}
+        {providerCatalogDialog.open ? (
+          <ProviderCatalogDialog
+            locale={locale}
+            state={providerCatalogDialog}
+            onChange={(patch) => setProviderCatalogDialog((current) => ({ ...current, ...patch }))}
+            onRefresh={() => refreshProviderCatalog()}
+            onImport={importSelectedCatalogProvider}
+            onImportRegistry={importCustomProviderRegistry}
+            onClose={() => setProviderCatalogDialog(createProviderCatalogDialogState())}
+          />
+        ) : null}
         {fullBackupImportDialog.open && fullBackupImportDialog.data ? (
           <FullBackupImportDialog
             locale={locale}
             envCount={fullBackupImportDialog.envCount}
             hasRedactedSecrets={fullBackupImportDialog.hasRedactedSecrets}
+            riskItems={fullBackupImportDialog.riskItems}
             isImporting={isImportingFullBackup}
             onConfirm={() => {
               void (async () => {
@@ -2445,7 +2877,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 setIsImportingFullBackup(true);
                 try {
                   await api.importFullBackup(fullBackupImportDialog.data!);
-                  setFullBackupImportDialog({ open: false, data: null, envCount: 0, hasRedactedSecrets: false });
+                  setFullBackupImportDialog({ open: false, data: null, envCount: 0, hasRedactedSecrets: false, riskItems: [] });
                   setError("");
                   setNotice(t(locale, "importSuccessWithPanelSettings"));
                   await loadState();
@@ -2459,7 +2891,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             }}
             onCancel={() => {
               if (isImportingFullBackup) return;
-              setFullBackupImportDialog({ open: false, data: null, envCount: 0, hasRedactedSecrets: false });
+              setFullBackupImportDialog({ open: false, data: null, envCount: 0, hasRedactedSecrets: false, riskItems: [] });
             }}
           />
         ) : null}
@@ -2530,15 +2962,105 @@ function DoctorReportPanel(props: {
 }
 
 
-function FullBackupImportDialog(props: {
+function ProviderCatalogDialog(props: {
+  locale: Locale;
+  state: ProviderCatalogDialogState;
+  onChange: (patch: Partial<ProviderCatalogDialogState>) => void;
+  onRefresh: () => void;
+  onImport: () => void;
+  onImportRegistry: () => void;
+  onClose: () => void;
+}): JSX.Element {
+  const { locale, state, onChange, onRefresh, onImport, onImportRegistry, onClose } = props;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogEscape(onClose);
+  useFocusTrap(dialogRef);
+  return createPortal(
+    <div className="dialog-overlay" role="presentation">
+      <div className="dialog import-preview-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-catalog-title">
+        <div className="dialog-header">
+          <h3 id="provider-catalog-title">{t(locale, "providerCatalogTitle")}</h3>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={t(locale, "close")}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="dialog-body import-preview-body">
+          <p>{t(locale, "providerCatalogDescription")}</p>
+          <div className="settings-inline-fields">
+            <Field label={t(locale, "providerCatalogFilter")} value={state.filter} onChange={(filter) => onChange({ filter })} />
+            <Field label={t(locale, "providerCatalogUrl")} value={state.catalogUrl} onChange={(catalogUrl) => onChange({ catalogUrl })} />
+          </div>
+          <button className="action-button compact" type="button" disabled={state.loading} onClick={onRefresh}>
+            {state.loading ? <LoaderCircle size={15} className="button-spinner" /> : <RefreshCw size={15} />}
+            <span>{t(locale, "providerCatalogRefresh")}</span>
+          </button>
+          {state.error ? <div className="import-preview-warning" role="alert">{state.error}</div> : null}
+          <div className="backup-records-list">
+            {state.items.map((item) => (
+              <button
+                type="button"
+                className={state.selectedId === item.id ? "history-entry-info active" : "history-entry-info"}
+                key={item.id}
+                onClick={() => onChange({ selectedId: item.id })}
+              >
+                <strong>{item.name}</strong>
+                <code>{item.id}</code>
+                <span>{item.type || "?"} · {formatMessage(t(locale, "providerCatalogModelCount"), { count: item.modelCount })}</span>
+              </button>
+            ))}
+          </div>
+          <div className="section-title">{t(locale, "providerCatalogImportTitle")}</div>
+          <div className="settings-inline-fields">
+            <Field label={t(locale, "providerCatalogSelectedId")} value={state.selectedId} onChange={(selectedId) => onChange({ selectedId })} />
+            <label className="field">
+              <span>{t(locale, "apiKeyLabel")}</span>
+              <input type="password" value={state.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} />
+            </label>
+          </div>
+          <div className="settings-inline-fields">
+            <Field label={t(locale, "formBaseUrl")} value={state.baseUrl} onChange={(baseUrl) => onChange({ baseUrl })} />
+            <Field label={t(locale, "providerCatalogDefaultModel")} value={state.defaultModel} onChange={(defaultModel) => onChange({ defaultModel })} />
+          </div>
+          <button className="action-button primary" type="button" disabled={state.loading || !state.selectedId || !state.apiKey} onClick={onImport}>
+            {t(locale, "providerCatalogImportAction")}
+          </button>
+          <div className="section-title">{t(locale, "providerRegistryImportTitle")}</div>
+          <div className="settings-inline-fields">
+            <Field label={t(locale, "providerRegistryUrl")} value={state.registryUrl} onChange={(registryUrl) => onChange({ registryUrl, registryTrusted: false })} />
+            <label className="field">
+              <span>{t(locale, "apiKeyLabel")}</span>
+              <input type="password" value={state.registryApiKey} onChange={(event) => onChange({ registryApiKey: event.target.value })} />
+            </label>
+          </div>
+          <label className="checkbox-line">
+            <input
+              type="checkbox"
+              checked={state.registryTrusted}
+              onChange={(event) => onChange({ registryTrusted: event.target.checked })}
+            />
+            <span>{t(locale, "providerRegistryTrustWarning")}</span>
+          </label>
+          <button className="action-button" type="button" disabled={state.loading || !state.registryUrl || !state.registryApiKey || !state.registryTrusted} onClick={onImportRegistry}>
+            {t(locale, "providerRegistryImportAction")}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export function FullBackupImportDialog(props: {
   locale: Locale;
   envCount: number;
   hasRedactedSecrets: boolean;
+  riskItems: string[];
   isImporting: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }): JSX.Element {
-  const { locale, envCount, hasRedactedSecrets, isImporting, onConfirm, onCancel } = props;
+  const { locale, envCount, hasRedactedSecrets, riskItems, isImporting, onConfirm, onCancel } = props;
+  const [trustConfirmed, setTrustConfirmed] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogEscape(onCancel);
   useFocusTrap(dialogRef);
@@ -2558,12 +3080,30 @@ function FullBackupImportDialog(props: {
           {hasRedactedSecrets ? (
             <div className="import-preview-warning" role="alert">{t(locale, "importRedactedWarning")}</div>
           ) : null}
+          {riskItems.length > 0 ? (
+            <div className="import-preview-warning" role="alert">
+              <strong>{formatMessage(t(locale, "fullBackupTrustWarning"), { count: riskItems.length })}</strong>
+              <ul>
+                {riskItems.slice(0, 20).map((item) => <li key={item}><code>{item}</code></li>)}
+              </ul>
+            </div>
+          ) : null}
+          {riskItems.length > 0 ? (
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={trustConfirmed}
+                onChange={(event) => setTrustConfirmed(event.target.checked)}
+              />
+              <span>{t(locale, "fullBackupExecutableTrustConfirm")}</span>
+            </label>
+          ) : null}
         </div>
         <div className="dialog-footer">
           <button className="action-button secondary" type="button" onClick={onCancel} disabled={isImporting}>
             {t(locale, "cancel")}
           </button>
-          <button className="action-button primary" type="button" onClick={onConfirm} disabled={isImporting}>
+          <button className="action-button primary" type="button" onClick={onConfirm} disabled={isImporting || (riskItems.length > 0 && !trustConfirmed)}>
             {isImporting ? t(locale, "fullBackupImporting") : t(locale, "importConfirm")}
           </button>
         </div>
@@ -2630,6 +3170,11 @@ function CreateKimiCodeEnvironmentDialog(props: {
             value={draft.description}
             onChange={(value) => onChange({ ...draft, description: value })}
           />
+          <Field
+            label={t(locale, "kimiCodeEnvironmentWorkingDirectory")}
+            value={draft.workingDirectory}
+            onChange={(value) => onChange({ ...draft, workingDirectory: value })}
+          />
         </div>
         <div className="dialog-footer">
           <button className="action-button compact secondary" type="button" onClick={onCancel}>
@@ -2650,10 +3195,89 @@ function HistoryPanel(props: {
   locale: Locale;
   state: AppState;
   updateState: (updater: (draft: AppState) => void, options?: { persist?: boolean; recordHistory?: boolean; historySummary?: string }) => void;
+  requestConfirm: TabPanelsProps["requestConfirm"];
+  loadState: TabPanelsProps["loadState"];
+  setNotice: TabPanelsProps["setNotice"];
+  setError: TabPanelsProps["setError"];
+  runAfterUnsavedHandled: TabPanelsProps["runAfterUnsavedHandled"];
 }): JSX.Element {
   const [, forceUpdate] = useState(0);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+  const [diskSnapshots, setDiskSnapshots] = useState<SnapshotRecord[]>([]);
+  const [legacySnapshots, setLegacySnapshots] = useState<SnapshotRecord[]>([]);
+  const [legacyTargets, setLegacyTargets] = useState<Record<number, string>>({});
+  const [snapshotBusyId, setSnapshotBusyId] = useState<number | null>(null);
   const history = getHistory(props.state);
+  const environments = normalizeKimiCodeEnvironments(props.state.panelSettings.kimi_code_environments);
+  const activeEnvironmentId = props.state.panelSettings.active_kimi_code_environment_id ?? environments[0]?.id ?? "default";
+
+  const refreshDiskSnapshots = async (): Promise<void> => {
+    const [scoped, legacy] = await Promise.all([
+      listSnapshots(activeEnvironmentId, undefined, 50),
+      listSnapshots("legacy-unassigned", undefined, 50),
+    ]);
+    setDiskSnapshots(scoped);
+    setLegacySnapshots(legacy);
+  };
+
+  useEffect(() => {
+    void refreshDiskSnapshots();
+  }, [activeEnvironmentId]);
+
+  const restoreDiskSnapshot = async (snapshot: SnapshotRecord): Promise<void> => {
+    const confirmed = await props.requestConfirm({
+      title: t(props.locale, "historyRestoreSnapshotTitle"),
+      description: formatMessage(t(props.locale, "historyRestoreSnapshotDescription"), {
+        file: snapshot.file_id,
+        time: new Date(snapshot.snapshot_at).toLocaleString(),
+      }),
+      confirmLabel: t(props.locale, "historyRestoreSnapshotAction"),
+      cancelLabel: t(props.locale, "cancel"),
+      tone: "danger",
+      kind: "confirm",
+    });
+    if (!confirmed) return;
+    setSnapshotBusyId(snapshot.id);
+    try {
+      if (!await restoreSnapshot(snapshot.id)) throw new Error(t(props.locale, "historyRestoreSnapshotFailed"));
+      await props.loadState();
+      await refreshDiskSnapshots();
+      props.setNotice(t(props.locale, "historyRestoreSnapshotSuccess"));
+    } catch (error) {
+      props.setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSnapshotBusyId(null);
+    }
+  };
+
+  const assignLegacySnapshot = async (snapshot: SnapshotRecord): Promise<void> => {
+    const environmentId = legacyTargets[snapshot.id] ?? activeEnvironmentId;
+    const environmentName = environments.find((environment) => environment.id === environmentId)?.name ?? environmentId;
+    const confirmed = await props.requestConfirm({
+      title: t(props.locale, "historyAssignSnapshotTitle"),
+      description: formatMessage(t(props.locale, "historyAssignSnapshotDescription"), {
+        file: snapshot.file_id,
+        environment: environmentName,
+      }),
+      confirmLabel: t(props.locale, "historyAssignSnapshotAction"),
+      cancelLabel: t(props.locale, "cancel"),
+      tone: "danger",
+      kind: "unsaved",
+    });
+    if (!confirmed) return;
+    setSnapshotBusyId(snapshot.id);
+    try {
+      if (!await assignLegacySnapshotEnvironment(snapshot.id, environmentId)) {
+        throw new Error(t(props.locale, "historyAssignSnapshotFailed"));
+      }
+      await refreshDiskSnapshots();
+      props.setNotice(t(props.locale, "historyAssignSnapshotSuccess"));
+    } catch (error) {
+      props.setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSnapshotBusyId(null);
+    }
+  };
 
   const handleUndo = (entryId: string): void => {
     const previous = restoreHistoryEntry(entryId);
@@ -2666,12 +3290,61 @@ function HistoryPanel(props: {
     }
   };
 
-  if (history.length === 0) {
-    return <div className="command-palette-empty">{t(props.locale, "historyNoHistory")}</div>;
-  }
-
   return (
     <div className="history-panel">
+      <section className="glass-panel form-panel">
+        <div className="section-title">{t(props.locale, "historyDiskSnapshots")}</div>
+        {diskSnapshots.length > 0 ? diskSnapshots.map((snapshot) => (
+          <div className="history-entry-main" key={`disk-${snapshot.id}`}>
+            <div className="history-entry-info">
+              <span className="history-entry-time">{new Date(snapshot.snapshot_at).toLocaleString()}</span>
+              <span className="history-entry-summary">{snapshot.file_id}</span>
+              <code>{snapshot.target_path}</code>
+            </div>
+            <button
+              type="button"
+              className="action-button compact"
+              disabled={snapshotBusyId === snapshot.id}
+              onClick={() => props.runAfterUnsavedHandled(() => restoreDiskSnapshot(snapshot))}
+            >
+              <RotateCcw size={14} />
+              <span>{t(props.locale, "historyRestoreSnapshotAction")}</span>
+            </button>
+          </div>
+        )) : <div className="command-palette-empty">{t(props.locale, "historyNoDiskSnapshots")}</div>}
+      </section>
+      {legacySnapshots.length > 0 ? (
+        <section className="glass-panel form-panel">
+          <div className="section-title">{t(props.locale, "historyLegacySnapshots")}</div>
+          {legacySnapshots.map((snapshot) => (
+            <div className="history-entry-main" key={`legacy-${snapshot.id}`}>
+              <div className="history-entry-info">
+                <span className="history-entry-time">{new Date(snapshot.snapshot_at).toLocaleString()}</span>
+                <span className="history-entry-summary">{snapshot.file_id}</span>
+              </div>
+              <CompactSelect
+                ariaLabel={t(props.locale, "historyAssignSnapshotTarget")}
+                value={legacyTargets[snapshot.id] ?? activeEnvironmentId}
+                options={environments.map((environment) => ({
+                  value: environment.id,
+                  label: environment.name || environment.id,
+                }))}
+                onChange={(value) => setLegacyTargets((current) => ({ ...current, [snapshot.id]: value }))}
+              />
+              <button
+                type="button"
+                className="action-button compact"
+                disabled={snapshotBusyId === snapshot.id}
+                onClick={() => void assignLegacySnapshot(snapshot)}
+              >
+                {t(props.locale, "historyAssignSnapshotAction")}
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : null}
+      <div className="section-title">{t(props.locale, "historySessionChanges")}</div>
+      {history.length === 0 ? <div className="command-palette-empty">{t(props.locale, "historyNoHistory")}</div> : null}
       {history.map((entry) => (
         <div key={entry.id} className="history-entry">
           <div className="history-entry-main">

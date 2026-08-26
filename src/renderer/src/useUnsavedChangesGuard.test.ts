@@ -11,10 +11,10 @@ function createStates(): { state: AppState; savedState: AppState } {
   return { state, savedState };
 }
 
-function renderGuard(decision: "save" | "discard" | "cancel") {
+function renderGuard(decision: "save" | "discard" | "cancel", saveResult = true) {
   const { state, savedState } = createStates();
   const requestConfirm = vi.fn().mockResolvedValue(decision);
-  const persistState = vi.fn().mockResolvedValue(undefined);
+  const persistState = vi.fn().mockResolvedValue(saveResult);
   const restoreSavedState = vi.fn();
   const action = vi.fn();
   const hook = renderHook(() => useUnsavedChangesGuard({
@@ -67,6 +67,16 @@ describe("useUnsavedChangesGuard", () => {
     expect(guard.action).not.toHaveBeenCalled();
     expect(guard.persistState).not.toHaveBeenCalled();
     expect(guard.restoreSavedState).not.toHaveBeenCalled();
+  });
+
+  it("treats a failed save as cancel and does not run the guarded action", async () => {
+    const guard = renderGuard("save", false);
+
+    await expect(guard.result.current.resolveUnsavedChanges()).resolves.toBe("cancel");
+    act(() => guard.result.current.runAfterUnsavedHandled(guard.action));
+
+    await waitFor(() => expect(guard.persistState).toHaveBeenCalled());
+    expect(guard.action).not.toHaveBeenCalled();
   });
 
   it("does not prompt or resolve changes merely because the window blurs", () => {

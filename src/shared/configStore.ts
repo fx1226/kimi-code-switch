@@ -7,7 +7,7 @@ import { SUPPORTED_CURRENCIES } from "./currency";
 import { buildMcpConfigDocument, DEFAULT_MCP_CONFIG_PATH, loadMcpConfig, parseMcpConfigStrict } from "./mcpStore";
 import { normalizeEntryName } from "./nameRules";
 import { createDefaultShortcuts, normalizeShortcuts } from "./shortcutStore";
-import { TUI_CONFIG_FILENAME, buildTuiConfigDocument, hasTuiConfigValues, mergeTuiConfigDocument, TuiConfigFromProfile } from "./tuiStore";
+import { TUI_CONFIG_FILENAME, buildTuiConfigDocument, hasTuiConfigValues, mergeTuiConfigDocument, parseTuiConfigDocumentWithDiagnostics, TuiConfigFromProfile } from "./tuiStore";
 import type {
   AppState,
   BackupDestinationType,
@@ -24,6 +24,7 @@ import type {
   McpServerConfig,
   ModelConfig,
   PanelSettings,
+  PortableDirectoryBundle,
   PermissionMode,
   PreviewBundle,
   Profile,
@@ -95,8 +96,10 @@ export function createDefaultKimiCodeEnvironment(): KimiCodeEnvironment {
   return {
     id: DEFAULT_KIMI_CODE_ENVIRONMENT_ID,
     name: DEFAULT_KIMI_CODE_ENVIRONMENT_NAME,
-    homePath: getKimiCodeEnvironmentHomePath(DEFAULT_KIMI_CODE_ENVIRONMENT_ID),
+    homePath: defaultKimiCodeHomePath(),
+    kind: "default",
     description: "Default Kimi Code home",
+    workingDirectory: "",
   };
 }
 
@@ -170,7 +173,7 @@ const DEFAULTS = {
   default_model: "",
   default_plan_mode: false,
   default_permission_mode: "",
-  merge_all_available_skills: false,
+  merge_all_available_skills: true,
 } as const;
 
 export interface EnvConfigData {
@@ -178,9 +181,35 @@ export interface EnvConfigData {
   models: Record<string, ModelConfig>;
 }
 
+export interface SaveTransactionRecord {
+  version: 1;
+  kind: "save-app-state";
+  createdAt: string;
+  textFiles: Array<{
+    path: string;
+    originalContent: string | null;
+    desiredContent: string;
+  }>;
+  panelOriginal?: PanelSettings | null;
+  panelDesired?: PanelSettings;
+}
+
+export interface StandardEnvironmentConfig {
+  mainConfig: MainConfig;
+  mcpServers: Record<string, McpServerConfig>;
+  tuiDocument?: string;
+  agentsDocument?: string;
+  skillsDirectory?: PortableDirectoryBundle;
+  pluginsDirectory?: PortableDirectoryBundle;
+}
+
 export interface FileAccess {
   readText(path: string): Promise<string | null>;
   writeText(path: string, content: string): Promise<void>;
+  writeTextCas?(path: string, content: string, expectedSha256: string): Promise<string>;
+  removeTextCas?(path: string, expectedSha256: string): Promise<void>;
+  beginSaveTransaction?(record: SaveTransactionRecord): Promise<void>;
+  completeSaveTransaction?(): Promise<void>;
   ensureDir(path: string): Promise<void>;
   // 可选：PanelSettings 专用读写（用于 SQLite 存储）
   // 若未提供，回退到 readText/writeText + TOML
@@ -223,7 +252,13 @@ export function projectEnabledMainConfig(config: MainConfig): MainConfig {
   for (const [name, model] of Object.entries(config.models)) {
     if (model.enabled === false) continue;
     if (!enabledProviders.has(model.provider)) continue;
-    const { enabled: _enabled, ...rest } = model;
+    const {
+      enabled: _enabled,
+      auth_mode: _authMode,
+      official_account_scope: _officialAccountScope,
+      pricing: _pricing,
+      ...rest
+    } = model;
     models[name] = rest;
   }
   projected.providers = providers;
@@ -313,27 +348,65 @@ export async function loadAppState(
     panelSettingsPath,
     DEFAULT_PANEL_SETTINGS_PATH,
   );
-  const fileMainConfig = normalizeMainConfig(await loadTomlFile(files, configPath, "main config"));
-  const mainConfig = shouldUseEnvironmentMainConfig(activeEnvironment, fileMainConfig)
-    ? cloneMainConfig(activeEnvironment.mainConfig!)
-    : fileMainConfig;
+  const mainConfig = normalizeMainConfig(await loadTomlFile(files, configPath, "main config"));
+  const tuiResult = parseTuiConfigDocumentWithDiagnostics(
+    await safeReadText(files, getKimiCodeTuiConfigPath(activeEnvironment.homePath)),
+  );
+  const tuiConfig = tuiResult.config;
 
-  // SQLite 为 Provider/Model 唯一真源：若提供了 env-config hook，则用 DB 数据覆盖文件解析结果。
-  // DB 为空（尚未迁移）时，把文件解析出的 providers/models 写入 DB 作为一次性迁移（全部默认启用）。
+  // config.toml 是活动 Provider/Model 的唯一真源。旧 env-config DB 只作为禁用项
+  // 的兼容归档读取：不得覆盖文件中的同名项，也不得复活 DB-only 的启用项。
   if (files.readEnvConfig) {
-    const dbConfig = await files.readEnvConfig(activeEnvironment.id);
+    let dbConfig: EnvConfigData | null = null;
+    try {
+      dbConfig = await files.readEnvConfig(activeEnvironment.id);
+    } catch (error) {
+      console.warn(`Disabled Provider/Model cache could not be read for ${activeEnvironment.id}:`, error);
+    }
     if (dbConfig) {
-      mainConfig.providers = dbConfig.providers;
-      mainConfig.models = dbConfig.models;
+      // Active definitions come from config.toml. Only GUI-owned metadata may be
+      // overlaid from the compatibility cache.
+      for (const [name, model] of Object.entries(mainConfig.models)) {
+        const cached = dbConfig.models[name];
+        if (!cached) continue;
+        mainConfig.models[name] = {
+          ...model,
+          ...(cached.auth_mode ? { auth_mode: cached.auth_mode } : {}),
+          ...(cached.official_account_scope ? { official_account_scope: cached.official_account_scope } : {}),
+          ...(cached.pricing ? { pricing: structuredClone(cached.pricing) } : {}),
+        };
+      }
+      const disabledProviderNames = new Set<string>();
+      for (const [name, provider] of Object.entries(dbConfig.providers)) {
+        if (provider.enabled === false && mainConfig.providers[name] === undefined) {
+          mainConfig.providers[name] = structuredClone(provider);
+          disabledProviderNames.add(name);
+        }
+      }
+      for (const [name, model] of Object.entries(dbConfig.models)) {
+        const providerExists = mainConfig.providers[model.provider] !== undefined
+          || disabledProviderNames.has(model.provider);
+        if (
+          mainConfig.models[name] === undefined
+          && providerExists
+          && (model.enabled === false || disabledProviderNames.has(model.provider))
+        ) {
+          mainConfig.models[name] = structuredClone(model);
+        }
+      }
     } else if (files.writeEnvConfig) {
       const migratedProviders = markAllEnabled(mainConfig.providers);
       const migratedModels = markAllEnabled(mainConfig.models);
       mainConfig.providers = migratedProviders;
       mainConfig.models = migratedModels;
-      await files.writeEnvConfig(activeEnvironment.id, {
-        providers: migratedProviders,
-        models: migratedModels,
-      });
+      try {
+        await files.writeEnvConfig(activeEnvironment.id, {
+          providers: migratedProviders,
+          models: migratedModels,
+        });
+      } catch (error) {
+        console.warn(`Disabled Provider/Model cache could not be initialized for ${activeEnvironment.id}:`, error);
+      }
     }
   }
   const fileMcpConfig = await loadMcpConfig(files, mcpConfigPath);
@@ -358,10 +431,8 @@ export async function loadAppState(
     profiles,
   );
   const scopedEnvironments = snapshotActiveKimiCodeEnvironment(environments, activeEnvironment.id, {
-    mainConfig,
     profiles,
     activeProfile,
-    mcpServers: mcpConfig.mcpServers,
   });
 
   return {
@@ -386,6 +457,8 @@ export async function loadAppState(
       active_kimi_code_environment_id: activeEnvironment.id,
     },
     mcpConfig,
+    tuiConfig,
+    tuiDiagnostics: { errors: tuiResult.errors, warnings: tuiResult.warnings },
   };
 }
 
@@ -656,7 +729,11 @@ function panelSettingsFromUnknown(data: Record<string, unknown>, fallback: Panel
   };
 }
 
-export async function saveAppState(files: FileAccess, state: AppState): Promise<void> {
+export async function saveAppState(
+  files: FileAccess,
+  state: AppState,
+  options?: { expectedSha256?: Partial<Record<"config" | "mcp" | "tui", string>> },
+): Promise<void> {
   const normalizedState = normalizeStatePaths(state);
   const stateToPersist: AppState = {
     ...normalizedState,
@@ -675,54 +752,191 @@ export async function saveAppState(files: FileAccess, state: AppState): Promise<
   await files.ensureDir(dirnamePath(normalizedState.mcpConfigPath));
   const stateForConfig = await restoreRedactedProviderSecrets(files, stateToPersist);
 
-  // SQLite 为 Provider/Model 唯一真源：先把全量（含禁用）写入 DB，
-  // 再把「启用项」投影写入 config.toml（Kimi Code 实际读取的文件）。
-  if (files.writeEnvConfig) {
-    await files.writeEnvConfig(normalizedState.panelSettings.active_kimi_code_environment_id, {
-      providers: stateForConfig.mainConfig.providers,
-      models: stateForConfig.mainConfig.models,
-    });
-    const projectedConfig: AppState = {
-      ...stateForConfig,
-      mainConfig: projectEnabledMainConfig(stateForConfig.mainConfig),
-    };
-    await files.writeText(normalizedState.configPath, buildConfigDocument(projectedConfig));
-  } else {
-    // 回退（测试环境）：直接把全量 mainConfig 写入 config.toml。
-    await files.writeText(normalizedState.configPath, buildConfigDocument(stateForConfig));
-  }
+  // 标准文件先落盘；旧 env-config 仅是可重建的禁用项兼容缓存，缓存故障不得
+  // 阻止官方 config.toml 保存。
+  const projectedConfig: AppState = {
+    ...stateForConfig,
+    mainConfig: projectEnabledMainConfig(stateForConfig.mainConfig),
+  };
+  const configDocument = buildConfigDocument(projectedConfig);
+  const mcpDocument = buildMcpConfigDocument(stateToPersist.mcpConfig);
+  const [originalConfigDocument, originalMcpDocument, originalPanelDocument, originalPanelSettings] = await Promise.all([
+    safeReadText(files, normalizedState.configPath),
+    safeReadText(files, stateToPersist.mcpConfigPath),
+    files.readPanelSettings ? Promise.resolve(null) : safeReadText(files, stateToPersist.panelSettingsPath),
+    files.readPanelSettings
+      ? files.readPanelSettings(stateToPersist.panelSettingsPath)
+      : Promise.resolve(null),
+  ]);
 
-  // Panel settings：优先使用 SQLite（若 writePanelSettings 存在）
-  if (files.writePanelSettings) {
-    await files.writePanelSettings(stateToPersist.panelSettingsPath, stateToPersist.panelSettings);
-  } else {
-    // 回退：TOML 文件（测试环境）
-    await files.writeText(
-      stateToPersist.panelSettingsPath,
-      buildPanelSettingsDocument(stateToPersist.panelSettings),
-    );
-  }
-
-  await files.writeText(stateToPersist.mcpConfigPath, buildMcpConfigDocument(stateToPersist.mcpConfig));
-
-  // tui.toml：把激活 profile 的两个 GUI 管理字段合并进现有文档。未设置的字段会从
-  // 现有文档删除，确保清空字段或切换 profile 后不会遗留旧 theme/editor.command；
-  // [notifications]/[upgrade] 等 GUI 不管理的内容继续保留。解析失败时合并函数原样
-  // 返回旧文档，且下面通过内容比较跳过写入，避免覆盖损坏文档造成数据丢失。
-  // 路径与 config.toml 同目录（<activeEnvHome>/tui.toml）：normalizeStatePaths 已把
-  // configPath 归一到激活环境受管目录，其 dirname 即 activeEnvHome。
   const activeProfileName = stateForConfig.activeProfile;
-  const tuiConfig = TuiConfigFromProfile(stateForConfig.profiles[activeProfileName]);
+  const profileTuiConfig = TuiConfigFromProfile(stateForConfig.profiles[activeProfileName]);
+  const tuiConfig = {
+    ...(stateForConfig.tuiConfig ?? {}),
+    ...profileTuiConfig,
+  };
   const tuiConfigPath = getKimiCodeTuiConfigPath(dirnamePath(stateForConfig.configPath));
   const existingTuiDocument = await safeReadText(files, tuiConfigPath);
-  if (existingTuiDocument !== null || hasTuiConfigValues(tuiConfig)) {
-    const nextTuiDocument = existingTuiDocument?.trim()
+  const nextTuiDocument = hasTuiConfigValues(tuiConfig)
+    ? existingTuiDocument?.trim()
       ? mergeTuiConfigDocument(existingTuiDocument, tuiConfig)
-      : buildTuiConfigDocument(tuiConfig);
-    if (nextTuiDocument !== existingTuiDocument) {
-      await files.ensureDir(dirnamePath(tuiConfigPath));
-      await files.writeText(tuiConfigPath, nextTuiDocument);
+      : buildTuiConfigDocument(tuiConfig)
+    : null;
+  const transactionTextFiles: SaveTransactionRecord["textFiles"] = [
+    {
+      path: normalizedState.configPath,
+      originalContent: originalConfigDocument,
+      desiredContent: configDocument,
+    },
+    {
+      path: stateToPersist.mcpConfigPath,
+      originalContent: originalMcpDocument,
+      desiredContent: mcpDocument,
+    },
+    ...(!files.writePanelSettings
+      ? [{
+          path: stateToPersist.panelSettingsPath,
+          originalContent: originalPanelDocument,
+          desiredContent: buildPanelSettingsDocument(stateToPersist.panelSettings),
+        }]
+      : []),
+    ...(nextTuiDocument !== null && nextTuiDocument !== existingTuiDocument
+      ? [{ path: tuiConfigPath, originalContent: existingTuiDocument, desiredContent: nextTuiDocument }]
+      : []),
+  ];
+  await files.beginSaveTransaction?.({
+    version: 1,
+    kind: "save-app-state",
+    createdAt: new Date().toISOString(),
+    textFiles: transactionTextFiles,
+    ...(files.writePanelSettings
+      ? { panelOriginal: originalPanelSettings, panelDesired: stateToPersist.panelSettings }
+      : {}),
+  });
+  let writtenConfigHash: string | undefined;
+  let writtenMcpHash: string | undefined;
+  let panelWritten = false;
+  try {
+    writtenConfigHash = await writeTextWithOptionalCas(
+      files,
+      normalizedState.configPath,
+      configDocument,
+      options?.expectedSha256?.config,
+    );
+    writtenMcpHash = await writeTextWithOptionalCas(
+      files,
+      stateToPersist.mcpConfigPath,
+      mcpDocument,
+      options?.expectedSha256?.mcp,
+    );
+
+    // Panel settings：优先使用 SQLite（若 writePanelSettings 存在）
+    if (files.writePanelSettings) {
+      await files.writePanelSettings(stateToPersist.panelSettingsPath, stateToPersist.panelSettings);
+    } else {
+      await files.writeText(
+        stateToPersist.panelSettingsPath,
+        buildPanelSettingsDocument(stateToPersist.panelSettings),
+      );
     }
+    panelWritten = true;
+
+    // TUI is part of the same logical save. It is written last so a failure can
+    // roll back config/MCP/panel without any later sibling write racing that
+    // rollback. Rust write_text itself is atomic.
+    if (nextTuiDocument !== null && nextTuiDocument !== existingTuiDocument) {
+      await files.ensureDir(dirnamePath(tuiConfigPath));
+      await writeTextWithOptionalCas(
+        files,
+        tuiConfigPath,
+        nextTuiDocument,
+        options?.expectedSha256?.tui,
+      );
+    }
+    await files.completeSaveTransaction?.();
+  } catch (error) {
+    let rollbackComplete = true;
+    if (panelWritten) {
+      try {
+        if (files.writePanelSettings && originalPanelSettings) {
+          await files.writePanelSettings(stateToPersist.panelSettingsPath, originalPanelSettings);
+        } else if (!files.writePanelSettings && originalPanelDocument !== null) {
+          await files.writeText(stateToPersist.panelSettingsPath, originalPanelDocument);
+        } else {
+          rollbackComplete = false;
+        }
+      } catch (rollbackError) {
+        rollbackComplete = false;
+        console.error("Could not roll back panel settings after partial save:", rollbackError);
+      }
+    }
+    rollbackComplete = await rollbackCasWrite(
+      files,
+      stateToPersist.mcpConfigPath,
+      originalMcpDocument,
+      writtenMcpHash,
+    ) && rollbackComplete;
+    rollbackComplete = await rollbackCasWrite(
+      files,
+      normalizedState.configPath,
+      originalConfigDocument,
+      writtenConfigHash,
+    ) && rollbackComplete;
+    if (rollbackComplete) {
+      try {
+        await files.completeSaveTransaction?.();
+      } catch (rollbackError) {
+        console.error("Could not clear completed save rollback journal:", rollbackError);
+      }
+    }
+    throw error;
+  }
+
+  if (files.writeEnvConfig) {
+    try {
+      await files.writeEnvConfig(normalizedState.panelSettings.active_kimi_code_environment_id, {
+        providers: stateForConfig.mainConfig.providers,
+        models: stateForConfig.mainConfig.models,
+      });
+    } catch (error) {
+      console.warn("Disabled Provider/Model cache update failed after standard files were saved:", error);
+    }
+  }
+
+}
+
+async function writeTextWithOptionalCas(
+  files: FileAccess,
+  path: string,
+  content: string,
+  expectedSha256: string | undefined,
+): Promise<string | undefined> {
+  if (expectedSha256 !== undefined && files.writeTextCas) {
+    return files.writeTextCas(path, content, expectedSha256);
+  }
+  await files.writeText(path, content);
+  return undefined;
+}
+
+async function rollbackCasWrite(
+  files: FileAccess,
+  path: string,
+  originalContent: string | null,
+  writtenSha256: string | undefined,
+): Promise<boolean> {
+  if (writtenSha256 === undefined) return true;
+  try {
+    if (originalContent === null) {
+      if (!files.removeTextCas) return false;
+      await files.removeTextCas(path, writtenSha256);
+    } else {
+      if (!files.writeTextCas) return false;
+      await files.writeTextCas(path, originalContent, writtenSha256);
+    }
+    return true;
+  } catch (rollbackError) {
+    console.error(`Could not roll back partial save for ${path}:`, rollbackError);
+    return false;
   }
 }
 
@@ -741,7 +955,11 @@ export async function migrateLegacyKimiCliConfigToKimiCode(files: FileAccess): P
   }
 
   const legacyConfigDocument = await safeReadText(files, LEGACY_CONFIG_PATH);
-  if (!legacyConfigDocument?.trim()) {
+  const legacyMcpJsonDocument = await safeReadText(files, LEGACY_MCP_JSON_PATH);
+  const legacyMcpDocument = legacyMcpJsonDocument?.trim()
+    ? legacyMcpJsonDocument
+    : await safeReadText(files, LEGACY_MCP_CONFIG_PATH);
+  if (!legacyConfigDocument?.trim() && !legacyMcpDocument?.trim()) {
     await writeLegacyMigrationMarker(files, { migrated: false, configMerged: false, profilesCopied: false, mcpMerged: false, reason: "legacy-config-missing" });
     return { migrated: false, configMerged: false, profilesCopied: false, mcpMerged: false, reason: "legacy-config-missing" };
   }
@@ -750,26 +968,27 @@ export async function migrateLegacyKimiCliConfigToKimiCode(files: FileAccess): P
   let profilesCopied = false;
   let mcpMerged = false;
 
-  // 迁移目标显式解析为「默认环境」的真实路径，而非 ~/.kimi-code 软链。
-  // 软链当前可能指向某个非默认环境，若用它做目标会把 legacy 配置错误注入到
-  // 当前激活的非默认环境；这里强制落到默认环境家目录。
-  const defaultEnvHome = getKimiCodeEnvironmentHomePath(DEFAULT_KIMI_CODE_ENVIRONMENT_ID);
+  // 迁移目标显式解析为官方默认环境真实目录 ~/.kimi-code；GUI 不再搬迁该目录
+  // 或用软链接切换环境，因此 legacy 数据不会误写到某个托管环境。
+  const defaultEnvHome = defaultKimiCodeHomePath();
   const defaultEnvConfigPath = getKimiCodeConfigPath(defaultEnvHome);
   const defaultEnvMcpPath = getKimiCodeMcpConfigPath(defaultEnvHome);
 
-  try {
-    const legacyConfig = parseDocument(legacyConfigDocument);
-    const currentConfigDocument = await safeReadText(files, defaultEnvConfigPath);
-    const currentConfig = parseDocument(currentConfigDocument);
-    const { value, changed } = mergeLegacyMainConfig(currentConfig, legacyConfig);
-    if (changed) {
-      await files.ensureDir(dirnamePath(defaultEnvConfigPath));
-      await files.writeText(defaultEnvConfigPath, stringify(value));
-      configMerged = true;
+  if (legacyConfigDocument?.trim()) {
+    try {
+      const legacyConfig = parseDocument(legacyConfigDocument);
+      const currentConfigDocument = await safeReadText(files, defaultEnvConfigPath);
+      const currentConfig = parseDocument(currentConfigDocument);
+      const { value, changed } = mergeLegacyMainConfig(currentConfig, legacyConfig);
+      if (changed) {
+        await files.ensureDir(dirnamePath(defaultEnvConfigPath));
+        await files.writeText(defaultEnvConfigPath, stringify(value));
+        configMerged = true;
+      }
+    } catch (error) {
+      await writeLegacyMigrationMarker(files, { migrated: false, configMerged: false, profilesCopied: false, mcpMerged: false, reason: formatErrorMessage(error) });
+      throw new Error(`Failed to migrate legacy Kimi CLI config: ${formatErrorMessage(error)}`);
     }
-  } catch (error) {
-    await writeLegacyMigrationMarker(files, { migrated: false, configMerged: false, profilesCopied: false, mcpMerged: false, reason: formatErrorMessage(error) });
-    throw new Error(`Failed to migrate legacy Kimi CLI config: ${formatErrorMessage(error)}`);
   }
 
   // Profile data is GUI-private state now. Do not create config.profiles.toml
@@ -779,7 +998,6 @@ export async function migrateLegacyKimiCliConfigToKimiCode(files: FileAccess): P
 
   const targetMcpPath = defaultEnvMcpPath;
   const currentMcpDocument = await safeReadText(files, targetMcpPath);
-  const legacyMcpDocument = (await safeReadText(files, LEGACY_MCP_JSON_PATH)) ?? (await safeReadText(files, LEGACY_MCP_CONFIG_PATH));
   if (legacyMcpDocument?.trim()) {
     const merged = mergeJsonMcpDocuments(currentMcpDocument, legacyMcpDocument);
     if (merged.changed) {
@@ -807,6 +1025,10 @@ export function buildConfigDocument(state: AppState): string {
   return normalizeTomlIndentation(stringify(serializeMainConfigToRaw(projected) as Record<string, unknown>));
 }
 
+export function parseMainConfigDocument(document: string | null): MainConfig {
+  return normalizeMainConfig(parseDocument(document));
+}
+
 /**
  * 把 MainConfig 重建为待序列化的扁平记录：
  * - 规范化字段直接放置；
@@ -818,8 +1040,13 @@ function serializeMainConfigToRaw(config: MainConfig): Record<string, unknown> {
     default_model: config.default_model,
     default_plan_mode: config.default_plan_mode,
     default_permission_mode: config.default_permission_mode || "manual",
-    merge_all_available_skills: config.merge_all_available_skills,
   };
+  if (
+    config.merge_all_available_skills !== true
+    || config.explicit_fields?.includes("merge_all_available_skills")
+  ) {
+    raw.merge_all_available_skills = config.merge_all_available_skills;
+  }
   if (config.extra_skill_dirs && config.extra_skill_dirs.length > 0) {
     raw.extra_skill_dirs = config.extra_skill_dirs;
   }
@@ -937,6 +1164,10 @@ export function applyProfile(state: AppState, profileName: string): void {
   state.mainConfig.default_plan_mode = profile.default_plan_mode;
   state.mainConfig.default_permission_mode = profile.default_permission_mode || "manual";
   state.mainConfig.merge_all_available_skills = profile.merge_all_available_skills;
+  state.mainConfig.explicit_fields = Array.from(new Set([
+    ...(state.mainConfig.explicit_fields ?? []),
+    "merge_all_available_skills",
+  ]));
   // thinking 配置映射到 [thinking] extra 节
   setMainConfigThinking(state.mainConfig, profile.thinking_enabled, profile.thinking_effort);
   // tui_theme / tui_editor_command 由 tuiStore 在写 tui.toml 时从激活 profile 读取
@@ -968,6 +1199,53 @@ function setMainConfigThinking(
     extra.thinking = thinking;
   } else {
     delete extra.thinking;
+  }
+  mainConfig.extra = Object.keys(extra).length > 0 ? extra : undefined;
+}
+
+/** E1：`[secondary_model]` 表的显式值形态（0.38.0 官方字段）。 */
+export interface SecondaryModelConfig {
+  default_model: string;
+  /** 缺省 false：仅当当前模型不可用时才回退到 secondary。 */
+  force?: boolean;
+}
+
+/**
+ * E1：从 `mainConfig.extra.secondary_model` 解析结构化显式值；缺失/非法返回 undefined。
+ * 供 doctor 校验与 UI 展示「文件显式值 / 当前有效值」共用同一 schema。
+ */
+export function extractSecondaryModel(extra: Record<string, unknown> | undefined): SecondaryModelConfig | undefined {
+  const raw = extra?.secondary_model;
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const defaultModel = typeof record.default_model === "string" ? record.default_model.trim() : "";
+  if (!defaultModel) {
+    return { default_model: "" };
+  }
+  return {
+    default_model: defaultModel,
+    ...(typeof record.force === "boolean" ? { force: record.force } : {}),
+  };
+}
+
+/**
+ * E1：把 secondary model 写回 `extra.secondary_model`（结构化 serializer）。
+ * `defaultModel` 为空时移除整个 [secondary_model] 表（回到官方默认：无 secondary）。
+ */
+export function setSecondaryModel(
+  mainConfig: MainConfig,
+  next: SecondaryModelConfig | undefined,
+): void {
+  const extra = mainConfig.extra ?? {};
+  if (!next || !next.default_model.trim()) {
+    delete extra.secondary_model;
+  } else {
+    extra.secondary_model = {
+      default_model: next.default_model.trim(),
+      ...(next.force !== undefined ? { force: next.force } : {}),
+    };
   }
   mainConfig.extra = Object.keys(extra).length > 0 ? extra : undefined;
 }
@@ -1295,19 +1573,10 @@ function shouldIgnoreEmptyDefaultEnvironmentProfile(
 }
 
 function getEnvironmentMcpServers(
-  environment: KimiCodeEnvironment,
-  settings: PanelSettings,
+  _environment: KimiCodeEnvironment,
+  _settings: PanelSettings,
   fileServers: Record<string, McpServerConfig>,
 ): Record<string, McpServerConfig> {
-  if (hasOwnRecordProperty(environment, "mcpServers")) {
-    return mergePanelMcpServers(
-      cloneMcpServers(environment.mcpServers ?? {}),
-      fileServers,
-    ).mcpServers;
-  }
-  if (isDefaultKimiCodeEnvironment(environment)) {
-    return mergePanelMcpServers(settings.mcp_servers, fileServers).mcpServers;
-  }
   return cloneMcpServers(fileServers);
 }
 
@@ -1317,44 +1586,28 @@ function cloneMainConfig(config: MainConfig): MainConfig {
   return clone;
 }
 
-function parseEnvironmentMainConfig(value: unknown): MainConfig | undefined {
-  return isRecord(value) ? normalizeMainConfig(value) : undefined;
-}
-
-function shouldUseEnvironmentMainConfig(
-  environment: KimiCodeEnvironment,
-  fileMainConfig: MainConfig,
-): boolean {
-  if (!environment.mainConfig) {
-    return false;
-  }
-  if (isDefaultKimiCodeEnvironment(environment)) {
-    return false;
-  }
-  return Object.keys(fileMainConfig.providers).length === 0
-    && Object.keys(fileMainConfig.models).length === 0
-    && !fileMainConfig.default_model;
-}
-
 function snapshotActiveKimiCodeEnvironment(
   environments: KimiCodeEnvironment[],
   activeEnvironmentId: string,
   snapshot: {
-    mainConfig: MainConfig;
     profiles: Record<string, Profile>;
     activeProfile: string;
-    mcpServers: Record<string, McpServerConfig>;
   },
 ): KimiCodeEnvironment[] {
-  return environments.map((environment) => environment.id === activeEnvironmentId
-    ? {
-        ...environment,
-        mainConfig: cloneMainConfig(snapshot.mainConfig),
-        profiles: sanitizeProfilesRecord(snapshot.profiles),
-        activeProfile: snapshot.activeProfile,
-        mcpServers: cloneMcpServers(snapshot.mcpServers),
-      }
-    : environment);
+  return environments.map((environment) => {
+    const {
+      mainConfig: _legacyMainConfig,
+      mcpServers: _legacyMcpServers,
+      ...withoutLegacySnapshots
+    } = environment;
+    return environment.id === activeEnvironmentId
+      ? {
+          ...withoutLegacySnapshots,
+          profiles: sanitizeProfilesRecord(snapshot.profiles),
+          activeProfile: snapshot.activeProfile,
+        }
+      : withoutLegacySnapshots;
+  });
 }
 
 function legacyProfilesPathForConfig(configPath: string): string {
@@ -1543,11 +1796,21 @@ function normalizeMainConfig(input: Record<string, unknown>): MainConfig {
       input.merge_all_available_skills,
       DEFAULTS.merge_all_available_skills,
     ),
+    explicit_fields: [
+      ...(Object.prototype.hasOwnProperty.call(input, "merge_all_available_skills")
+        ? ["merge_all_available_skills"]
+        : []),
+      // E1：builtin_product_skills 走 extra 透传往返；记录「是否在文件里显式出现」，
+      // 供 UI 区分「显式 false/true」与「缺省视为 true」，不物化默认值。
+      ...(Object.prototype.hasOwnProperty.call(input, "builtin_product_skills")
+        ? ["builtin_product_skills"]
+        : []),
+    ],
     extra_skill_dirs: asStringArray(input.extra_skill_dirs),
     telemetry: typeof input.telemetry === "boolean" ? input.telemetry : undefined,
     hooks: Array.isArray(input.hooks) ? input.hooks : [],
-    models: isRecord(input.models) ? (input.models as MainConfig["models"]) : {},
-    providers: isRecord(input.providers) ? (input.providers as MainConfig["providers"]) : {},
+    models: normalizeModels(input.models),
+    providers: normalizeProviders(input.providers),
     loop_control: isRecord(input.loop_control) ? input.loop_control : {},
     background: isRecord(input.background) ? input.background : {},
     notifications: isRecord(input.notifications) ? input.notifications : {},
@@ -1557,6 +1820,37 @@ function normalizeMainConfig(input: Record<string, unknown>): MainConfig {
     // 保存时写回，避免 GUI 保存抹掉 CLI 可识别的字段。
     extra: collectMainConfigExtra(input),
   };
+}
+
+function normalizeProviders(value: unknown): MainConfig["providers"] {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
+      .map(([name, provider]) => [name, {
+        ...provider,
+        type: asString(provider.type, ""),
+        base_url: asString(provider.base_url, ""),
+        api_key: asString(provider.api_key, ""),
+      } as ProviderConfig]),
+  );
+}
+
+function normalizeModels(value: unknown): MainConfig["models"] {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
+      .map(([name, model]) => [name, {
+        ...model,
+        provider: asString(model.provider, ""),
+        model: asString(model.model, name),
+        max_context_size: typeof model.max_context_size === "number" ? model.max_context_size : 0,
+        capabilities: Array.isArray(model.capabilities)
+          ? model.capabilities.filter((capability): capability is string => typeof capability === "string")
+          : [],
+      } as ModelConfig]),
+  );
 }
 
 /**
@@ -1735,10 +2029,8 @@ export function normalizeStatePaths(state: AppState): AppState {
   const activeProfile = ensureActiveProfile(state.activeProfile, profiles);
   const profilesPath = "";
   const scopedEnvironments = snapshotActiveKimiCodeEnvironment(environments, activeEnvironment.id, {
-    mainConfig: state.mainConfig,
     profiles,
     activeProfile,
-    mcpServers: state.mcpConfig.mcpServers,
   });
   const panelSettings: PanelSettings = {
     ...state.panelSettings,
@@ -1918,11 +2210,11 @@ export function importConfig(
   return next;
 }
 
-export const FULL_BACKUP_VERSION = 1;
+export const FULL_BACKUP_VERSION = 3;
 
 /**
- * 组装全量备份包：覆盖所有环境的 Provider/Model（来自 DB）+ 每个环境的 MCP/Profile（来自 panelSettings 环境快照）
- * + 全局面板设置。含真实密钥。
+ * 组装旧版全量备份包。活动环境来自标准文件状态；非活动环境只使用旧 DB
+ * 兼容缓存，不再读取已退役的 panel mainConfig/MCP 快照。
  *
  * @param state 当前 AppState（提供 panelSettings 与环境列表）
  * @param allEnvConfigs 各环境的 { providers, models }，来自 DB 的 exportAllEnvConfigs
@@ -1930,6 +2222,7 @@ export const FULL_BACKUP_VERSION = 1;
 export function buildFullBackup(
   state: AppState,
   allEnvConfigs: Record<string, EnvConfigData>,
+  standardEnvironmentConfigs: Record<string, StandardEnvironmentConfig> = {},
 ): FullBackupBundle {
   const environments = parseKimiCodeEnvironments(
     state.panelSettings.kimi_code_environments,
@@ -1939,19 +2232,19 @@ export function buildFullBackup(
 
   const bundles: EnvironmentConfigBundle[] = environments.map((environment) => {
     // 当前激活环境的 Provider/Model 以内存 state 为准（可能含未保存编辑）；
-    // 其余环境优先用 DB 快照，DB 为空时回退到面板设置中的环境快照（mainConfig）。
+    // 其余环境仅使用旧 DB 兼容缓存，避免复活 panel 中的过期定义。
     const dbConfig = allEnvConfigs[environment.id];
-    const dbHasProviders = dbConfig && Object.keys(dbConfig.providers ?? {}).length > 0;
-    const dbHasModels = dbConfig && Object.keys(dbConfig.models ?? {}).length > 0;
+    const standardConfig = standardEnvironmentConfigs[environment.id];
+    const mergedConfig = mergeStandardConfigWithGuiCache(standardConfig?.mainConfig, dbConfig);
     const providers = environment.id === activeId
       ? structuredClone(state.mainConfig.providers)
-      : structuredClone((dbHasProviders ? dbConfig!.providers : environment.mainConfig?.providers) ?? {});
+      : mergedConfig.providers;
     const models = environment.id === activeId
       ? structuredClone(state.mainConfig.models)
-      : structuredClone((dbHasModels ? dbConfig!.models : environment.mainConfig?.models) ?? {});
+      : mergedConfig.models;
     const mcpServers = environment.id === activeId
       ? cloneMcpServers(state.mcpConfig.mcpServers)
-      : cloneMcpServers(environment.mcpServers ?? {});
+      : cloneMcpServers(standardConfig?.mcpServers ?? {});
     const profiles = environment.id === activeId
       ? sanitizeProfilesRecord(state.profiles)
       : sanitizeProfilesRecord(environment.profiles ?? {});
@@ -1959,7 +2252,29 @@ export function buildFullBackup(
       ? state.activeProfile
       : (environment.activeProfile ?? DEFAULT_PROFILE_NAME);
     return {
-      environment: { id: environment.id, name: environment.name, homePath: environment.homePath, description: environment.description },
+      environment: {
+        id: environment.id,
+        name: environment.name,
+        homePath: environment.homePath,
+        kind: environment.kind,
+        description: environment.description,
+        workingDirectory: environment.workingDirectory,
+      },
+      mainConfig: {
+        ...(environment.id === activeId
+          ? structuredClone(state.mainConfig)
+          : structuredClone(standardConfig?.mainConfig ?? normalizeMainConfig({}))),
+        providers: structuredClone(providers),
+        models: structuredClone(models),
+      },
+      tuiDocument: standardConfig?.tuiDocument,
+      agentsDocument: standardConfig?.agentsDocument,
+      skillsDirectory: standardConfig?.skillsDirectory
+        ? structuredClone(standardConfig.skillsDirectory)
+        : undefined,
+      pluginsDirectory: standardConfig?.pluginsDirectory
+        ? structuredClone(standardConfig.pluginsDirectory)
+        : undefined,
       providers,
       models,
       mcpServers,
@@ -1977,6 +2292,41 @@ export function buildFullBackup(
     activeEnvironmentId: activeId,
     panelSettings: structuredClone(state.panelSettings),
   };
+}
+
+function mergeStandardConfigWithGuiCache(
+  standard: MainConfig | undefined,
+  cache: EnvConfigData | undefined,
+): EnvConfigData {
+  const providers = structuredClone(standard?.providers ?? {});
+  const models = structuredClone(standard?.models ?? {});
+  if (!cache) return { providers, models };
+
+  const disabledProviders = new Set<string>();
+  for (const [name, provider] of Object.entries(cache.providers)) {
+    if (provider.enabled === false && providers[name] === undefined) {
+      providers[name] = structuredClone(provider);
+      disabledProviders.add(name);
+    }
+  }
+  for (const [name, model] of Object.entries(cache.models)) {
+    if (models[name]) {
+      models[name] = {
+        ...models[name],
+        ...(model.auth_mode ? { auth_mode: model.auth_mode } : {}),
+        ...(model.official_account_scope ? { official_account_scope: model.official_account_scope } : {}),
+        ...(model.pricing ? { pricing: structuredClone(model.pricing) } : {}),
+      };
+      continue;
+    }
+    if (
+      (model.enabled === false || disabledProviders.has(model.provider))
+      && providers[model.provider] !== undefined
+    ) {
+      models[name] = structuredClone(model);
+    }
+  }
+  return { providers, models };
 }
 
 export function isFullBackupBundle(data: unknown): data is FullBackupBundle {
@@ -2000,6 +2350,29 @@ export function validateFullBackup(data: unknown): ValidationResult {
   }
   if (!Array.isArray((data as { environments?: unknown }).environments)) {
     errors.push("Missing 'environments' array.");
+  } else {
+    const ids = new Set<string>();
+    for (const [index, environment] of (data as { environments: unknown[] }).environments.entries()) {
+      if (!isRecord(environment) || !isRecord(environment.environment)) {
+        errors.push(`Invalid environment entry at index ${index}.`);
+        continue;
+      }
+      const id = environment.environment.id;
+      if (typeof id !== "string" || !normalizeEntryName(id)) {
+        errors.push(`Environment at index ${index} has an invalid id.`);
+      } else if (ids.has(id)) {
+        errors.push(`Duplicate environment id: ${id}.`);
+      } else {
+        ids.add(id);
+      }
+      for (const field of ["providers", "models", "mcpServers", "profiles"] as const) {
+        if (!isRecord(environment[field])) errors.push(`Environment ${String(id)} has invalid ${field}.`);
+      }
+    }
+    const activeId = (data as { activeEnvironmentId?: unknown }).activeEnvironmentId;
+    if (typeof activeId !== "string" || !ids.has(activeId)) {
+      errors.push("activeEnvironmentId does not reference a backed-up environment.");
+    }
   }
   if (!isRecord((data as { panelSettings?: unknown }).panelSettings)) {
     errors.push("Missing 'panelSettings'.");
@@ -2007,10 +2380,157 @@ export function validateFullBackup(data: unknown): ValidationResult {
   return { valid: errors.length === 0, errors };
 }
 
+export interface FullBackupRiskSummary {
+  stdioMcpCommands: string[];
+  remoteMcpEndpoints: string[];
+  providerEndpoints: string[];
+  configHooks: string[];
+  agentsDocuments: string[];
+  executableSkillFiles: string[];
+  skillDocumentsAndScripts: string[];
+  pluginDirectories: string[];
+  pluginExecutableFiles: string[];
+  pluginCapabilities: string[];
+}
+
+/** Surface executable/network trust boundaries before importing an untrusted backup. */
+export function assessFullBackupRisk(data: FullBackupBundle): FullBackupRiskSummary {
+  const stdioMcpCommands: string[] = [];
+  const remoteMcpEndpoints: string[] = [];
+  const providerEndpoints: string[] = [];
+  const configHooks: string[] = [];
+  const agentsDocuments: string[] = [];
+  const executableSkillFiles: string[] = [];
+  const skillDocumentsAndScripts: string[] = [];
+  const pluginDirectories: string[] = [];
+  const pluginExecutableFiles: string[] = [];
+  const pluginCapabilities: string[] = [];
+  for (const environment of data.environments) {
+    const environmentId = environment.environment.id;
+    for (const [name, server] of Object.entries(environment.mcpServers ?? {})) {
+      const command = typeof server.command === "string" ? server.command.trim() : "";
+      const args = Array.isArray(server.args) ? server.args.filter((item): item is string => typeof item === "string") : [];
+      const url = typeof server.url === "string" ? server.url.trim() : "";
+      if (server.transport === "stdio" && command) {
+        stdioMcpCommands.push(`${environmentId}/${name}: ${command} ${args.join(" ")}`.trim());
+      } else if (url) {
+        remoteMcpEndpoints.push(`${environmentId}/${name}: ${redactUrlForTrustPreview(server.url)}`);
+      }
+    }
+    for (const [name, provider] of Object.entries(environment.providers ?? {})) {
+      if (typeof provider.base_url === "string" && provider.base_url.trim()) {
+        providerEndpoints.push(`${environmentId}/${name}: ${redactUrlForTrustPreview(provider.base_url)}`);
+      }
+    }
+    for (const [index, hook] of (environment.mainConfig?.hooks ?? []).entries()) {
+      configHooks.push(`${environmentId}/hook-${index + 1}: ${JSON.stringify(redactTrustValue(hook)).slice(0, 240)}`);
+    }
+    if (environment.agentsDocument?.trim()) {
+      agentsDocuments.push(`${environmentId}/AGENTS.md (${environment.agentsDocument.length} characters)`);
+    }
+    for (const file of environment.skillsDirectory?.files ?? []) {
+      if (file.executable) executableSkillFiles.push(`${environmentId}/skills/${file.relativePath}`);
+      const path = file.relativePath.toLocaleLowerCase();
+      if (path.endsWith("skill.md") || path.endsWith(".md") || path.includes("/scripts/")) {
+        skillDocumentsAndScripts.push(`${environmentId}/skills/${file.relativePath}`);
+      }
+    }
+    if (environment.pluginsDirectory?.exists) {
+      pluginDirectories.push(`${environmentId}/plugins (${environment.pluginsDirectory.files.length} files)`);
+      for (const file of environment.pluginsDirectory.files) {
+        const itemPath = `${environmentId}/plugins/${file.relativePath}`;
+        if (file.executable) pluginExecutableFiles.push(itemPath);
+        const normalizedPath = file.relativePath.replace(/\\/g, "/").toLocaleLowerCase();
+        if (normalizedPath === "installed.json") {
+          try {
+            const installed = JSON.parse(decodePortableText(file.contentBase64)) as unknown;
+            if (isRecord(installed) && Array.isArray(installed.plugins)) {
+              for (const plugin of installed.plugins) {
+                if (!isRecord(plugin)) continue;
+                const id = typeof plugin.id === "string" ? plugin.id : "<unknown>";
+                const source = typeof plugin.source === "string"
+                  ? redactUrlForTrustPreview(plugin.source)
+                  : "unknown source";
+                pluginCapabilities.push(`${environmentId}/${id}: installed from ${source}`);
+              }
+            }
+          } catch {
+            pluginCapabilities.push(`${itemPath}: invalid installed.json`);
+          }
+        }
+        if (normalizedPath.endsWith("kimi.plugin.json") || normalizedPath.endsWith(".kimi-plugin/plugin.json")) {
+          try {
+            const manifest = JSON.parse(decodePortableText(file.contentBase64)) as unknown;
+            if (!isRecord(manifest)) throw new Error("manifest root is not an object");
+            const name = typeof manifest.name === "string" ? manifest.name : file.relativePath;
+            const capabilities = [
+              Array.isArray(manifest.hooks) && manifest.hooks.length > 0 ? `${manifest.hooks.length} hooks` : "",
+              isRecord(manifest.mcpServers) ? `${Object.keys(manifest.mcpServers).length} MCP servers` : "",
+              manifest.sessionStart !== undefined ? "sessionStart" : "",
+              manifest.systemPrompt !== undefined ? "systemPrompt" : "",
+              manifest.commands !== undefined ? "commands" : "",
+              manifest.skills !== undefined ? "Skills" : "",
+            ].filter(Boolean);
+            pluginCapabilities.push(`${environmentId}/${name}: ${capabilities.join(", ") || "manifest"}`);
+          } catch {
+            pluginCapabilities.push(`${itemPath}: invalid manifest`);
+          }
+        }
+      }
+    }
+  }
+  return {
+    stdioMcpCommands,
+    remoteMcpEndpoints,
+    providerEndpoints,
+    configHooks,
+    agentsDocuments,
+    executableSkillFiles,
+    skillDocumentsAndScripts,
+    pluginDirectories,
+    pluginExecutableFiles,
+    pluginCapabilities,
+  };
+}
+
+function decodePortableText(value: string): string {
+  const binary = atob(value);
+  return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+}
+
+function redactTrustValue(value: unknown, key = ""): unknown {
+  if (/api[_-]?key|token|secret|password|authorization|cookie/i.test(key)) return REDACTION_MASK;
+  if (Array.isArray(value)) return value.map((entry) => redactTrustValue(entry));
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [
+      entryKey,
+      redactTrustValue(entry, entryKey),
+    ]));
+  }
+  return value;
+}
+
+function redactUrlForTrustPreview(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    for (const key of [...url.searchParams.keys()]) url.searchParams.set(key, REDACTION_MASK);
+    return url.toString();
+  } catch {
+    return value.replace(/([?&][^=&#]+)=([^&#]*)/g, `$1=${REDACTION_MASK}`);
+  }
+}
+
 export function fullBackupContainsRedactedSecrets(data: FullBackupBundle): boolean {
-  return data.environments.some((env) =>
-    Object.values(env.providers ?? {}).some((p) => p.api_key === REDACTION_MASK),
-  );
+  return containsRedactionMask(data.environments);
+}
+
+function containsRedactionMask(value: unknown): boolean {
+  if (value === REDACTION_MASK) return true;
+  if (Array.isArray(value)) return value.some(containsRedactionMask);
+  if (isRecord(value)) return Object.values(value).some(containsRedactionMask);
+  return false;
 }
 
 /**
@@ -2028,27 +2548,31 @@ export function extractEnvConfigsFromBackup(data: FullBackupBundle): Record<stri
 }
 
 /**
- * 从全量备份包重建 panelSettings（含每个环境的 MCP/Profile 快照），用于写回 SQLite。
- * 保留备份中的全局面板设置，但把环境列表的 mcpServers/profiles/activeProfile 用备份内容覆盖。
+ * 从全量备份包重建 GUI 私有设置。备份提供的绝对 homePath 不受信任：默认
+ * 环境落到官方 root，其它环境落到 GUI 托管 root。MCP 不再存 panel 快照。
  */
 export function rebuildPanelSettingsFromBackup(data: FullBackupBundle): PanelSettings {
   const panelSettings = structuredClone(data.panelSettings);
   const environments: KimiCodeEnvironment[] = data.environments.map((env) => ({
     id: env.environment.id,
     name: env.environment.name,
-    homePath: getKimiCodeEnvironmentHomePath(env.environment.id),
+    homePath: env.environment.id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+      ? defaultKimiCodeHomePath()
+      : getKimiCodeEnvironmentHomePath(env.environment.id),
+    kind: env.environment.id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID ? "default" : "managed",
     description: env.environment.description,
-    mcpServers: cloneMcpServers(env.mcpServers ?? {}),
+    // Project roots are host-specific and should be selected explicitly after restore.
+    workingDirectory: "",
     profiles: sanitizeProfilesRecord(env.profiles ?? {}),
     activeProfile: env.activeProfile,
   }));
   panelSettings.kimi_code_environments = environments;
   panelSettings.active_kimi_code_environment_id = data.activeEnvironmentId;
-  // 同步顶层 mcp_servers / profiles 为激活环境的快照。
+  // 顶层 MCP 快照已退役；Profile 仍是 GUI 私有状态。
   const active = data.environments.find((e) => e.environment.id === data.activeEnvironmentId)
     ?? data.environments[0];
   if (active) {
-    panelSettings.mcp_servers = cloneMcpServers(active.mcpServers ?? {});
+    panelSettings.mcp_servers = {};
     panelSettings.profiles = sanitizeProfilesRecord(active.profiles ?? {});
     panelSettings.active_profile = active.activeProfile;
   }
@@ -2134,22 +2658,6 @@ function parsePanelMcpServers(value: unknown): Record<string, McpServerConfig> {
   }
 }
 
-function mergePanelMcpServers(
-  panelServers: Record<string, McpServerConfig>,
-  fileServers: Record<string, McpServerConfig>,
-): { mcpServers: Record<string, McpServerConfig> } {
-  const merged = cloneMcpServers(panelServers);
-
-  for (const [name, server] of Object.entries(fileServers)) {
-    merged[name] = {
-      ...server,
-      enabled: panelServers[name]?.enabled ?? true,
-    };
-  }
-
-  return { mcpServers: merged };
-}
-
 function cloneMcpServers(servers: Record<string, McpServerConfig>): Record<string, McpServerConfig> {
   return Object.fromEntries(
     Object.entries(servers).map(([name, server]) => [
@@ -2232,18 +2740,30 @@ function parseKimiCodeEnvironments(
     const name = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
       ? DEFAULT_KIMI_CODE_ENVIRONMENT_NAME
       : asString(item.name, id) || id;
+    const fallbackHomePath = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+      ? defaultKimiCodeHomePath()
+      : getKimiCodeEnvironmentHomePath(id);
+    const homePath = sanitizePath(asString(item.homePath, ""), fallbackHomePath);
+    const inferredKind: KimiCodeEnvironment["kind"] = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+      ? "default"
+      : homePath === getKimiCodeEnvironmentHomePath(id)
+        ? "managed"
+        : "external";
+    const kind = item.kind === "default" || item.kind === "managed" || item.kind === "external"
+      ? item.kind
+      : inferredKind;
     result.push({
       id,
       name,
-      homePath: getKimiCodeEnvironmentHomePath(id),
+      homePath,
+      kind,
       description: asString(item.description, ""),
+      workingDirectory: sanitizePath(asString(item.workingDirectory, ""), ""),
       createdAt: asString(item.createdAt, ""),
       updatedAt: asString(item.updatedAt, ""),
       sourceEnvironmentId: asString(item.sourceEnvironmentId, ""),
-      ...(hasOwnRecordProperty(item, "mainConfig") ? { mainConfig: parseEnvironmentMainConfig(item.mainConfig) } : {}),
       ...(hasOwnRecordProperty(item, "profiles") ? { profiles: sanitizeProfilesRecord(item.profiles) } : {}),
       ...(typeof item.activeProfile === "string" ? { activeProfile: item.activeProfile } : {}),
-      ...(hasOwnRecordProperty(item, "mcpServers") ? { mcpServers: parsePanelMcpServers(item.mcpServers) } : {}),
     });
   }
   return result.length > 0 ? result : defaults;

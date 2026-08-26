@@ -5,9 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { UsageEvent } from "@shared/usageTypes";
 import * as db from "./usageDb";
 
-const SESSION_ROOT = "~/.kimi-code/sessions";
-const LOG_DIR = "~/.kimi-code/logs";
-const LOG_PATH = "~/.kimi-code/logs/kimi-code.log";
+const DEFAULT_KIMI_CODE_HOME = "~/.kimi-code";
 
 const RE_LLM_STEP = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) \| INFO\s+\| .+kimisoul:_step:\d+ \| ([0-9a-f-]+) - LLM step completed in ([\d.]+)s \(input=(\d+), output=(\d+)\)/;
 const RE_SESSION_CREATE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) \| INFO\s+\| .+:_run:\d+ \|  - Created new session: ([0-9a-f-]+)/;
@@ -32,11 +30,13 @@ interface SessionContext {
 export interface UsageLogWatcherOptions {
   getActiveProfile: () => string;
   getActiveEnvironmentId?: () => string;
+  getActiveEnvironmentHome?: () => string;
   onEvent?: (event: UsageEvent) => void;
 }
 
 export class UsageLogWatcher {
   private fileOffset = 0;
+  private globalInodeSignature: string | null = null;
   private tailBuffer = "";
   private sessions = new Map<string, SessionContext>();
   private currentSession: string | null = null;
@@ -50,13 +50,29 @@ export class UsageLogWatcher {
 
   constructor(private options: UsageLogWatcherOptions) {}
 
+  private environmentHome(): string {
+    return this.options.getActiveEnvironmentHome?.().trim() || DEFAULT_KIMI_CODE_HOME;
+  }
+
+  private sessionRoot(): string {
+    return `${this.environmentHome()}/sessions`;
+  }
+
+  private logDir(): string {
+    return `${this.environmentHome()}/logs`;
+  }
+
+  private logPath(): string {
+    return `${this.logDir()}/kimi-code.log`;
+  }
+
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
     await this.ingestHistoricalLogs();
-    await this.readNewLines(LOG_PATH);
+    await this.readNewLines(this.logPath());
     this.pollTimer = setInterval(() => {
-      void this.readNewLines();
+      void this.readNewLines(this.logPath());
       void this.readSessionLogs();
     }, 5000);
   }
@@ -79,7 +95,7 @@ export class UsageLogWatcher {
    */
   async ingestNow(): Promise<void> {
     if (!this.running) return;
-    await this.readNewLines(LOG_PATH);
+    await this.readNewLines(this.logPath());
     await this.readSessionLogs();
   }
 
@@ -101,12 +117,13 @@ export class UsageLogWatcher {
 
   private async ingestHistoricalLogs(): Promise<void> {
     try {
-      const entries = await this.listDir(LOG_DIR);
+      const logDir = this.logDir();
+      const entries = await this.listDir(logDir);
       const rotated = entries
         .filter((name) => name.endsWith(".log") && name !== "kimi-code.log")
         .sort();
       for (const name of rotated) {
-        await this.ingestFile(`${LOG_DIR}/${name}`);
+        await this.ingestFile(`${logDir}/${name}`);
       }
     } catch {
       /* logs dir may not exist */
@@ -120,7 +137,7 @@ export class UsageLogWatcher {
       if (!s || s.size === 0) return;
       const text = await this.readSlice(path, 0, s.size);
       for (const line of text.split("\n")) {
-        if (line.trim()) await this.parseLine(line);
+        if (line.trim()) await this.parseLine(line, path);
       }
     } catch {
       /* file may not be readable */
@@ -135,10 +152,11 @@ export class UsageLogWatcher {
 
   private async discoverSessionLogPaths(): Promise<string[]> {
     const paths: string[] = [];
+    const sessionRoot = this.sessionRoot();
     try {
-      const workDirs = await this.listDir(SESSION_ROOT);
+      const workDirs = await this.listDir(sessionRoot);
       for (const workDir of workDirs) {
-        const workDirPath = `${SESSION_ROOT}/${workDir}`;
+        const workDirPath = `${sessionRoot}/${workDir}`;
         let sessions: string[];
         try {
           sessions = await this.listDir(workDirPath);
@@ -179,23 +197,31 @@ export class UsageLogWatcher {
     return new TextEncoder().encode(text).length;
   }
 
-  private async readNewLines(path = LOG_PATH): Promise<void> {
+  private async readNewLines(path: string): Promise<void> {
     if (!this.running) return;
     try {
       const s = await this.fileStat(path);
       if (!s) return;
       const signature = this.inodeSignature(s);
-      const saved = path === LOG_PATH ? null : await db.getIngestState(path);
-      let offset = path === LOG_PATH ? this.fileOffset : saved?.byteOffset ?? 0;
+      const isGlobalLog = path === this.logPath();
+      const saved = isGlobalLog ? null : await db.getIngestState(path);
+      let offset = isGlobalLog ? this.fileOffset : saved?.byteOffset ?? 0;
+      if (isGlobalLog && this.globalInodeSignature !== null && this.globalInodeSignature !== signature) {
+        offset = 0;
+        this.tailBuffer = "";
+      }
       if (saved?.inodeSignature && saved.inodeSignature !== signature) offset = 0;
       if (s.size < offset) offset = 0;
       if (s.size <= offset) return;
 
-      const text = (path === LOG_PATH ? this.tailBuffer : "") + (await this.readSlice(path, offset, s.size - offset));
-      if (path === LOG_PATH) this.fileOffset = s.size;
+      const text = (isGlobalLog ? this.tailBuffer : "") + (await this.readSlice(path, offset, s.size - offset));
+      if (isGlobalLog) {
+        this.fileOffset = s.size;
+        this.globalInodeSignature = signature;
+      }
       const lines = text.split("\n");
       const tail = lines.pop() ?? "";
-      if (path === LOG_PATH) {
+      if (isGlobalLog) {
         this.tailBuffer = tail;
         for (const line of lines) await this.parseLine(line, path);
       } else {
@@ -297,7 +323,7 @@ export class UsageLogWatcher {
     return true;
   }
 
-  private async parseLine(line: string, sourcePath = LOG_PATH): Promise<void> {
+  private async parseLine(line: string, sourcePath = this.logPath()): Promise<void> {
     let m: RegExpMatchArray | null;
 
     if (await this.parseWireJsonLine(line, sourcePath)) return;

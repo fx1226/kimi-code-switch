@@ -107,7 +107,7 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
                   default_model: modelName,
                   default_plan_mode: false,
                   default_permission_mode: "manual",
-                  merge_all_available_skills: false,
+                  merge_all_available_skills: draft.mainConfig.merge_all_available_skills,
                   thinking_enabled: true,
                 });
                 if (activate) {

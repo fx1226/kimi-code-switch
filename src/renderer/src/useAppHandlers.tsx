@@ -422,6 +422,7 @@ export function useAppHandlers() {
     openBackupRecords,
     deleteBackupRecord,
     restoreBackupRecord,
+    migrateLegacyBackupRecord,
   } = useBackupActions({
     state,
     locale,
@@ -434,6 +435,7 @@ export function useAppHandlers() {
     setBackupRecordsDialog,
     confirmDeleteResource,
     restoreWithDryRun,
+    requestConfirm,
   });
 
   return {
@@ -552,5 +554,6 @@ export function useAppHandlers() {
     openBackupRecords,
     deleteBackupRecord,
     restoreBackupRecord,
+    migrateLegacyBackupRecord,
   };
 }

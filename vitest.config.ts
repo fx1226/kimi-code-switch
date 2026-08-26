@@ -16,17 +16,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      // 覆盖率门禁同时覆盖纯业务逻辑（src/shared）与从 Electron 主进程迁移来的前端适配层
-      // （src/renderer/src/tauri）。后者是薄的 invoke 转发包装，分支密度低、错误分支多走 try/catch，
-      // 难以达到 shared 的 80/55 标准，故对整体门禁取一个二者都能稳定通过的实测值（见下方注释）。
+      // 覆盖率门禁同时覆盖纯业务逻辑（src/shared）与 Tauri 前端适配层。
+      // 行、语句和函数执行率统一守住 80%；分支仍按薄适配器大量平台/error fallback
+      // 的实际结构设置 70%，避免为了数字移除必要的防御分支。
       include: ["src/shared/**/*.ts", "src/renderer/src/tauri/**/*.ts"],
       thresholds: {
-        // 实测值（含 tauri 适配层后整体）：lines/statements ~70+、functions ~80+、branches ~70+。
-        // 阈值按可稳定通过的实测下限设定，低于纯 shared 是因为薄包装层拉低了行/分支密度。
-        lines: 70,
-        functions: 70,
-        branches: 50,
-        statements: 70,
+        lines: 80,
+        functions: 80,
+        branches: 70,
+        statements: 80,
       },
     },
   },

@@ -25,9 +25,7 @@ fn now_iso() -> String {
 
 /// 初始化 env_config 表。
 #[tauri::command]
-pub fn init_env_config_store(
-    state: tauri::State<crate::usage::UsageState>,
-) -> Result<(), String> {
+pub fn init_env_config_store(state: tauri::State<crate::usage::UsageState>) -> Result<(), String> {
     let guard = lock_conn(&state)?;
     let conn = guard.as_ref().ok_or("usage db not open")?;
     conn.execute_batch(SCHEMA_SQL)
@@ -254,14 +252,16 @@ pub fn migrate_env_config_from_toml(
     let parsed: toml::Value =
         toml::from_str(&content).map_err(|e| format!("parse config.toml: {e}"))?;
 
-    let to_json = |v: &toml::Value| -> Json {
-        serde_json::to_value(v).unwrap_or_else(|_| json!({}))
-    };
+    let to_json =
+        |v: &toml::Value| -> Json { serde_json::to_value(v).unwrap_or_else(|_| json!({})) };
     let providers = parsed
         .get("providers")
         .map(to_json)
         .unwrap_or_else(|| json!({}));
-    let models = parsed.get("models").map(to_json).unwrap_or_else(|| json!({}));
+    let models = parsed
+        .get("models")
+        .map(to_json)
+        .unwrap_or_else(|| json!({}));
 
     // 全部标记 enabled=true。
     let mark_enabled = |v: Json| -> Json {
@@ -309,8 +309,14 @@ mod tests {
         let guard = state.conn.lock().unwrap();
         let conn = guard.as_ref().unwrap();
         let parsed: Json = serde_json::from_str(cfg).unwrap();
-        let providers = parsed.get("providers").map(|v| v.to_string()).unwrap_or_else(|| "{}".into());
-        let models = parsed.get("models").map(|v| v.to_string()).unwrap_or_else(|| "{}".into());
+        let providers = parsed
+            .get("providers")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "{}".into());
+        let models = parsed
+            .get("models")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "{}".into());
         conn.execute(
             "INSERT INTO env_config (kimi_code_environment_id, providers, models, created_at, updated_at)
              VALUES (?1, ?2, ?3, '2026-01-01', '2026-01-01')
@@ -334,7 +340,11 @@ mod tests {
     #[test]
     fn upsert_and_read_roundtrip() {
         let state = make_state();
-        save("default", r#"{"providers":{"p1":{"type":"kimi","enabled":true}},"models":{}}"#, &state);
+        save(
+            "default",
+            r#"{"providers":{"p1":{"type":"kimi","enabled":true}},"models":{}}"#,
+            &state,
+        );
         let (providers, _models) = get("default", &state).expect("row exists");
         let parsed: Json = serde_json::from_str(&providers).unwrap();
         assert_eq!(parsed["p1"]["type"], "kimi");
@@ -359,8 +369,13 @@ mod tests {
         save("work", r#"{"providers":{"w":{}},"models":{}}"#, &state);
         let (dp, _) = get("default", &state).unwrap();
         let (wp, _) = get("work", &state).unwrap();
-        assert!(serde_json::from_str::<Json>(&dp).unwrap().get("d").is_some());
-        assert!(serde_json::from_str::<Json>(&wp).unwrap().get("w").is_some());
+        assert!(serde_json::from_str::<Json>(&dp)
+            .unwrap()
+            .get("d")
+            .is_some());
+        assert!(serde_json::from_str::<Json>(&wp)
+            .unwrap()
+            .get("w")
+            .is_some());
     }
 }
-

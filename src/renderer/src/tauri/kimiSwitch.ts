@@ -4,9 +4,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import parseTomlString from "@iarna/toml/parse-string.js";
+import stringifyToml from "@iarna/toml/stringify.js";
 
 import {
   createDefaultPanelSettings,
@@ -23,20 +24,24 @@ import {
   cloneState,
   applyProfile,
   buildFullBackup,
+  buildConfigDocument,
+  parseMainConfigDocument,
   extractEnvConfigsFromBackup,
   rebuildPanelSettingsFromBackup,
 } from "@shared/configStore";
+import { buildMcpConfigDocument, parseMcpConfig } from "@shared/mcpStore";
 import { buildConfigDoctorReport, buildManagedDocuments, buildRedactedPreviewBundle } from "@shared/configSafety";
-import { scanSkills } from "@shared/skillsStore";
+import { resolveNearestGitProjectRoot, scanSkills } from "@shared/skillsStore";
+import { remapInstalledPluginRoots, scanKimiPlugins } from "@shared/pluginStore";
 import { compareReleaseVersions } from "@shared/versionUtils";
 import { computeEventCost, resolveModelPricing } from "@shared/pricing";
-import type { AppState, FullBackupBundle, KimiCodeEnvironment, KimiCodeEnvironmentPreferenceResult, ManagedFileId, ModelConfig, PanelSettings, PreviewBundle, OpenKimiTerminalRequest, FileSnapshotBundle, SaveStateConflictResult, SaveStateResult } from "@shared/types";
+import type { AppState, FullBackupBundle, KimiCodeEnvironment, KimiCodeEnvironmentPreferenceResult, ManagedFileId, McpServerConfig, ModelConfig, PanelSettings, PortableDirectoryBundle, PreviewBundle, OpenKimiTerminalRequest, FileSnapshotBundle, SaveStateConflictResult, SaveStateResult } from "@shared/types";
 
-import { tauriFileAccess, pathExists, ensureKimiCodeEnvironmentLayout, activateKimiCodeEnvironmentLink } from "./fileAccess";
+import { tauriFileAccess, pathExists, recoverPendingSaveTransaction, recoverPendingRestoreTransaction, removeFile } from "./fileAccess";
 import * as usageDb from "./usageDb";
 import { UsageLogWatcher } from "./usageLogWatcher";
 import * as cli from "./cli";
-import { openKimiInTerminal, openSessionTerminal } from "./terminal";
+import { openKimiInTerminal, openKimiMcpLoginInTerminal, openSessionTerminal } from "./terminal";
 import { captureSnapshotForState, detectExternalChangeConflict, readManagedDocuments } from "./fileSnapshots";
 import { initConfigHistory, captureSnapshot, cleanupOldSnapshots } from "./configHistory";
 import { getPanelSettings, initPanelSettingsStore, savePanelSettings } from "./panelSettingsStore";
@@ -49,6 +54,7 @@ const skillFileAccess = {
   readText: (path: string) => tauriFileAccess.readText(path),
   listDir: (path: string) => invoke<Array<{ name: string; isDirectory: boolean }>>("list_dir_typed", { path }),
   pathExists,
+  realPath: (path: string) => invoke<string>("real_path", { path }),
 };
 
 // ── 用量洞察运行时（log watcher + db 生命周期）──
@@ -66,6 +72,13 @@ let shortcutSyncTask: Promise<void> = Promise.resolve();
 let startupKimiCodeDetection: AppState["kimiTargetDetection"] | null = null;
 let startupKimiCodeDetectionTask: Promise<AppState["kimiTargetDetection"]> | null = null;
 
+/** C2：启动时发现的待人工恢复 journal 状态（unknown → 只读恢复；quarantined → 提示）。 */
+let pendingSaveRecovery: SaveRecoveryInfo | null = null;
+
+export type SaveRecoveryInfo =
+  | { action: "unknown" | "unknown-restore"; journal: unknown }
+  | { action: "quarantined" | "quarantined-restore"; reason?: "malformed" | "unsupported"; quarantinedPath?: string };
+
 type LoadStatePaths = {
   configTarget?: AppState["configTarget"];
   configPath?: string;
@@ -73,6 +86,51 @@ type LoadStatePaths = {
   panelSettingsPath?: string;
   mcpConfigPath?: string;
 };
+
+async function sha256Text(content: string | null): Promise<string> {
+  if (content === null) return "";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function decodeBase64Text(value: string): string {
+  const binary = atob(value);
+  return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+}
+
+function encodeBase64Text(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export function remapPluginDirectoryForRestore(
+  bundle: PortableDirectoryBundle,
+  sourceHome: string,
+  targetHome: string,
+): PortableDirectoryBundle {
+  const next = structuredClone(bundle);
+  const installed = next.files.find((file) => file.relativePath === "installed.json");
+  if (!installed) return next;
+  try {
+    const document = remapInstalledPluginRoots(
+      decodeBase64Text(installed.contentBase64),
+      sourceHome,
+      targetHome,
+    );
+    installed.contentBase64 = encodeBase64Text(document);
+    next.sha256 = undefined;
+  } catch {
+    // Rust restore validation will preserve the original bytes; plugin inventory
+    // will surface the malformed installed.json instead of silently dropping it.
+  }
+  return next;
+}
 
 export type EndpointReachabilityResult = {
   ok: boolean;
@@ -86,6 +144,231 @@ function activeProfile(): string {
 
 function activeKimiCodeEnvironmentId(): string {
   return currentAppState?.panelSettings.active_kimi_code_environment_id ?? "default";
+}
+
+function activeKimiCodeEnvironmentHome(): string {
+  const environmentId = activeKimiCodeEnvironmentId();
+  return normalizeKimiCodeEnvironments(currentAppState?.panelSettings.kimi_code_environments)
+    .find((environment) => environment.id === environmentId)?.homePath ?? "~/.kimi-code";
+}
+
+function supportsCredentialSlots(settings: PanelSettings): boolean {
+  const activeId = settings.active_kimi_code_environment_id ?? "default";
+  const environment = normalizeKimiCodeEnvironments(settings.kimi_code_environments)
+    .find((candidate) => candidate.id === activeId);
+  return activeId === "default" && environment?.homePath === "~/.kimi-code";
+}
+
+function normalizeLexicalPath(value: string): string {
+  const normalized = value.replace(/\\/g, "/");
+  const unc = normalized.startsWith("//");
+  const drive = unc ? "" : normalized.match(/^[A-Za-z]:/u)?.[0] ?? "";
+  const absolute = normalized.startsWith("/") || Boolean(drive);
+  const body = unc ? normalized.slice(2) : drive ? normalized.slice(drive.length) : normalized;
+  const parts: string[] = [];
+  for (const part of body.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length > 0 && parts.at(-1) !== "..") parts.pop();
+      else if (!absolute) parts.push(part);
+      continue;
+    }
+    parts.push(part);
+  }
+  const prefix = unc ? "//" : drive ? `${drive}/` : absolute ? "/" : "";
+  return `${prefix}${parts.join("/")}` || (absolute ? prefix : ".");
+}
+
+function normalizeProjectRootMcpServers(
+  servers: Record<string, McpServerConfig>,
+  projectRoot: string,
+): Record<string, McpServerConfig> {
+  return Object.fromEntries(Object.entries(servers).map(([name, server]) => {
+    if (server.transport !== "stdio") return [name, server];
+    const configuredCwd = typeof server.extra?.cwd === "string" ? server.extra.cwd.trim() : "";
+    const cwdIsAbsolute = configuredCwd.startsWith("/")
+      || configuredCwd.startsWith("\\\\")
+      || /^[A-Za-z]:[\\/]/u.test(configuredCwd);
+    const resolvedCwd = configuredCwd
+      ? normalizeLexicalPath(cwdIsAbsolute ? configuredCwd : `${projectRoot}/${configuredCwd}`)
+      : normalizeLexicalPath(projectRoot);
+    return [name, {
+      ...server,
+      extra: { ...(server.extra ?? {}), cwd: resolvedCwd },
+    }];
+  }));
+}
+
+async function workspaceTrustMarkerPath(homePath: string, workingDirectory: string): Promise<string> {
+  const normalized = workingDirectory.replace(/\\/g, "/").replace(/\/+$/, "");
+  const base = normalized.split("/").at(-1) ?? normalized;
+  const slugCandidate = base
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, "");
+  const slug = !slugCandidate || slugCandidate === "." || slugCandidate === ".."
+    ? "workspace"
+    : slugCandidate;
+  const hash = (await sha256Text(normalized)).slice(0, 12);
+  return `${homePath.replace(/\/+$/, "")}/workspace-trust/wd_${slug}_${hash}`;
+}
+
+async function readWorkspaceTrust(markerPath: string): Promise<boolean> {
+  try {
+    const document = await tauriFileAccess.readText(markerPath);
+    if (document === null) return false;
+    JSON.parse(document);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function loadProjectMcpScope(state: AppState): Promise<void> {
+  const activeId = state.panelSettings.active_kimi_code_environment_id ?? "default";
+  const environment = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments)
+    .find((candidate) => candidate.id === activeId);
+  const workingDirectory = environment?.workingDirectory?.trim();
+  if (!workingDirectory) {
+    state.projectMcpConfig = undefined;
+    return;
+  }
+  const normalizedWorkingDirectory = workingDirectory.replace(/\\/g, "/").replace(/\/+$/, "");
+  const projectRoot = await resolveNearestGitProjectRoot(skillFileAccess, normalizedWorkingDirectory)
+    ?? normalizedWorkingDirectory;
+  const environmentHome = environment?.homePath ?? (activeId === "default" ? "~/.kimi-code" : getKimiCodeEnvironmentHomePath(activeId));
+  const trustPath = await workspaceTrustMarkerPath(environmentHome, normalizedWorkingDirectory);
+  const trusted = await readWorkspaceTrust(trustPath);
+  const sourceSpecs = [
+    { scope: "project-root" as const, path: `${projectRoot}/.mcp.json` },
+    { scope: "project-local" as const, path: `${normalizedWorkingDirectory}/.kimi-code/mcp.json` },
+  ].filter((source, index, all) => all.findIndex((candidate) => candidate.path === source.path) === index);
+  const sources = await Promise.all(sourceSpecs.map(async (source) => {
+    const document = await tauriFileAccess.readText(source.path);
+    if (document === null) return { ...source, mcpServers: {} };
+    try {
+      const parsedServers = parseMcpConfig(document, { sourcePath: source.path }).mcpServers;
+      return {
+        ...source,
+        mcpServers: source.scope === "project-root"
+          ? normalizeProjectRootMcpServers(parsedServers, projectRoot)
+          : parsedServers,
+      };
+    } catch (error) {
+      return {
+        ...source,
+        mcpServers: {},
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+  const declaredMcpServers = Object.assign({}, ...sources.map((source) => source.mcpServers));
+  const errors = sources.flatMap((source) => source.error ? [`${source.path}: ${source.error}`] : []);
+  state.projectMcpConfig = {
+    projectRoot,
+    configPath: sources.map((source) => source.path).join(" → "),
+    trusted,
+    trustPath,
+    declaredMcpServers,
+    mcpServers: trusted ? declaredMcpServers : {},
+    error: errors.length > 0 ? errors.join("; ") : undefined,
+    sources,
+  };
+}
+
+export async function loadPluginInventory(state: AppState): Promise<void> {
+  const activeId = state.panelSettings.active_kimi_code_environment_id ?? "default";
+  const environment = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments)
+    .find((candidate) => candidate.id === activeId);
+  const home = environment?.homePath ?? (activeId === "default" ? "~/.kimi-code" : getKimiCodeEnvironmentHomePath(activeId));
+  state.pluginInventory = await scanKimiPlugins(skillFileAccess, home);
+}
+
+export async function loadProjectLocalConfig(state: AppState): Promise<void> {
+  const activeId = state.panelSettings.active_kimi_code_environment_id ?? "default";
+  const environment = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments)
+    .find((candidate) => candidate.id === activeId);
+  const workingDirectory = environment?.workingDirectory?.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!workingDirectory) {
+    state.projectLocalConfig = undefined;
+    return;
+  }
+  const projectRoot = await resolveNearestGitProjectRoot(skillFileAccess, workingDirectory)
+    ?? workingDirectory;
+  const path = `${projectRoot}/.kimi-code/local.toml`;
+  const existingDocument = await tauriFileAccess.readText(path);
+  const document = existingDocument ?? "";
+  try {
+    const parsed = document.trim() ? parseTomlString(document) as Record<string, unknown> : {};
+    if (parsed.workspace !== undefined && (typeof parsed.workspace !== "object" || parsed.workspace === null || Array.isArray(parsed.workspace))) {
+      throw new Error("workspace must be a table");
+    }
+    const workspace = parsed.workspace && typeof parsed.workspace === "object" && !Array.isArray(parsed.workspace)
+      ? parsed.workspace as Record<string, unknown>
+      : {};
+    if (parsed.workspace !== undefined && workspace.additional_dir === undefined) {
+      throw new Error("workspace.additional_dir must be an array of strings");
+    }
+    if (workspace.additional_dir !== undefined && !Array.isArray(workspace.additional_dir)) {
+      throw new Error("workspace.additional_dir must be an array of strings");
+    }
+    const configuredDirs = Array.isArray(workspace.additional_dir)
+      ? workspace.additional_dir.filter((entry): entry is string => typeof entry === "string")
+      : [];
+    if (Array.isArray(workspace.additional_dir) && configuredDirs.length !== workspace.additional_dir.length) {
+      throw new Error("workspace.additional_dir must be an array of strings");
+    }
+    const additionalDirs = await resolveProjectAdditionalDirs(projectRoot, configuredDirs);
+    state.projectLocalConfig = {
+      projectRoot,
+      workingDirectory,
+      path,
+      additionalDirs,
+      document,
+      sha256: await sha256Text(existingDocument),
+    };
+  } catch (error) {
+    state.projectLocalConfig = {
+      projectRoot,
+      workingDirectory,
+      path,
+      additionalDirs: [],
+      document,
+      sha256: await sha256Text(existingDocument),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function resolveProjectAdditionalDirs(
+  projectRoot: string,
+  additionalDirs: string[],
+): Promise<string[]> {
+  // pathe.normalize("") used by Kimi resolves to "."; whitespace-only values
+  // remain invalid after trim. The textarea already removes blank visual rows
+  // for new edits, while existing official documents retain this edge case.
+  const inputs = additionalDirs.map((entry) => entry === "" ? "." : entry);
+  const resolved = await Promise.all(inputs.map((inputPath) => invoke<string>(
+    "resolve_workspace_directory",
+    { projectRoot, inputPath },
+  )));
+  return [...new Set(resolved)];
+}
+
+async function loadTuiRevision(state: AppState): Promise<void> {
+  const normalized = normalizeStatePaths(state);
+  const environmentHome = normalized.configPath.replace(/\/config\.toml$/, "");
+  state.tuiConfigSha256 = await sha256Text(
+    await tauriFileAccess.readText(`${environmentHome}/tui.toml`),
+  );
+}
+
+function requireDefaultEnvironmentForCredentialSlots(): void {
+  if (!currentAppState || !supportsCredentialSlots(currentAppState.panelSettings)) {
+    throw new Error("Credential slots only support the legacy default environment. Log in separately for this environment.");
+  }
 }
 
 async function getStartupKimiCodeDetection(
@@ -311,6 +594,7 @@ async function ensureUsageRuntime(): Promise<void> {
     logWatcher = new UsageLogWatcher({
       getActiveProfile: activeProfile,
       getActiveEnvironmentId: activeKimiCodeEnvironmentId,
+      getActiveEnvironmentHome: activeKimiCodeEnvironmentHome,
     });
     await logWatcher.start();
   }
@@ -346,11 +630,11 @@ function ensureStoresInitialized(): Promise<void> {
 
       if (!usageOpen) {
         await usageDb.open(USAGE_DB_PATH);
-        await initConfigHistory();
         usageOpen = true;
       }
 
       await initPanelSettingsStore();
+      await initConfigHistory();
       const { initMcpServersStore } = await import("./mcpServersStore");
       await initMcpServersStore();
       const { initEnvConfigStore } = await import("./envConfigStore");
@@ -394,12 +678,55 @@ export const kimiSwitchTauri = {
     // 打开数据库 + 初始化所有 store（单飞，防并发重复初始化）。
     const storeStartedAt = startupTimingNow();
     await ensureStoresInitialized();
+    const recovery = await recoverPendingSaveTransaction();
+    if (recovery.action === "unknown") {
+      // C2：unknown 状态进入只读恢复模式——不自动覆盖任何文件；UI 通过 getPendingSaveRecovery 呈现。
+      pendingSaveRecovery = {
+        action: "unknown",
+        journal: recovery.journal,
+      };
+    } else if (recovery.action === "quarantined") {
+      pendingSaveRecovery = {
+        action: "quarantined",
+        reason: recovery.reason,
+        quarantinedPath: recovery.quarantinedPath,
+      };
+    } else {
+      pendingSaveRecovery = null;
+    }
+    // C3：恢复被 crash 中断的 restore 事务（full/regular/history 恢复的统一 journal）。
+    const restoreRecovery = await recoverPendingRestoreTransaction();
+    if (restoreRecovery.action === "unknown") {
+      pendingSaveRecovery = {
+        action: "unknown-restore",
+        journal: restoreRecovery.journal,
+      };
+    } else if (restoreRecovery.action === "quarantined") {
+      pendingSaveRecovery = {
+        action: "quarantined-restore",
+        reason: restoreRecovery.reason,
+        quarantinedPath: restoreRecovery.quarantinedPath,
+      };
+    }
     const { migrateMcpFromJson } = await import("./mcpServersStore");
     recordStartupTiming("kimiSwitch.loadState.stores", storeStartedAt);
 
-    const currentSettingsBeforeLoad = await getPanelSettings();
-    const activeEnvironmentIdBeforeLoad = currentSettingsBeforeLoad?.active_kimi_code_environment_id ?? "default";
-    await ensureKimiCodeEnvironmentLayout(activeEnvironmentIdBeforeLoad);
+    const currentSettings = await getPanelSettings();
+    if (!currentSettings) {
+      const detectedHome = await invoke<string>("get_kimi_code_home");
+      if (detectedHome && detectedHome !== "~/.kimi-code") {
+        const initialSettings = createDefaultPanelSettings();
+        initialSettings.kimi_code_environments = [{
+          id: "default",
+          name: "默认环境",
+          homePath: detectedHome,
+          kind: "external",
+          description: "Inherited from KIMI_CODE_HOME",
+        }];
+        initialSettings.config_path = getKimiCodeConfigPath(detectedHome);
+        await savePanelSettings(initialSettings);
+      }
+    }
 
     const effectiveTarget = "kimi-code";
     const effectivePaths: LoadStatePaths = {
@@ -409,12 +736,20 @@ export const kimiSwitchTauri = {
 
     const stateStartedAt = startupTimingNow();
     const state = await loadAppState(tauriFileAccess, effectivePaths);
+    await loadPluginInventory(state);
+    await loadProjectMcpScope(state);
+    await loadProjectLocalConfig(state);
+    await loadTuiRevision(state);
     recordStartupTiming("kimiSwitch.loadState.loadAppState", stateStartedAt);
     state.kimiTargetDetection = startupKimiCodeDetection ?? createPendingKimiCodeDetection();
     try {
       const accountStartedAt = startupTimingNow();
-      const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
-      state.panelSettings.active_official_account_id = accountStatus.active_account_id;
+      if (supportsCredentialSlots(state.panelSettings)) {
+        const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
+        state.panelSettings.active_official_account_id = accountStatus.active_account_id;
+      } else {
+        state.panelSettings.active_official_account_id = "";
+      }
       recordStartupTiming("kimiSwitch.loadState.accountStatus", accountStartedAt);
     } catch (err) {
       console.warn("Official account status load skipped:", err);
@@ -444,17 +779,50 @@ export const kimiSwitchTauri = {
     recordStartupTiming("kimiSwitch.loadState.total", loadStartedAt);
     return state;
   },
+  getPendingSaveRecovery: (): SaveRecoveryInfo | null => pendingSaveRecovery,
+  dismissSaveRecovery: (): void => {
+    pendingSaveRecovery = null;
+  },
+  // C2：人工选择后执行恢复决策。目前实现"放弃（删除 journal）"，original/desired 的选择
+  // 走 C3 统一 restore journal 的 recovery UI。这里返回成功与否。
+  resolveSaveRecovery: async (decision: "abandon"): Promise<void> => {
+    if (decision === "abandon") {
+      for (const journal of [
+        "~/.kimi-code-switch-gui/pending-save-transaction.json",
+        "~/.kimi-code-switch-gui/pending-restore-transaction.json",
+      ]) {
+        await removeFile(journal).catch(() => {
+          // 不存在忽略
+        });
+      }
+    }
+    pendingSaveRecovery = null;
+  },
   saveState: async (state: AppState): Promise<SaveStateResult> => {
     // 保存前捕获快照（Kimi 标准配置 + GUI SQLite 导出）
     const normalized = normalizeStatePaths(state);
+    const writeBaseline = await captureSnapshotForState(normalized);
     const environmentId = normalized.panelSettings.active_kimi_code_environment_id ?? "";
+    const environmentHome = normalized.configPath.replace(/\/config\.toml$/, "");
+    const tuiBaselineHash = state.tuiConfigSha256
+      ?? await sha256Text(await tauriFileAccess.readText(`${environmentHome}/tui.toml`));
     await Promise.all([
       captureSnapshot("config", normalized.configPath, undefined, environmentId),
       captureSnapshot("panel", normalized.panelSettingsPath, undefined, environmentId),
       captureSnapshot("mcp", normalized.mcpConfigPath, undefined, environmentId),
+      captureSnapshot("tui", `${environmentHome}/tui.toml`, undefined, environmentId),
+      captureSnapshot("agents", `${environmentHome}/AGENTS.md`, undefined, environmentId),
+      captureSnapshot("skills", `${environmentHome}/skills`, undefined, environmentId),
     ]);
 
-    await saveAppState(tauriFileAccess, state);
+    await saveAppState(tauriFileAccess, state, {
+      expectedSha256: {
+        config: writeBaseline.files.config.sha256,
+        mcp: writeBaseline.files.mcp.sha256,
+        tui: tuiBaselineHash,
+      },
+    });
+    await loadTuiRevision(state);
     currentAppState = state;
 
     await syncWindowToggleShortcut();
@@ -473,6 +841,7 @@ export const kimiSwitchTauri = {
     options?: { expectedSnapshot?: FileSnapshotBundle; allowOverwrite?: boolean },
   ): Promise<SaveStateResult | SaveStateConflictResult> => {
     const normalized = normalizeStatePaths(state);
+    let writeBaseline: FileSnapshotBundle | undefined;
     if (options?.allowOverwrite !== true) {
       const conflict = await detectExternalChangeConflict({
         expectedSnapshot: options?.expectedSnapshot,
@@ -492,17 +861,31 @@ export const kimiSwitchTauri = {
           conflict: conflict.conflict,
         };
       }
+      writeBaseline = conflict.snapshot;
     }
 
     // 保存前捕获快照（Kimi 标准配置 + GUI SQLite 导出）
     const environmentId = normalized.panelSettings.active_kimi_code_environment_id ?? "";
+    const environmentHome = normalized.configPath.replace(/\/config\.toml$/, "");
+    const tuiBaselineHash = state.tuiConfigSha256
+      ?? await sha256Text(await tauriFileAccess.readText(`${environmentHome}/tui.toml`));
     await Promise.all([
       captureSnapshot("config", normalized.configPath, undefined, environmentId),
       captureSnapshot("panel", normalized.panelSettingsPath, undefined, environmentId),
       captureSnapshot("mcp", normalized.mcpConfigPath, undefined, environmentId),
+      captureSnapshot("tui", `${environmentHome}/tui.toml`, undefined, environmentId),
+      captureSnapshot("agents", `${environmentHome}/AGENTS.md`, undefined, environmentId),
+      captureSnapshot("skills", `${environmentHome}/skills`, undefined, environmentId),
     ]);
 
-    await saveAppState(tauriFileAccess, state);
+    await saveAppState(tauriFileAccess, state, writeBaseline ? {
+      expectedSha256: {
+        config: writeBaseline.files.config.sha256,
+        mcp: writeBaseline.files.mcp.sha256,
+        tui: tuiBaselineHash,
+      },
+    } : undefined);
+    await loadTuiRevision(state);
     currentAppState = state;
 
     await syncWindowToggleShortcut();
@@ -551,24 +934,19 @@ export const kimiSwitchTauri = {
     environments: KimiCodeEnvironment[],
     activeEnvironmentId: string,
   ): Promise<KimiCodeEnvironmentPreferenceResult> => {
+    const restartUsageWatcher = logWatcher?.isRunning() ?? false;
     const currentSettings = (await getPanelSettings())
       ?? currentAppState?.panelSettings
       ?? createDefaultPanelSettings();
     const currentActiveEnvironmentId = currentAppState?.panelSettings.active_kimi_code_environment_id
       ?? currentSettings.active_kimi_code_environment_id;
     const normalizedEnvironments = normalizeKimiCodeEnvironments(environments, currentSettings.kimi_code_environments)
-      .map((environment) => ({
-        ...environment,
-        homePath: getKimiCodeEnvironmentHomePath(environment.id),
-      }))
       .map((environment) => (
         currentAppState && environment.id === currentActiveEnvironmentId
           ? {
               ...environment,
-              mainConfig: currentAppState.mainConfig,
               profiles: currentAppState.profiles,
               activeProfile: currentAppState.activeProfile,
-              mcpServers: currentAppState.mcpConfig.mcpServers,
             }
           : environment
       ));
@@ -577,7 +955,6 @@ export const kimiSwitchTauri = {
     if (!activeEnvironment) {
       throw new Error("No Kimi Code environment is available.");
     }
-    await activateKimiCodeEnvironmentLink(activeEnvironment.id);
     const configPath = getKimiCodeConfigPath(activeEnvironment.homePath);
     const saved = await savePanelSettings({
       ...currentSettings,
@@ -597,12 +974,20 @@ export const kimiSwitchTauri = {
       configPath,
       mcpConfigPath: getKimiCodeMcpConfigPath(activeEnvironment.homePath),
     }));
+    await loadPluginInventory(nextState);
+    await loadProjectMcpScope(nextState);
+    await loadProjectLocalConfig(nextState);
+    await loadTuiRevision(nextState);
     nextState.kimiTargetDetection = currentAppState?.kimiTargetDetection
       ?? startupKimiCodeDetection
       ?? createPendingKimiCodeDetection();
     try {
-      const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
-      nextState.panelSettings.active_official_account_id = accountStatus.active_account_id;
+      if (supportsCredentialSlots(nextState.panelSettings)) {
+        const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
+        nextState.panelSettings.active_official_account_id = accountStatus.active_account_id;
+      } else {
+        nextState.panelSettings.active_official_account_id = "";
+      }
     } catch (err) {
       console.warn("Official account status load skipped:", err);
     }
@@ -625,6 +1010,10 @@ export const kimiSwitchTauri = {
       ...nextState,
       panelSettings: finalPanelSettings,
     };
+    if (restartUsageWatcher) {
+      stopUsageRuntime();
+      await ensureUsageRuntime();
+    }
     const normalizedState = normalizeStatePaths(currentAppState);
     return {
       ok: true,
@@ -673,9 +1062,10 @@ export const kimiSwitchTauri = {
       .find((environment) => environment.id === activeEnvironmentId);
     return scanSkills(skillFileAccess, {
       mergeAllAvailableSkills: normalized.mainConfig.merge_all_available_skills,
-      // 用户技能与 workspaces.json 都跟随当前 KIMI_CODE_HOME，避免自定义环境串读默认环境。
+      // 用户技能跟随 KIMI_CODE_HOME；项目技能按 GUI 启动 Kimi 时相同的 cwd 向上找最近 Git 根。
       envHome: activeEnvironment?.homePath ?? getKimiCodeEnvironmentHomePath(activeEnvironmentId),
-      readJson: async (path) => tauriFileAccess.readText(path),
+      projectWorkingDirectory: activeEnvironment?.workingDirectory,
+      pluginSkillRoots: normalized.pluginInventory?.skillRoots ?? [],
       // config.toml extra_skill_dirs 追加目录。
       extraSkillDirs: normalized.mainConfig.extra_skill_dirs ?? [],
     });
@@ -683,20 +1073,25 @@ export const kimiSwitchTauri = {
   defaultSettings: (): Promise<PanelSettings> => Promise.resolve(createDefaultPanelSettings()),
 
   // ── dialog / shell ──
-  pickFile: async (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => {
-    const selected = await openDialog({ multiple: false, filters: options?.filters });
+  pickFile: async (options?: { filters?: Array<{ name: string; extensions: string[] }>; properties?: Array<string> }) => {
+    // 从 renderer 打开仅用于"读取"；写路径一律走 Rust 组合命令（save_file_with_dialog 等）。
+    const selected = await openDialog({ multiple: false, filters: options?.filters, directory: options?.properties?.includes("openDirectory"), canCreateDirectories: options?.properties?.includes("createDirectory") });
     return typeof selected === "string" ? { canceled: false, filePath: selected } : { canceled: true };
   },
   saveFile: async (content: string, options?: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
-    const filePath = await saveDialog({ defaultPath: options?.defaultPath, filters: options?.filters });
-    if (!filePath) return { canceled: true };
-    await tauriFileAccess.writeText(filePath, content);
-    return { canceled: false, filePath };
+    // 对话框由 Rust 打开，并在同一命令内写入；renderer 无法把任意绝对路径当作"对话框授权"。
+    const filePath = await invoke<string | null>("save_file_with_dialog", {
+      content,
+      defaultPath: options?.defaultPath ?? null,
+    });
+    return filePath == null ? { canceled: true } : { canceled: false, filePath };
   },
   readFile: async (filePath: string) => {
     const content = await tauriFileAccess.readText(filePath);
     return content === null ? { ok: false, error: "File not found." } : { ok: true, content };
   },
+  // B1：启动时把用户已保存的偏好目录（备份目录/注册环境 home）重登记为 Rust durable grant。
+  reconcileDurableGrants: (paths: string[]) => invoke<void>("reconcile_durable_grants", { paths }),
   openExternal: async (url: string): Promise<{ ok: true }> => {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "mailto:") {
@@ -706,6 +1101,35 @@ export const kimiSwitchTauri = {
     return { ok: true };
   },
   openKimiInTerminal: (request: PanelSettings | OpenKimiTerminalRequest) => openKimiInTerminal(request),
+  saveProjectAdditionalDirs: async (additionalDirs: string[]) => {
+    if (!currentAppState?.projectLocalConfig) {
+      throw new Error("Set a project working directory before editing additional workspace directories.");
+    }
+    const config = currentAppState.projectLocalConfig;
+    if (config.error) throw new Error(`Cannot update invalid project local config: ${config.error}`);
+    const normalizedDirs = await resolveProjectAdditionalDirs(config.workingDirectory, additionalDirs);
+    const parsed = config.document.trim()
+      ? parseTomlString(config.document) as Record<string, unknown>
+      : {};
+    const workspace = parsed.workspace && typeof parsed.workspace === "object" && !Array.isArray(parsed.workspace)
+      ? parsed.workspace as Record<string, unknown>
+      : {};
+    parsed.workspace = { ...workspace, additional_dir: normalizedDirs };
+    const nextDocument = stringifyToml(parsed);
+    // Rust 侧组合命令：仅允许写 <projectRoot>/.kimi-code/local.toml，路径在 Rust 端拼接。
+    const sha256 = await invoke<string>("write_project_local_config", {
+      projectRoot: config.projectRoot,
+      content: nextDocument,
+      expectedSha256: config.sha256,
+    });
+    currentAppState.projectLocalConfig = {
+      ...config,
+      additionalDirs: normalizedDirs,
+      document: nextDocument,
+      sha256,
+    };
+    return { ok: true as const };
+  },
 
   // ── CLI / MCP / 连通性 ──
   getInstallSource: (): Promise<"homebrew" | "manual" | "development"> => Promise.resolve("manual"),
@@ -716,18 +1140,40 @@ export const kimiSwitchTauri = {
     }),
   refreshKimiTargetDetection: () => refreshStartupKimiCodeDetection(true),
   runProvidersHealthCheck: (state: AppState) => cli.runProvidersHealthCheck(state),
+  listProviderCatalog: (filter?: string, url?: string) =>
+    cli.listKimiProviderCatalog(activeKimiCodeEnvironmentHome(), { filter, url }),
+  getProviderCatalogModels: (providerId: string, url?: string) =>
+    cli.getKimiProviderCatalogModels(activeKimiCodeEnvironmentHome(), providerId, { url }),
+  importProviderCatalog: (options: {
+    providerId: string;
+    apiKey: string;
+    defaultModel?: string;
+    baseUrl?: string;
+    url?: string;
+  }) => cli.importKimiProviderCatalog(activeKimiCodeEnvironmentHome(), options),
+  importProviderRegistry: (options: { url: string; apiKey: string }) =>
+    cli.importKimiProviderRegistry(activeKimiCodeEnvironmentHome(), options),
   upgradeKimiCli: (target?: AppState["configTarget"], options?: { install?: boolean }) =>
     cli.upgradeTargetCli(target ?? "kimi-code", options),
-  startKimiOAuthLogin: (target: AppState["configTarget"], onEvent?: (event: cli.KimiOAuthLoginEvent) => void, options?: { accountId?: string; activate?: boolean }) =>
-    cli.startKimiOAuthLogin(target, onEvent, options),
+  startKimiOAuthLogin: (target: AppState["configTarget"], onEvent?: (event: cli.KimiOAuthLoginEvent) => void, options?: { accountId?: string; activate?: boolean }) => {
+    if (options?.accountId) requireDefaultEnvironmentForCredentialSlots();
+    return cli.startKimiOAuthLogin(target, onEvent, {
+      ...options,
+      homePath: activeKimiCodeEnvironmentHome(),
+    });
+  },
   startKimiCodeOAuthLogin: (onEvent?: (event: cli.KimiOAuthLoginEvent) => void) =>
-    cli.startKimiOAuthLogin("kimi-code", onEvent),
+    cli.startKimiOAuthLogin("kimi-code", onEvent, { homePath: activeKimiCodeEnvironmentHome() }),
   listOfficialAccounts: () => officialAccounts.listOfficialAccounts(),
   getOfficialAccountCredentialsStatus: () => officialAccounts.getOfficialAccountCredentialsStatus(),
   createOfficialAccount: (displayName: string) => officialAccounts.createOfficialAccount(displayName),
   renameOfficialAccount: (id: string, displayName: string) => officialAccounts.renameOfficialAccount(id, displayName),
-  captureCurrentOfficialAccount: (displayName: string) => officialAccounts.captureCurrentOfficialAccount(displayName),
+  captureCurrentOfficialAccount: (displayName: string) => {
+    requireDefaultEnvironmentForCredentialSlots();
+    return officialAccounts.captureCurrentOfficialAccount(displayName);
+  },
   activateOfficialAccount: async (id: string) => {
+    requireDefaultEnvironmentForCredentialSlots();
     const result = await officialAccounts.activateOfficialAccount(id);
     currentAppState = currentAppState
       ? {
@@ -740,7 +1186,10 @@ export const kimiSwitchTauri = {
       : currentAppState;
     return result;
   },
-  deleteOfficialAccount: (id: string) => officialAccounts.deleteOfficialAccount(id),
+  deleteOfficialAccount: (id: string) => {
+    requireDefaultEnvironmentForCredentialSlots();
+    return officialAccounts.deleteOfficialAccount(id);
+  },
   testMcpServer: (name: string) => {
     const server = currentAppState?.mcpConfig.mcpServers[name];
     if (!server) throw new Error(`MCP server not found: ${name}`);
@@ -757,8 +1206,8 @@ export const kimiSwitchTauri = {
     return cli.callKimiMcpServerTool(name, target, toolName, argsJson);
   },
   authMcpServer: (name: string) => {
-    void name;
-    throw new Error("Kimi Code does not expose MCP authorization commands in the current CLI.");
+    if (!currentAppState) throw new Error("Kimi state is not loaded.");
+    return openKimiMcpLoginInTerminal(name, currentAppState.panelSettings);
   },
   resetMcpServerAuth: (name: string) => {
     void name;
@@ -810,7 +1259,7 @@ export const kimiSwitchTauri = {
     const currentVersion = await getVersion();
     const resp = await invoke<{ status: number; ok: boolean; body: string }>("http_request", {
       method: "GET",
-      url: "https://api.github.com/repos/sunhao-java/kimi-code-switch-gui/releases/latest",
+      url: "https://api.github.com/repos/fx1226/kimi-code-switch-gui/releases/latest",
       headers: { Accept: "application/vnd.github+json", "User-Agent": "kimi-code-switch-gui" },
       body: null,
     });
@@ -820,7 +1269,7 @@ export const kimiSwitchTauri = {
       currentVersion,
       latestVersion,
       hasUpdate: latestVersion ? compareReleaseVersions(latestVersion, currentVersion) > 0 : false,
-      releaseUrl: payload.html_url ?? "https://github.com/sunhao-java/kimi-code-switch-gui/releases",
+      releaseUrl: payload.html_url ?? "https://github.com/fx1226/kimi-code-switch-gui/releases",
       releaseName: payload.name ?? `v${latestVersion}`,
       releaseBody: payload.body ?? "",
       publishedAt: payload.published_at ?? "",
@@ -831,7 +1280,7 @@ export const kimiSwitchTauri = {
   readChangelog: async (locale: string): Promise<string | null> => {
     const resp = await invoke<{ status: number; ok: boolean; body: string }>("http_request", {
       method: "GET",
-      url: `https://raw.githubusercontent.com/sunhao-java/kimi-code-switch-gui/master/CHANGELOGS/${locale}.md`,
+      url: `https://raw.githubusercontent.com/fx1226/kimi-code-switch-gui/master/CHANGELOGS/${locale}.md`,
       headers: { "User-Agent": "kimi-code-switch-gui" },
       body: null,
     });
@@ -878,7 +1327,7 @@ export const kimiSwitchTauri = {
     await ensureUsageRuntime();
     if (currentAppState) {
       currentAppState.panelSettings.insights_status = "enabled";
-      await saveAppState(tauriFileAccess, currentAppState);
+      await savePanelSettings(currentAppState.panelSettings);
     }
     return { ok: true };
   },
@@ -886,7 +1335,7 @@ export const kimiSwitchTauri = {
     stopUsageRuntime();
     if (currentAppState) {
       currentAppState.panelSettings.insights_status = "disabled";
-      await saveAppState(tauriFileAccess, currentAppState);
+      await savePanelSettings(currentAppState.panelSettings);
     }
     return { ok: true as const };
   },
@@ -897,7 +1346,7 @@ export const kimiSwitchTauri = {
   usageSetConfig: async (patch: Partial<PanelSettings>) => {
     if (currentAppState) {
       Object.assign(currentAppState.panelSettings, patch);
-      await saveAppState(tauriFileAccess, currentAppState);
+      await savePanelSettings(currentAppState.panelSettings);
     }
     return { ok: true as const, settings: extractInsightsSettings(currentAppState) as never };
   },
@@ -955,7 +1404,7 @@ export const kimiSwitchTauri = {
   },
   usageOpenSessionTerminal: async (sessionId: string) => {
     const app = currentAppState?.panelSettings.terminal_app ?? "system-terminal";
-    await openSessionTerminal(sessionId, app);
+    await openSessionTerminal(sessionId, app, activeKimiCodeEnvironmentHome());
     return { ok: true as const };
   },
 
@@ -964,25 +1413,218 @@ export const kimiSwitchTauri = {
   listBackups: (state: AppState) => backup.listBackups(state),
   deleteBackup: (state: AppState, backupName: string) => backup.deleteBackup(state, backupName),
   restoreBackup: (state: AppState, backupName: string) => backup.restoreBackup(state, backupName),
-  restoreBackupSafe: (state: AppState, backupName: string, options?: { expectedSnapshot?: FileSnapshotBundle; allowOverwrite?: boolean }) => backup.restoreBackupSafe(state, backupName, options),
+  restoreBackupSafe: (state: AppState, backupName: string, options?: { expectedSnapshot?: FileSnapshotBundle; allowOverwrite?: boolean; allowRisk?: boolean }) => backup.restoreBackupSafe(state, backupName, options),
   restoreBackupDryRun: (state: AppState, backupName: string) => backup.restoreBackupDryRun(state, backupName),
   testBackupWebdav: (state: AppState) => backup.testBackupWebdav(state),
+  migrateLegacyWebDavBackup: (state: AppState, backupName: string, legacyEncryptionPassword?: string) =>
+    backup.migrateLegacyWebDavBackup(state, backupName, legacyEncryptionPassword),
+  exportBackupEncryptionKey: async () => {
+    const secret = await invoke<string>("get_or_create_backup_encryption_secret");
+    const filePath = await invoke<string | null>("save_file_with_dialog", {
+      content: `${secret}\n`,
+      defaultPath: "kimi-backup-recovery-key.txt",
+    });
+    return filePath == null ? { canceled: true as const } : { canceled: false as const, filePath };
+  },
+  importBackupEncryptionKey: async () => {
+    const selected = await openDialog({
+      multiple: false,
+      filters: [{ name: "Recovery key", extensions: ["txt", "key"] }],
+    });
+    if (typeof selected !== "string") return { canceled: true as const };
+    const secret = await tauriFileAccess.readText(selected);
+    if (secret === null) throw new Error("Backup recovery key file could not be read.");
+    const keyPath = await invoke<string>("import_backup_encryption_secret", { secret, replace: true });
+    return { canceled: false as const, filePath: selected, keyPath };
+  },
 
   // ── 全量导出/导入（所有环境的 Provider/Model/MCP/Profile + 全局面板设置）──
   exportFullBackup: async (state: AppState): Promise<FullBackupBundle> => {
     const { exportAllEnvConfigs } = await import("./envConfigStore");
     const allEnvConfigs = await exportAllEnvConfigs();
-    return buildFullBackup(state, allEnvConfigs);
+    const standardEntries = await Promise.all(
+      normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments).map(async (environment) => {
+        const configPath = getKimiCodeConfigPath(environment.homePath);
+        const mcpPath = getKimiCodeMcpConfigPath(environment.homePath);
+        const [configDocument, mcpDocument, tuiDocument, agentsDocument, skillsDirectory, pluginsDirectory] = await Promise.all([
+          tauriFileAccess.readText(configPath),
+          tauriFileAccess.readText(mcpPath),
+          tauriFileAccess.readText(`${environment.homePath}/tui.toml`),
+          tauriFileAccess.readText(`${environment.homePath}/AGENTS.md`),
+          invoke<PortableDirectoryBundle>("export_portable_directory", { path: `${environment.homePath}/skills` }),
+          invoke<PortableDirectoryBundle>("export_portable_directory", { path: `${environment.homePath}/plugins` }),
+        ]);
+        try {
+          return [environment.id, {
+            mainConfig: parseMainConfigDocument(configDocument),
+            mcpServers: parseMcpConfig(mcpDocument, { sourcePath: mcpPath }).mcpServers,
+            tuiDocument: tuiDocument ?? undefined,
+            agentsDocument: agentsDocument ?? undefined,
+            skillsDirectory,
+            pluginsDirectory,
+          }] as const;
+        } catch (error) {
+          throw new Error(`Cannot export environment ${environment.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }),
+    );
+    return buildFullBackup(state, allEnvConfigs, Object.fromEntries(standardEntries));
   },
   importFullBackup: async (bundle: FullBackupBundle): Promise<AppState> => {
-    const { importAllEnvConfigs } = await import("./envConfigStore");
-    // 1) 写回各环境的 Provider/Model 到 DB（先清空再整体写入）
-    await importAllEnvConfigs(extractEnvConfigsFromBackup(bundle));
-    // 2) 写回面板设置（含每个环境的 MCP/Profile 快照）到 SQLite
-    await savePanelSettings(rebuildPanelSettingsFromBackup(bundle));
-    // 3) 重新加载完整状态（会据此投影 config.toml / mcp.json）
+    const { exportAllEnvConfigs, importAllEnvConfigs } = await import("./envConfigStore");
+    const previousEnvConfigs = await exportAllEnvConfigs();
+    const rebuiltPanelSettings = rebuildPanelSettingsFromBackup(bundle);
+    const previousPanelSettings = currentAppState?.panelSettings ?? await getPanelSettings();
+    rebuiltPanelSettings.backup_webdav_password = previousPanelSettings?.backup_webdav_password ?? "";
+    const restoredEnvironments = normalizeKimiCodeEnvironments(rebuiltPanelSettings.kimi_code_environments);
+    const originalDocuments = await Promise.all(restoredEnvironments.flatMap((environment) => [
+      getKimiCodeConfigPath(environment.homePath),
+      getKimiCodeMcpConfigPath(environment.homePath),
+      `${environment.homePath}/tui.toml`,
+      `${environment.homePath}/AGENTS.md`,
+    ]).map(async (path) => {
+      const content = await tauriFileAccess.readText(path);
+      return { path, content, expectedHash: await sha256Text(content), writtenHash: undefined as string | undefined };
+    }));
+    const originalDocumentByPath = new Map(originalDocuments.map((document) => [document.path, document]));
+    const writeImportedDocument = async (path: string, content: string): Promise<void> => {
+      const original = originalDocumentByPath.get(path);
+      if (!original) throw new Error(`Missing import baseline for ${path}`);
+      original.writtenHash = await tauriFileAccess.writeTextCas!(path, content, original.expectedHash);
+    };
+    const originalSkillsDirectories = await Promise.all(restoredEnvironments.map(async (environment) => ({
+      path: `${environment.homePath}/skills`,
+      bundle: await invoke<PortableDirectoryBundle>("export_portable_directory", { path: `${environment.homePath}/skills` }),
+      writtenHash: undefined as string | undefined,
+    })));
+    const originalSkillsByPath = new Map(originalSkillsDirectories.map((directory) => [directory.path, directory]));
+    const originalPluginDirectories = await Promise.all(restoredEnvironments.map(async (environment) => ({
+      path: `${environment.homePath}/plugins`,
+      bundle: await invoke<PortableDirectoryBundle>("export_portable_directory", { path: `${environment.homePath}/plugins` }),
+      writtenHash: undefined as string | undefined,
+    })));
+    const originalPluginsByPath = new Map(originalPluginDirectories.map((directory) => [directory.path, directory]));
+    try {
+      for (const environmentBundle of bundle.environments) {
+        const environment = restoredEnvironments.find((candidate) => candidate.id === environmentBundle.environment.id);
+        if (!environment) continue;
+        const fallbackConfig = parseMainConfigDocument(null);
+        const mainConfig = environmentBundle.mainConfig
+          ? structuredClone(environmentBundle.mainConfig)
+          : {
+              ...fallbackConfig,
+              default_model: environmentBundle.profiles[environmentBundle.activeProfile]?.default_model
+                ?? Object.keys(environmentBundle.models)[0]
+                ?? "",
+              providers: structuredClone(environmentBundle.providers),
+              models: structuredClone(environmentBundle.models),
+            };
+        mainConfig.providers = structuredClone(environmentBundle.providers);
+        mainConfig.models = structuredClone(environmentBundle.models);
+        const stateForDocument = { ...(currentAppState ?? await loadAppState(tauriFileAccess)), mainConfig } as AppState;
+        await tauriFileAccess.ensureDir(environment.homePath);
+        // Keep writes sequential: Promise.all rejection does not cancel sibling
+        // writes and can otherwise race with the rollback below.
+        await writeImportedDocument(
+          getKimiCodeConfigPath(environment.homePath),
+          buildConfigDocument(stateForDocument),
+        );
+        await writeImportedDocument(
+          getKimiCodeMcpConfigPath(environment.homePath),
+          buildMcpConfigDocument({ mcpServers: environmentBundle.mcpServers }),
+        );
+        if (environmentBundle.tuiDocument !== undefined) {
+          await writeImportedDocument(`${environment.homePath}/tui.toml`, environmentBundle.tuiDocument);
+        }
+        if (environmentBundle.agentsDocument !== undefined) {
+          await writeImportedDocument(`${environment.homePath}/AGENTS.md`, environmentBundle.agentsDocument);
+        }
+        if (environmentBundle.skillsDirectory !== undefined) {
+          const path = `${environment.homePath}/skills`;
+          const original = originalSkillsByPath.get(path);
+          if (!original?.bundle.sha256) throw new Error(`Missing Skills import baseline for ${path}`);
+          original.writtenHash = await invoke<string>("replace_portable_directory", {
+            path,
+            bundle: environmentBundle.skillsDirectory,
+            expectedSha256: original.bundle.sha256,
+          });
+        }
+        if (environmentBundle.pluginsDirectory !== undefined) {
+          const path = `${environment.homePath}/plugins`;
+          const original = originalPluginsByPath.get(path);
+          if (!original?.bundle.sha256) throw new Error(`Missing Plugins import baseline for ${path}`);
+          const resolvedTargetHome = await invoke<string>("resolve_home_path", { path: environment.homePath });
+          const remapped = remapPluginDirectoryForRestore(
+            environmentBundle.pluginsDirectory,
+            environmentBundle.environment.homePath,
+            resolvedTargetHome,
+          );
+          original.writtenHash = await invoke<string>("replace_portable_directory", {
+            path,
+            bundle: remapped,
+            expectedSha256: original.bundle.sha256,
+          });
+        }
+      }
+      // Keep disabled resources and GUI-only model metadata in the compatibility cache.
+      await importAllEnvConfigs(extractEnvConfigsFromBackup(bundle));
+      await savePanelSettings(rebuiltPanelSettings);
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      for (const original of originalDocuments.reverse()) {
+        if (original.writtenHash === undefined) continue;
+        try {
+          if (original.content === null) {
+            await tauriFileAccess.removeTextCas!(original.path, original.writtenHash);
+          } else {
+            await tauriFileAccess.writeTextCas!(original.path, original.content, original.writtenHash);
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(`${original.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      for (const original of originalSkillsDirectories.reverse()) {
+        if (original.writtenHash === undefined) continue;
+        try {
+          await invoke("replace_portable_directory", {
+            path: original.path,
+            bundle: original.bundle,
+            expectedSha256: original.writtenHash,
+          });
+        } catch (rollbackError) {
+          rollbackErrors.push(`${original.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      for (const original of originalPluginDirectories.reverse()) {
+        if (original.writtenHash === undefined) continue;
+        try {
+          await invoke("replace_portable_directory", {
+            path: original.path,
+            bundle: original.bundle,
+            expectedSha256: original.writtenHash,
+          });
+        } catch (rollbackError) {
+          rollbackErrors.push(`${original.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      try {
+        await importAllEnvConfigs(previousEnvConfigs);
+      } catch (rollbackError) {
+        rollbackErrors.push(`environment cache: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+      if (previousPanelSettings) {
+        try {
+          await savePanelSettings(previousPanelSettings);
+        } catch (rollbackError) {
+          rollbackErrors.push(`panel settings: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        }
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(rollbackErrors.length > 0
+        ? `${message} (rollback incomplete: ${rollbackErrors.join("; ")})`
+        : message);
+    }
     const reloaded = await loadAppState(tauriFileAccess);
-    await saveAppState(tauriFileAccess, reloaded);
     currentAppState = reloaded;
     return reloaded;
   },

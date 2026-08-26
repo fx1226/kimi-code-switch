@@ -1,5 +1,15 @@
 // 文件指纹/快照（前端版，移植自 main/modules/fileSnapshots.ts）。
 // sha256 用 Web Crypto；stat 用 Rust file_stat；读取用 fileAccess。
+//
+// 并发模型（optimistic revision guard，非 OS 级 CAS）：
+// - `write_text_cas`/`remove_file_cas` 在写/删前比较 sha256 与期望值，写后再复核；
+//   这显著缩小「读-比-写」窗口，但不是原子 compare-and-swap。
+// - 外部进程在最终检查与 rename/写入之间的极小窗口内仍可修改文件；此竞态无法仅靠
+//   单文件 CAS 消除（官方 CLI 不遵循本应用的 advisory lock）。
+// - 用户恢复路径：saveStateSafe 检测到 external-change 后返回 `external-change` 冲突，
+//   UI 展示当前盘上内容与预览 diff；用户确认「强制覆盖」才允许覆盖，或取消保留本地修改。
+// - 崩溃一致性：跨文件保存先写 journal（C1/C3），启动时仅在 revision 可证明时提交或
+//   回滚；未知 revision 进入 C2 只读恢复模式，绝不静默覆盖。
 import { invoke } from "@tauri-apps/api/core";
 
 import { buildPanelSettingsDocument, createLineDiff, normalizeStatePaths } from "@shared/configStore";

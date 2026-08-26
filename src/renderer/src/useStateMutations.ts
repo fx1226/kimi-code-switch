@@ -19,7 +19,7 @@ interface StateMutationsContext {
   setNotice: Dispatch<SetStateAction<string>>;
   setDiagnostics: Dispatch<SetStateAction<DiagnosticsState>>;
   refreshPreview: (draft?: AppState) => Promise<void>;
-  persistState: (nextState: AppState) => Promise<void>;
+  persistState: (nextState: AppState) => Promise<boolean>;
   persistImmediateState: (nextVisibleState: AppState, nextSavedStateOverride?: AppState) => Promise<void>;
 }
 

@@ -2,16 +2,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ManagedFileId } from "@shared/types";
 
+export type HistoryFileId = ManagedFileId | "tui" | "agents" | "skills";
+
 /**
  * 快照记录（从 Rust 返回）
  */
 export interface SnapshotRecord {
   id: number;
   snapshot_at: string; // ISO 8601 timestamp
-  file_id: ManagedFileId;
+  kimi_code_environment_id: string;
+  file_id: HistoryFileId;
   sha256: string;
   size_bytes: number;
   snapshot_path: string;
+  target_path: string;
   description: string | null;
 }
 
@@ -39,7 +43,7 @@ export async function initConfigHistory(): Promise<void> {
  * @returns 快照 ID，如果去重或失败则返回 null
  */
 export async function captureSnapshot(
-  fileId: ManagedFileId,
+  fileId: HistoryFileId,
   filePath: string,
   description?: string,
   kimiCodeEnvironmentId?: string,
@@ -66,12 +70,14 @@ export async function captureSnapshot(
  * @returns 按时间倒序排列的快照列表
  */
 export async function listSnapshots(
-  fileId?: ManagedFileId,
+  kimiCodeEnvironmentId: string,
+  fileId?: HistoryFileId,
   limit?: number,
 ): Promise<SnapshotRecord[]> {
   try {
     const result = await invoke<SnapshotRecord[]>("list_snapshots", {
       fileId: fileId ?? null,
+      kimiCodeEnvironmentId,
       limit: limit ?? 100,
     });
     return result;
@@ -119,6 +125,22 @@ export async function restoreSnapshot(snapshotId: number): Promise<boolean> {
   }
 }
 
+export async function assignLegacySnapshotEnvironment(
+  snapshotId: number,
+  kimiCodeEnvironmentId: string,
+): Promise<boolean> {
+  try {
+    await invoke("assign_legacy_snapshot_environment", {
+      snapshotId,
+      kimiCodeEnvironmentId,
+    });
+    return true;
+  } catch (err) {
+    console.error(`Failed to assign legacy snapshot ${snapshotId}:`, err);
+    return false;
+  }
+}
+
 /**
  * 清理旧快照。
  *
@@ -135,4 +157,3 @@ export async function cleanupOldSnapshots(): Promise<number> {
     return 0;
   }
 }
-

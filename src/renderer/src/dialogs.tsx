@@ -46,6 +46,8 @@ export interface BackupRecordsDialogState {
   errorMessage: string;
   deletingName?: string;
   restoringName?: string;
+  migratingName?: string;
+  legacyEncryptionPassword?: string;
 }
 
 export function useDialogEscape(onClose: () => void): void {
@@ -348,6 +350,8 @@ export function BackupRecordsDialog(
     locale: Locale;
     onDelete: (record: BackupRecord) => void;
     onRestore: (record: BackupRecord) => void;
+    onMigrateLegacy: (record: BackupRecord, legacyEncryptionPassword: string) => void;
+    onLegacyEncryptionPasswordChange: (value: string) => void;
     onClose: () => void;
   },
 ): JSX.Element {
@@ -385,6 +389,17 @@ export function BackupRecordsDialog(
             <X size={16} />
           </button>
         </div>
+        {props.destinationType === "webdav" ? (
+          <label className="field">
+            <span>{t(props.locale, "backupLegacyEncryptionPassword")}</span>
+            <input
+              type="password"
+              value={props.legacyEncryptionPassword ?? ""}
+              placeholder={t(props.locale, "backupLegacyEncryptionPasswordHint")}
+              onChange={(event) => props.onLegacyEncryptionPasswordChange(event.target.value)}
+            />
+          </label>
+        ) : null}
         {props.isLoading ? (
           <div className="backup-records-empty">
             <LoaderCircle size={18} className="button-spinner" />
@@ -412,6 +427,17 @@ export function BackupRecordsDialog(
                   </div>
                   <div className="backup-record-action-cell">
                     <div className="backup-record-actions">
+                      {props.destinationType === "webdav" ? (
+                        <button
+                          className={props.migratingName === record.name ? "action-button compact is-loading" : "action-button compact secondary"}
+                          type="button"
+                          disabled={Boolean(props.restoringName || props.deletingName || props.migratingName)}
+                          onClick={() => props.onMigrateLegacy(record, props.legacyEncryptionPassword ?? "")}
+                        >
+                          {props.migratingName === record.name ? <LoaderCircle size={16} className="button-spinner" /> : null}
+                          <span>{t(props.locale, "backupLegacyMigrateAction")}</span>
+                        </button>
+                      ) : null}
                       <button
                         className={
                           props.restoringName === record.name
@@ -420,7 +446,7 @@ export function BackupRecordsDialog(
                         }
                         type="button"
                         disabled={
-                          props.restoringName === record.name || props.deletingName === record.name
+                          Boolean(props.restoringName || props.deletingName || props.migratingName)
                         }
                         onClick={() => props.onRestore(record)}
                       >
@@ -437,7 +463,7 @@ export function BackupRecordsDialog(
                         className={props.deletingName === record.name ? "action-button compact danger is-loading" : "action-button compact danger"}
                         type="button"
                         disabled={
-                          props.deletingName === record.name || props.restoringName === record.name
+                          Boolean(props.deletingName || props.restoringName || props.migratingName)
                         }
                         onClick={() => props.onDelete(record)}
                       >

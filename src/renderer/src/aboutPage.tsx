@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bug, Check, ExternalLink, FileText, Github, LoaderCircle, Mail, RefreshCw } from "lucide-react";
+import { Bug, Check, ExternalLink, FileText, Github, LoaderCircle, Mail, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { compareReleaseVersions, normalizeReleaseVersion } from "@shared/versionUtils";
 import type { Locale } from "@shared/types";
@@ -32,14 +32,143 @@ export const ABOUT_INFO = {
   version: "2.2.5",
   author: "Hulk Sun",
   license: "MIT",
-  repositoryUrl: "https://github.com/sunhao-java/kimi-code-switch-gui",
-  issuesUrl: "https://github.com/sunhao-java/kimi-code-switch-gui/issues",
+  repositoryUrl: "https://github.com/fx1226/kimi-code-switch-gui",
+  issuesUrl: "https://github.com/fx1226/kimi-code-switch-gui/issues",
   authorBlogUrl: "https://www.crazy-coder.cn",
   contactEmail: "sunhao.java@gmail.com",
 };
 
+/** F2：官方契约验证基线（对齐 plan 第 1.1 节固定基线；升级时更新）。 */
+export const OFFICIAL_BASELINE = {
+  version: "0.38.0",
+  commit: "0999454bdcb5ddd98f39bffee434dcf0a810f394",
+  releaseDate: "2026-08-20",
+};
+
+/** F2：能力五档分类（支持 / 只透传 / 只读 / 委托 TUI / 未支持）。 */
+export const CAPABILITY_TIERS: Array<{
+  key: string;
+  tier: "supported" | "passthrough" | "readonly" | "delegated-tui" | "unsupported";
+  i18nKey: string;
+}> = [
+  { key: "config", tier: "supported", i18nKey: "aboutCompatConfig" },
+  { key: "mcp", tier: "supported", i18nKey: "aboutCompatMcp" },
+  { key: "tui", tier: "supported", i18nKey: "aboutCompatTui" },
+  { key: "skills", tier: "supported", i18nKey: "aboutCompatSkills" },
+  { key: "plugins", tier: "readonly", i18nKey: "aboutCompatPlugins" },
+  { key: "providers", tier: "supported", i18nKey: "aboutCompatProviders" },
+  { key: "agents", tier: "passthrough", i18nKey: "aboutCompatAgents" },
+  { key: "pluginLifecycle", tier: "delegated-tui", i18nKey: "aboutCompatPluginLifecycle" },
+  { key: "oauth", tier: "delegated-tui", i18nKey: "aboutCompatOauth" },
+];
+
 const PENDING_UPDATE_VERSION_STORAGE_KEY = "kimi-switch.pending-update-version";
 const UPDATE_CHECK_COOLDOWN_MS = 30 * 1000;
+
+/** F2：兼容性状态页文案（独立字典，避免污染全局 i18n；6 语言齐全）。 */
+const COMPAT_STRINGS: Record<string, Record<Locale, string>> = {
+  compatTitle: {
+    "zh-CN": "官方兼容性状态",
+    "zh-TW": toTraditionalChinese("官方兼容性状态"),
+    "en-US": "Official Compatibility Status",
+    "ja-JP": "公式互換性ステータス",
+    "de-DE": "Offizieller Kompatibilitätsstatus",
+    "es-ES": "Estado de compatibilidad oficial",
+  },
+  compatCapability: {
+    "zh-CN": "能力", "zh-TW": toTraditionalChinese("能力"), "en-US": "Capability", "ja-JP": "機能", "de-DE": "Fähigkeit", "es-ES": "Capacidad",
+  },
+  compatStatus: {
+    "zh-CN": "状态", "zh-TW": toTraditionalChinese("状态"), "en-US": "Status", "ja-JP": "状態", "de-DE": "Status", "es-ES": "Estado",
+  },
+  compatBaseline: {
+    "zh-CN": "已验证基线：Kimi Code {version}（{commit}，发布于 {date}）",
+    "zh-TW": toTraditionalChinese("已验证基线：Kimi Code {version}（{commit}，发布于 {date}）"),
+    "en-US": "Verified baseline: Kimi Code {version} ({commit}, released {date})",
+    "ja-JP": "検証済みベースライン: Kimi Code {version}（{commit}、{date} リリース）",
+    "de-DE": "Verifizierte Basis: Kimi Code {version} ({commit}, veröffentlicht {date})",
+    "es-ES": "Base verificada: Kimi Code {version} ({commit}, publicado {date})",
+  },
+  compatLocal: {
+    "zh-CN": "本机 Kimi Code 版本：{version}",
+    "zh-TW": toTraditionalChinese("本机 Kimi Code 版本：{version}"),
+    "en-US": "Local Kimi Code version: {version}",
+    "ja-JP": "ローカルの Kimi Code バージョン: {version}",
+    "de-DE": "Lokale Kimi Code-Version: {version}",
+    "es-ES": "Versión local de Kimi Code: {version}",
+  },
+  compatNone: {
+    "zh-CN": "未检测到（见总览页）",
+    "zh-TW": toTraditionalChinese("未检测到（见总览页）"),
+    "en-US": "Not detected (see overview)",
+    "ja-JP": "検出されません（概要ページ参照）",
+    "de-DE": "Nicht erkannt (siehe Übersicht)",
+    "es-ES": "No detectada (ver resumen)",
+  },
+  compatRiskTitle: {
+    "zh-CN": "版本高于基线时的风险提示",
+    "zh-TW": toTraditionalChinese("版本高于基线时的风险提示"),
+    "en-US": "Risk when the local version is newer than the baseline",
+    "ja-JP": "ローカル版がベースラインより新しい場合のリスク",
+    "de-DE": "Risiko, wenn die lokale Version neuer als die Basis ist",
+    "es-ES": "Riesgo si la versión local es más nueva que la base",
+  },
+  compatRiskBody: {
+    "zh-CN": "本机 Kimi Code 版本高于本 GUI 已验证的 0.38.0 基线时，配置/MCP/TUI/Skills/插件契约可能已变化；「支持」状态仅为 0.38 验证结论。升级前请参考升级 SOP。",
+    "zh-TW": toTraditionalChinese("本机 Kimi Code 版本高于本 GUI 已验证的 0.38.0 基线时，配置/MCP/TUI/Skills/插件契约可能已变化；「支持」状态仅为 0.38 验证结论。升级前请参考升级 SOP。"),
+    "en-US": "When the local Kimi Code version is newer than the verified 0.38.0 baseline, config/MCP/TUI/Skills/plugin contracts may have changed; \"Supported\" only reflects the 0.38 verification. Follow the upgrade SOP before upgrading.",
+    "ja-JP": "ローカルの Kimi Code バージョンが検証済み 0.38.0 より新しい場合、config/MCP/TUI/Skills/プラグイン契約が変わっている可能性があります。「対応」は 0.38 検証の結果です。アップグレード前は SOP に従ってください。",
+    "de-DE": "Wenn die lokale Kimi Code-Version neuer als die verifizierte 0.38.0-Basis ist, können sich config/MCP/TUI/Skills/Plugin-Verträge geändert haben; \"Unterstützt\" spiegelt nur die 0.38-Verifikation wider. Befolgen Sie vor dem Upgrade die SOP.",
+    "es-ES": "Cuando la versión local de Kimi Code es más nueva que la base verificada 0.38.0, los contratos de config/MCP/TUI/Skills/plugins pueden cambiar; \"Compatible\" solo refleja la verificación 0.38. Siga el SOP de actualización antes de actualizar.",
+  },
+  compatTierSupported: {
+    "zh-CN": "支持", "zh-TW": toTraditionalChinese("支持"), "en-US": "Supported", "ja-JP": "対応", "de-DE": "Unterstützt", "es-ES": "Compatible",
+  },
+  compatTierPassthrough: {
+    "zh-CN": "只透传", "zh-TW": toTraditionalChinese("只透传"), "en-US": "Passthrough", "ja-JP": "透過のみ", "de-DE": "Nur Durchreichen", "es-ES": "Solo paso directo",
+  },
+  compatTierReadonly: {
+    "zh-CN": "只读", "zh-TW": toTraditionalChinese("只读"), "en-US": "Read-only", "ja-JP": "読み取り専用", "de-DE": "Schreibgeschützt", "es-ES": "Solo lectura",
+  },
+  compatTierDelegatedTui: {
+    "zh-CN": "委托 TUI", "zh-TW": toTraditionalChinese("委托 TUI"), "en-US": "Delegated to TUI", "ja-JP": "TUI 委任", "de-DE": "An TUI delegiert", "es-ES": "Delegado a TUI",
+  },
+  compatTierUnsupported: {
+    "zh-CN": "未支持", "zh-TW": toTraditionalChinese("未支持"), "en-US": "Unsupported", "ja-JP": "未対応", "de-DE": "Nicht unterstützt", "es-ES": "No compatible",
+  },
+  compatConfig: {
+    "zh-CN": "config.toml 结构化管理", "zh-TW": toTraditionalChinese("config.toml 结构化管理"), "en-US": "config.toml structured management", "ja-JP": "config.toml 構造化管理", "de-DE": "config.toml strukturierte Verwaltung", "es-ES": "Gestión estructurada de config.toml",
+  },
+  compatMcp: {
+    "zh-CN": "MCP 配置/测试", "zh-TW": toTraditionalChinese("MCP 配置/测试"), "en-US": "MCP config/testing", "ja-JP": "MCP 設定/テスト", "de-DE": "MCP-Konfiguration/-Test", "es-ES": "Config/pruebas de MCP",
+  },
+  compatTui: {
+    "zh-CN": "TUI 设置", "zh-TW": toTraditionalChinese("TUI 设置"), "en-US": "TUI settings", "ja-JP": "TUI 設定", "de-DE": "TUI-Einstellungen", "es-ES": "Ajustes de TUI",
+  },
+  compatSkills: {
+    "zh-CN": "Skills 发现/预览", "zh-TW": toTraditionalChinese("Skills 发现/预览"), "en-US": "Skills discovery/preview", "ja-JP": "Skills 検出/プレビュー", "de-DE": "Skills-Erkennung/-Vorschau", "es-ES": "Descubrimiento/vista previa de skills",
+  },
+  compatPlugins: {
+    "zh-CN": "插件清单（只读）", "zh-TW": toTraditionalChinese("插件清单（只读）"), "en-US": "Plugin inventory (read-only)", "ja-JP": "プラグイン一覧（読み取り専用）", "de-DE": "Plugin-Inventar (schreibgeschützt)", "es-ES": "Inventario de plugins (solo lectura)",
+  },
+  compatProviders: {
+    "zh-CN": "Provider/Model 管理", "zh-TW": toTraditionalChinese("Provider/Model 管理"), "en-US": "Provider/Model management", "ja-JP": "Provider/Model 管理", "de-DE": "Provider/Model-Verwaltung", "es-ES": "Gestión de providers/modelos",
+  },
+  compatAgents: {
+    "zh-CN": "Agents 目录/extra_agent_dirs", "zh-TW": toTraditionalChinese("Agents 目录/extra_agent_dirs"), "en-US": "Agents dirs / extra_agent_dirs", "ja-JP": "Agents ディレクトリ / extra_agent_dirs", "de-DE": "Agents-Verzeichnisse / extra_agent_dirs", "es-ES": "Dirs de agents / extra_agent_dirs",
+  },
+  compatPluginLifecycle: {
+    "zh-CN": "Plugin 生命周期", "zh-TW": toTraditionalChinese("Plugin 生命周期"), "en-US": "Plugin lifecycle", "ja-JP": "プラグインライフサイクル", "de-DE": "Plugin-Lebenszyklus", "es-ES": "Ciclo de vida de plugins",
+  },
+  compatOauth: {
+    "zh-CN": "MCP/账号 OAuth", "zh-TW": toTraditionalChinese("MCP/账号 OAuth"), "en-US": "MCP/account OAuth", "ja-JP": "MCP/アカウント OAuth", "de-DE": "MCP/Konto-OAuth", "es-ES": "OAuth de MCP/cuentas",
+  },
+};
+
+function compatText(locale: Locale, key: string, values: Record<string, string | number> = {}): string {
+  const template = COMPAT_STRINGS[key]?.[locale] ?? COMPAT_STRINGS[key]?.["en-US"] ?? key;
+  return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(values[name] ?? `{${name}}`));
+}
 
 function aboutText(
   locale: Locale,
@@ -771,6 +900,18 @@ export function AboutPage(props: {
   const [copiedReleaseUrl, setCopiedReleaseUrl] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource | "unknown">("unknown");
   const [pendingUpdateVersion, setPendingUpdateVersion] = useState(() => loadPendingUpdateVersion());
+  const [localCliVersion, setLocalCliVersion] = useState<string>("");
+  useEffect(() => {
+    let cancelled = false;
+    void window.kimiSwitch?.getCliVersion?.({ target: "kimi-code" })
+      .then((result) => {
+        if (!cancelled && result?.installed && result.version) {
+          setLocalCliVersion(result.version);
+        }
+      })
+      .catch(() => { /* 忽略，兼容性仍可展示基线 */ });
+    return () => { cancelled = true; };
+  }, []);
   const currentReleaseNotes = useChangelogForCurrentVersion(props.locale);
   const links = [
     {
@@ -958,6 +1099,50 @@ export function AboutPage(props: {
           </button>
         </div>
       </div>
+
+      <section className="about-section about-section-wide about-compat">
+        <div className="section-title about-section-title">
+          <ShieldCheck size={16} />
+          <span>{compatText(props.locale, "compatTitle")}</span>
+        </div>
+        <p className="about-compat-baseline">
+          {compatText(props.locale, "compatBaseline", {
+            version: OFFICIAL_BASELINE.version,
+            commit: OFFICIAL_BASELINE.commit,
+            date: OFFICIAL_BASELINE.releaseDate,
+          })}
+        </p>
+        <p className="about-compat-local">
+          {localCliVersion
+            ? compatText(props.locale, "compatLocal", { version: localCliVersion })
+            : compatText(props.locale, "compatNone")}
+        </p>
+        <table className="about-compat-table">
+          <thead>
+            <tr>
+              <th>{compatText(props.locale, "compatCapability")}</th>
+              <th>{compatText(props.locale, "compatStatus")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {CAPABILITY_TIERS.map((capability) => (
+              <tr key={capability.key}>
+                <td className="about-compat-capability">{compatText(props.locale, capability.i18nKey)}</td>
+                <td>
+                  <span className={`status-pill ${capability.tier === "supported" ? "on" : capability.tier === "passthrough" ? "" : "off"}`}>
+                    {compatText(props.locale, `compatTier${capability.tier.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("")}`)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="about-compat-risk">
+          <TriangleAlert size={15} />
+          <strong>{compatText(props.locale, "compatRiskTitle")}</strong>
+          <p>{compatText(props.locale, "compatRiskBody")}</p>
+        </div>
+      </section>
 
       {isDev ? (
         <section className="about-preview-panel">

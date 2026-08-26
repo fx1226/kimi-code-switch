@@ -190,6 +190,62 @@ beforeEach(() => {
 });
 
 describe("UsageLogWatcher parsing", () => {
+  it("resolves logs and sessions from the active KIMI_CODE_HOME", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_dir") return [] as never;
+      if (cmd === "file_stat") return null as never;
+      return undefined as never;
+    });
+    const watcher = new UsageLogWatcher({
+      getActiveProfile: () => "work",
+      getActiveEnvironmentHome: () => "/custom/kimi-home",
+    });
+
+    await watcher.start();
+    watcher.stop();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("list_dir", { path: "/custom/kimi-home/logs" });
+    expect(mockedInvoke).toHaveBeenCalledWith("list_dir", { path: "/custom/kimi-home/sessions" });
+    expect(mockedInvoke).toHaveBeenCalledWith("file_stat", { path: "/custom/kimi-home/logs/kimi-code.log" });
+  });
+
+  it("resets the global offset when log rotation changes the inode", async () => {
+    const first = `${JSON.stringify({
+      type: "usage.record",
+      model: "kimi/first",
+      usage: { inputOther: 1, output: 1 },
+      time: 1000,
+    })}\n`;
+    const second = `${JSON.stringify({
+      type: "usage.record",
+      model: "kimi/second",
+      usage: { inputOther: 2, output: 2 },
+      time: 2000,
+    })}\n`;
+    let content = first;
+    let inode = 1;
+    mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      const path = (args as { path?: string } | undefined)?.path ?? "";
+      if (cmd === "list_dir") return [] as never;
+      if (cmd === "file_stat" && path.endsWith("logs/kimi-code.log")) {
+        return { size: content.length, mtime_ms: inode, ino: inode } as never;
+      }
+      if (cmd === "file_stat") return null as never;
+      if (cmd === "read_file_slice") return content as never;
+      return undefined as never;
+    });
+    const watcher = new UsageLogWatcher({ getActiveProfile: () => "default" });
+
+    await watcher.start();
+    content = second;
+    inode = 2;
+    await watcher.ingestNow();
+    watcher.stop();
+
+    expect(mockedInsert).toHaveBeenCalledTimes(2);
+    expect(mockedInsert.mock.calls.map(([event]) => event.model)).toEqual(["kimi/first", "kimi/second"]);
+  });
+
   it("parses LLM step lines into UsageEvents with provider/model/session context", async () => {
     primeInvokeForHistoricalIngest(SAMPLE_LOG);
     const events: UsageEvent[] = [];

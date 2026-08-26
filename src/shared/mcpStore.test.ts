@@ -22,6 +22,7 @@ describe("mcpStore", () => {
     const config = parseMcpConfig(`{
       "mcpServers": {
         "linear": {
+          "transport": "sse",
           "url": "https://example.test/sse",
           "auth": "oauth"
         }
@@ -174,5 +175,42 @@ describe("mcpStore", () => {
 
   it("throws on invalid MCP config instead of silently returning empty config", () => {
     expect(() => parseMcpConfig("{not-json}")).toThrow(/Invalid MCP config/);
+  });
+
+  it("rejects entries that the official MCP schema would reject", () => {
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":null}}')).toThrow(/must be an object/);
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"command":""}}}')).toThrow(/command must be non-empty/);
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"url":"not-a-url"}}}')).toThrow(/URL must be valid/);
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"command":"node","startupTimeoutMs":0}}}')).toThrow(/startupTimeoutMs/);
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"url":"https://x.test","enabledTools":[1]}}}')).toThrow(/enabledTools/);
+  });
+
+  it("infers ordinary HTTP for URL entries unless SSE is explicit", () => {
+    const inferred = parseMcpConfigStrict('{"mcpServers":{"remote":{"url":"https://x.test/sse"}}}');
+    expect(inferred.mcpServers.remote.transport).toBe("streamable-http");
+  });
+
+  it("accepts the official empty object form as an empty MCP config", () => {
+    expect(parseMcpConfigStrict("{}")).toEqual({ mcpServers: {} });
+  });
+
+  it("validates and preserves the optional stdio runtime_id", () => {
+    const valid = parseMcpConfigStrict(JSON.stringify({
+      mcpServers: {
+        remoteRuntime: {
+          command: "node",
+          runtime_id: "runtime-a",
+          executor: "kaos",
+        },
+      },
+    }));
+    expect(JSON.parse(buildMcpConfigDocument(valid)).mcpServers.remoteRuntime).toMatchObject({
+      runtime_id: "runtime-a",
+      executor: "kaos",
+    });
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"command":"node","runtime_id":""}}}'))
+      .toThrow(/runtime_id/);
+    expect(() => parseMcpConfigStrict('{"mcpServers":{"bad":{"command":"node","runtime_id":42}}}'))
+      .toThrow(/runtime_id/);
   });
 });

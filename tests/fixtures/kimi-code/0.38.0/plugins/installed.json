@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "kimi-datasource",
+      "root": "<KIMI_HOME>/plugins/managed/kimi-datasource",
+      "source": "npm:@moonshot-ai/kimi-datasource@3.4.0",
+      "enabled": true,
+      "installedAt": "2026-08-20T00:00:00.000Z",
+      "updatedAt": "2026-08-20T00:00:00.000Z",
+      "originalSource": "npm:@moonshot-ai/kimi-datasource@3.4.0",
+      "capabilities": {
+        "mcpServers": ["data"],
+        "hooks": []
+      }
+    }
+  ]
+}

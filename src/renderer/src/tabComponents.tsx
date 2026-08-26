@@ -778,7 +778,7 @@ export function ProviderForm(props: {
       <ProviderAdvancedSection locale={props.locale} name={props.name} value={props.value} onChange={props.onChange} />
       <ActionFooter
         onSave={() => {
-          if (endpointUrl === null) {
+          if (hasEndpointFormatError) {
             setEndpointCheckState("failed");
             setEndpointCheckMessage(t(props.locale, "endpointInvalidUrl"));
             return;
@@ -1242,6 +1242,20 @@ export function McpServerForm(props: {
 }): JSX.Element {
   const isRemoteTransport = isRemoteMcpTransport(props.value.transport);
   const [invalidLineFields, setInvalidLineFields] = useState<Set<string>>(() => new Set());
+  const extra = props.value.extra ?? {};
+
+  const updateExtra = (key: string, value: unknown): void => {
+    const next = { ...extra };
+    if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
+    props.onChange(props.name, {
+      ...props.value,
+      extra: Object.keys(next).length > 0 ? next : undefined,
+    });
+  };
 
   useEffect(() => {
     setInvalidLineFields(new Set());
@@ -1349,6 +1363,81 @@ export function McpServerForm(props: {
           />
         </>
       )}
+      <AdvancedCollapse label={t(props.locale, "mcpAdvancedRuntimeTitle")}>
+        <div className="settings-inline-fields">
+          <Field
+            label={t(props.locale, "mcpStartupTimeoutMs")}
+            value={typeof extra.startupTimeoutMs === "number" ? String(extra.startupTimeoutMs) : ""}
+            inputMode="numeric"
+            onChange={(value) => {
+              const parsed = Number.parseInt(value, 10);
+              updateExtra("startupTimeoutMs", Number.isFinite(parsed) && parsed > 0 ? parsed : undefined);
+            }}
+          />
+          <Field
+            label={t(props.locale, "mcpToolTimeoutMs")}
+            value={typeof extra.toolTimeoutMs === "number" ? String(extra.toolTimeoutMs) : ""}
+            inputMode="numeric"
+            onChange={(value) => {
+              const parsed = Number.parseInt(value, 10);
+              updateExtra("toolTimeoutMs", Number.isFinite(parsed) && parsed > 0 ? parsed : undefined);
+            }}
+          />
+        </div>
+        {isRemoteTransport ? (
+          <>
+            <Field
+              label={t(props.locale, "mcpBearerTokenEnvVar")}
+              value={typeof extra.bearerTokenEnvVar === "string" ? extra.bearerTokenEnvVar : ""}
+              onChange={(value) => updateExtra("bearerTokenEnvVar", value.trim())}
+            />
+            <label className="toggle-field">
+              <input
+                type="checkbox"
+                checked={extra.auth === "oauth"}
+                onChange={(event) => updateExtra("auth", event.target.checked ? "oauth" : undefined)}
+              />
+              <span>{t(props.locale, "mcpOauthRequired")}</span>
+            </label>
+          </>
+        ) : (
+          <Field
+            label={t(props.locale, "mcpCwd")}
+            value={typeof extra.cwd === "string" ? extra.cwd : ""}
+            onChange={(value) => updateExtra("cwd", value.trim())}
+          />
+        )}
+        <LineCodeField
+          label={t(props.locale, "mcpEnabledTools")}
+          hint={t(props.locale, "mcpToolsListHint")}
+          fieldKey="enabledTools"
+          resetKey={`${props.name}:${props.value.transport}:enabledTools`}
+          value={formatListLines(Array.isArray(extra.enabledTools) ? extra.enabledTools.filter((item): item is string => typeof item === "string") : [])}
+          placeholder={t(props.locale, "mcpToolsListPlaceholder")}
+          invalidMessage={t(props.locale, "mcpLineListInvalid")}
+          rows={3}
+          onValidityChange={updateLineFieldValidity}
+          onValidChange={(value) => {
+            updateExtra("enabledTools", parseListLines(value));
+            return true;
+          }}
+        />
+        <LineCodeField
+          label={t(props.locale, "mcpDisabledTools")}
+          hint={t(props.locale, "mcpToolsListHint")}
+          fieldKey="disabledTools"
+          resetKey={`${props.name}:${props.value.transport}:disabledTools`}
+          value={formatListLines(Array.isArray(extra.disabledTools) ? extra.disabledTools.filter((item): item is string => typeof item === "string") : [])}
+          placeholder={t(props.locale, "mcpToolsListPlaceholder")}
+          invalidMessage={t(props.locale, "mcpLineListInvalid")}
+          rows={3}
+          onValidityChange={updateLineFieldValidity}
+          onValidChange={(value) => {
+            updateExtra("disabledTools", parseListLines(value));
+            return true;
+          }}
+        />
+      </AdvancedCollapse>
       <AdvancedCollapse label={t(props.locale, "mcpToolWorkbenchTitle")}>
         <McpToolWorkbench key={props.name} locale={props.locale} serverName={props.name} server={props.value} />
       </AdvancedCollapse>
@@ -1359,6 +1448,16 @@ export function McpServerForm(props: {
         deleteLabel={t(props.locale, "delete")}
         isSaveDisabled={invalidLineFields.size > 0}
       >
+        {isRemoteTransport && extra.auth === "oauth" ? (
+          <button
+            className="action-button"
+            type="button"
+            disabled={props.isTesting}
+            onClick={() => void props.onRunAction("auth", props.name)}
+          >
+            <span>{t(props.locale, "mcpOauthLogin")}</span>
+          </button>
+        ) : null}
         <button
           className={props.isTesting ? "action-button is-loading" : "action-button"}
           type="button"
@@ -1862,7 +1961,7 @@ export function createFallbackState(): AppState {
       default_model: "",
       default_plan_mode: false,
       default_permission_mode: "",
-      merge_all_available_skills: false,
+      merge_all_available_skills: true,
       hooks: [],
       models: {},
       providers: {},

@@ -9,6 +9,7 @@ import { formatAcceleratorForPlatform, getBrowserShortcutPlatform, normalizeShor
 
 import { CommandPalette } from "./commandPalette";
 import { QuickProfileSwitcher } from "./quickProfileSwitcher";
+import type { SaveRecoveryInfo } from "./tauri/kimiSwitch";
 import { TabPanels } from "./tabs/TabPanels";
 import { ProfileCentricView } from "./views/ProfileCentricView";
 import { AddAssistantWizard } from "./wizards/AddAssistantWizard";
@@ -55,6 +56,7 @@ export function App(): JSX.Element {
     isSkillsLoading,
     documentViewer, setDocumentViewer,
     backupRecordsDialog, setBackupRecordsDialog,
+    migrateLegacyBackupRecord,
     doctorReport,
     setFileSnapshot,
     error, setError, notice, setNotice, externalChange, setExternalChange,
@@ -152,6 +154,26 @@ export function App(): JSX.Element {
   const requestCascadeDelete = (type: "provider" | "model", name: string): void => {
     setCascadeTarget({ type, name, impact: getCascadePreview(state, { type, name }) });
   };
+
+  // C2：启动后展示待人工恢复的 save journal（unknown → 只读恢复；quarantined → 提示）。
+  const [saveRecovery, setSaveRecovery] = useState<SaveRecoveryInfo | null>(null);
+  useEffect(() => {
+    const api = getApi();
+    if (api?.getPendingSaveRecovery) {
+      const info = api.getPendingSaveRecovery();
+      if (info) setSaveRecovery(info);
+    }
+    // loadState 完成后再次检查（首次检查可能在 loadState 尚未填充 pendingSaveRecovery 时执行）。
+    const check = (): void => {
+      const apiNow = getApi();
+      if (apiNow?.getPendingSaveRecovery) {
+        const info = apiNow.getPendingSaveRecovery();
+        setSaveRecovery(info ?? null);
+      }
+    };
+    window.addEventListener("kimi-refresh", check);
+    return () => window.removeEventListener("kimi-refresh", check);
+  }, []);
 
   useShortcuts({
     shortcuts,
@@ -288,6 +310,40 @@ export function App(): JSX.Element {
               className="app-tip-close"
               aria-label={t(locale, "close")}
               onClick={() => setExternalChange(null)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {saveRecovery ? (
+        <div className="app-tip-layer" role="dialog" aria-label={t(locale, "saveRecoveryTitle")}>
+          <div className="app-tip app-tip-warning">
+            <AlertTriangle size={18} className="app-tip-icon" />
+            <span className="app-tip-message">
+              {saveRecovery.action === "unknown" || saveRecovery.action === "unknown-restore"
+                ? t(locale, "saveRecoveryUnknown")
+                : t(locale, saveRecovery.reason === "malformed" ? "saveRecoveryQuarantinedMalformed" : "saveRecoveryQuarantinedUnsupported")}
+            </span>
+            <button
+              type="button"
+              className="app-tip-action"
+              onClick={async () => {
+                const api = getApi();
+                if (!api?.resolveSaveRecovery) return;
+                await api.resolveSaveRecovery("abandon");
+                setSaveRecovery(null);
+                setNotice(t(locale, "saveRecoveryAbandoned"));
+              }}
+            >
+              <X size={13} />
+              {t(locale, "saveRecoveryAbandon")}
+            </button>
+            <button
+              type="button"
+              className="app-tip-close"
+              aria-label={t(locale, "close")}
+              onClick={() => setSaveRecovery(null)}
             >
               <X size={14} />
             </button>
@@ -509,6 +565,11 @@ export function App(): JSX.Element {
           {...backupRecordsDialog}
           onDelete={deleteBackupRecord}
           onRestore={restoreBackupRecord}
+          onMigrateLegacy={migrateLegacyBackupRecord}
+          onLegacyEncryptionPasswordChange={(value) => setBackupRecordsDialog((current) => current ? {
+            ...current,
+            legacyEncryptionPassword: value,
+          } : current)}
           onClose={() => setBackupRecordsDialog(null)}
         />
       ) : null}

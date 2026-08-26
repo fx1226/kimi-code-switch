@@ -160,7 +160,7 @@ describe("useAppPersistence", () => {
 
     expect(loadStateApi).toHaveBeenCalled();
     expect(previewState).toHaveBeenCalledWith(expect.objectContaining({
-      configPath: "~/.kimi-code-switch-gui/.env/default/config.toml",
+      configPath: "~/.kimi-code/config.toml",
     }));
     expect(setPreview).toHaveBeenCalledWith({ config: "preview" });
     // 快照基线在 loadState 返回前同步建立（关闭外部变更检测被绕过的窗口）。
@@ -210,12 +210,48 @@ describe("useAppPersistence", () => {
       setSelectedMcpServer: vi.fn(),
     }));
 
+    let persisted = false;
     await act(async () => {
-      await result.current.persistState(state);
+      persisted = await result.current.persistState(state);
     });
 
+    expect(persisted).toBe(true);
     expect(saveStateSafe).toHaveBeenCalledWith(expect.any(Object), {
       expectedSnapshot: latestSnapshot,
     });
+  });
+
+  it("returns false and leaves saved state unchanged when persistence fails", async () => {
+    const state = createState();
+    const setSavedState = vi.fn();
+    vi.stubGlobal("kimiSwitch", {
+      saveStateSafe: vi.fn().mockRejectedValue(new Error("write conflict")),
+      previewState: vi.fn(),
+    });
+    const { result } = renderHook(() => useAppPersistence({
+      state,
+      savedState: state,
+      locale: "zh-CN",
+      setState: vi.fn(),
+      setSavedState,
+      setPreview: vi.fn(),
+      setError: vi.fn(),
+      setNotice: vi.fn(),
+      setDiagnostics: vi.fn(),
+      fileSnapshot: null,
+      setFileSnapshot: vi.fn(),
+      setDoctorReport: vi.fn(),
+      confirmExternalOverwrite: vi.fn(),
+      refreshPreview: vi.fn(),
+      refreshSkills: vi.fn(),
+      currentSelections: { provider: "", model: "", profile: "", mcpServer: "" },
+      setSelectedProvider: vi.fn(),
+      setSelectedModel: vi.fn(),
+      setSelectedProfile: vi.fn(),
+      setSelectedMcpServer: vi.fn(),
+    }));
+
+    await expect(result.current.persistState(state)).resolves.toBe(false);
+    expect(setSavedState).not.toHaveBeenCalled();
   });
 });

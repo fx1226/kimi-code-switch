@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  assignLegacySnapshotEnvironment,
   initConfigHistory,
   captureSnapshot,
   listSnapshots,
@@ -75,29 +76,34 @@ describe("configHistory", () => {
         {
           id: 1,
           snapshot_at: "2026-06-08T10:00:00Z",
+          kimi_code_environment_id: "work",
           file_id: "config",
           sha256: "abc123",
           size_bytes: 1024,
           snapshot_path: "/path/1.gz",
+          target_path: "/work/config.toml",
           description: "test",
         },
         {
           id: 2,
           snapshot_at: "2026-06-08T11:00:00Z",
+          kimi_code_environment_id: "work",
           file_id: "profiles",
           sha256: "def456",
           size_bytes: 2048,
           snapshot_path: "/path/2.gz",
+          target_path: "/work/config.profiles.toml",
           description: null,
         },
       ];
 
       mockInvoke.mockResolvedValueOnce(mockSnapshots);
 
-      const result = await listSnapshots("config", 50);
+      const result = await listSnapshots("work", "config", 50);
 
       expect(mockInvoke).toHaveBeenCalledWith("list_snapshots", {
         fileId: "config",
+        kimiCodeEnvironmentId: "work",
         limit: 50,
       });
       expect(result).toEqual(mockSnapshots);
@@ -106,10 +112,11 @@ describe("configHistory", () => {
     it("默认参数", async () => {
       mockInvoke.mockResolvedValueOnce([]);
 
-      await listSnapshots();
+      await listSnapshots("default");
 
       expect(mockInvoke).toHaveBeenCalledWith("list_snapshots", {
         fileId: null,
+        kimiCodeEnvironmentId: "default",
         limit: 100,
       });
     });
@@ -117,7 +124,7 @@ describe("configHistory", () => {
     it("失败时返回空数组", async () => {
       mockInvoke.mockRejectedValueOnce(new Error("db error"));
 
-      const result = await listSnapshots();
+      const result = await listSnapshots("default");
 
       expect(result).toEqual([]);
     });
@@ -163,6 +170,22 @@ describe("configHistory", () => {
       const result = await restoreSnapshot(42);
 
       expect(result).toBe(false);
+    });
+  });
+
+  describe("assignLegacySnapshotEnvironment", () => {
+    it("binds a legacy snapshot to a selected registered environment", async () => {
+      mockInvoke.mockResolvedValue(undefined as never);
+      await expect(assignLegacySnapshotEnvironment(7, "work")).resolves.toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith("assign_legacy_snapshot_environment", {
+        snapshotId: 7,
+        kimiCodeEnvironmentId: "work",
+      });
+    });
+
+    it("returns false when the assignment is rejected", async () => {
+      mockInvoke.mockRejectedValue(new Error("not registered"));
+      await expect(assignLegacySnapshotEnvironment(7, "missing")).resolves.toBe(false);
     });
   });
 

@@ -165,7 +165,7 @@ describe("getMcpActionNotice", () => {
   });
 
   it("returns auth started message for en-US", () => {
-    expect(getMcpActionNotice("en-US", "auth")).toBe("MCP authorization started.");
+    expect(getMcpActionNotice("en-US", "auth")).toContain("run /mcp-config");
   });
 
   it("returns reset success message for ja-JP", () => {
@@ -177,7 +177,7 @@ describe("getMcpActionNotice", () => {
   });
 
   it("returns auth message for es-ES", () => {
-    expect(getMcpActionNotice("es-ES", "auth")).toBe("Autorización MCP iniciada.");
+    expect(getMcpActionNotice("es-ES", "auth")).toContain("/mcp-config");
   });
 });
 

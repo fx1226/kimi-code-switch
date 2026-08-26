@@ -39,6 +39,14 @@ export interface ProviderConfig {
   type: string;
   base_url: string;
   api_key: string;
+  model_source?: "static" | "discover" | "oauth-catalog" | string;
+  default_model?: string;
+  oauth?: {
+    storage: "file" | "keyring" | string;
+    key: string;
+    oauth_host?: string;
+  };
+  source?: Record<string, unknown>;
   /**
    * 0.38.0：凭据回退变量名 → 环境变量名 的映射（config-file-only）。
    * 用于在 api_key 缺省或需要时从指定环境变量取凭据，不写入 config.toml。
@@ -71,6 +79,13 @@ export interface ModelConfig {
   model: string;
   max_context_size: number;
   capabilities: string[];
+  provider_id?: string;
+  protocol?: "anthropic" | "openai" | "openai_responses" | "google-genai" | string;
+  aliases?: string[];
+  max_input_size?: number;
+  off_effort?: string;
+  base_url?: string;
+  beta_api?: boolean;
   auth_mode?: ModelAuthMode;
   official_account_scope?: "global";
   pricing?: ModelPricing;
@@ -137,6 +152,8 @@ export interface MainConfig {
    */
   default_permission_mode: PermissionMode | "";
   merge_all_available_skills: boolean;
+  /** GUI-only presence tracking so official defaults are not materialized on no-op saves. */
+  explicit_fields?: string[];
   /**
    * 只读遗留字段：0.38.0 引擎忽略 profile_label，GUI 不再写入 config.toml，
    * 仅用于在加载时作为默认 profile 的显示名提示。
@@ -197,6 +214,73 @@ export interface McpConfig {
   mcpServers: Record<string, McpServerConfig>;
 }
 
+export interface TuiConfig {
+  theme?: string;
+  disable_paste_burst?: boolean;
+  renderLatex?: boolean;
+  cacheExpiryHint?: boolean;
+  editorCommand?: string;
+  notificationsEnabled?: boolean;
+  notificationCondition?: "unfocused" | "always";
+  upgradeAutoInstall?: boolean;
+  statusLine?: { items?: string[]; command?: string };
+}
+
+/** E2：tui.toml 文件中「显式声明」的值（未填即缺失）。`TuiConfig` 即此形态。 */
+export type ExplicitTuiConfig = TuiConfig;
+
+/** E2：应用官方默认值后的「有效」TUI 配置（每个字段都有值，可安全消费）。 */
+export interface EffectiveTuiConfig {
+  theme: string;
+  disablePasteBurst: boolean;
+  renderLatex: boolean;
+  cacheExpiryHint: boolean;
+  editorCommand: string | null;
+  notificationsEnabled: boolean;
+  notificationCondition: "unfocused" | "always";
+  upgradeAutoInstall: boolean;
+  statusLineItems: string[];
+  statusLineCommand: string | null;
+}
+
+export interface PluginDiagnostic {
+  severity: "error" | "warn" | "info";
+  message: string;
+}
+
+export interface PluginSkillRoot {
+  pluginId: string;
+  path: string;
+  rootSkillOnly?: boolean;
+}
+
+export interface PluginInventoryItem {
+  id: string;
+  root: string;
+  source: "local-path" | "zip-url" | "github" | string;
+  enabled: boolean;
+  installedAt: string;
+  updatedAt?: string;
+  originalSource?: string;
+  state: "ok" | "error";
+  displayName: string;
+  version?: string;
+  description?: string;
+  manifestPath?: string;
+  skillRoots: PluginSkillRoot[];
+  mcpServers: Record<string, McpServerConfig>;
+  hookCount: number;
+  diagnostics: PluginDiagnostic[];
+}
+
+export interface PluginInventoryReport {
+  installedPath: string;
+  plugins: PluginInventoryItem[];
+  skillRoots: PluginSkillRoot[];
+  mcpServers: Record<string, McpServerConfig>;
+  diagnostics: PluginDiagnostic[];
+}
+
 export interface ShortcutBinding {
   action: ShortcutAction;
   accelerator: string;
@@ -208,7 +292,10 @@ export interface KimiCodeEnvironment {
   id: string;
   name: string;
   homePath: string;
+  kind?: "default" | "managed" | "external";
   description?: string;
+  /** Project/session cwd used by GUI-launched Kimi processes. */
+  workingDirectory?: string;
   createdAt?: string;
   updatedAt?: string;
   mainConfig?: MainConfig;
@@ -299,6 +386,37 @@ export interface AppState {
   activeProfile: string;
   panelSettings: PanelSettings;
   mcpConfig: McpConfig;
+  tuiConfig?: TuiConfig;
+  /** GUI-only load-time revision（optimistic revision guard）；非 OS 级 CAS。 */
+  tuiConfigSha256?: string;
+  tuiDiagnostics?: { errors: string[]; warnings: string[] };
+  /** Read-only project scope discovered from the active environment cwd. */
+  projectMcpConfig?: {
+    projectRoot: string;
+    configPath: string;
+    trusted: boolean;
+    trustPath: string;
+    declaredMcpServers: Record<string, McpServerConfig>;
+    mcpServers: Record<string, McpServerConfig>;
+    error?: string;
+    sources?: Array<{
+      scope: "project-root" | "project-local";
+      path: string;
+      mcpServers: Record<string, McpServerConfig>;
+      error?: string;
+    }>;
+  };
+  /** Read-only effective plugin inventory from $KIMI_CODE_HOME/plugins. */
+  pluginInventory?: PluginInventoryReport;
+  projectLocalConfig?: {
+    projectRoot: string;
+    workingDirectory: string;
+    path: string;
+    additionalDirs: string[];
+    document: string;
+    sha256: string;
+    error?: string;
+  };
 }
 
 export interface OpenKimiTerminalRequest {
@@ -436,8 +554,10 @@ export interface ExternalChangeNotifyPayload {
   changedFileNames: string[];
 }
 
+export type RestoreFileId = ManagedFileId | "tui" | "agents";
+
 export interface RestoreDryRunFilePlan {
-  id: ManagedFileId;
+  id: RestoreFileId;
   path: string;
   action: "create" | "replace" | "unchanged";
   currentDocument: string;
@@ -458,6 +578,22 @@ export interface RestoreBackupResult {
   snapshot: FileSnapshotBundle;
   doctor: ConfigDoctorReport;
   rollbackBackupName: string;
+}
+
+/** B4：恢复被危险内容门禁拦截时的返回（local / WebDAV / history 统一）。 */
+export interface RestoreRiskBlockedResult {
+  ok: false;
+  reason: "dangerous-content";
+  doctor: ConfigDoctorReport;
+  risk: {
+    items: string[];
+    tiers: {
+      configHooks: string[];
+      stdioMcpCommands: string[];
+      remoteMcpEndpoints: string[];
+      agentsDocuments: string[];
+    };
+  };
 }
 
 export interface BackupMetadata {
@@ -515,12 +651,35 @@ export interface ExportBundle {
   panelSettings?: PanelSettings; // 可选：面板设置（字体、主题等）
 }
 
+/** A binary-safe, relative file captured from a portable Kimi Code directory. */
+export interface PortableFileBundle {
+  relativePath: string;
+  contentBase64: string;
+  executable: boolean;
+}
+
+/**
+ * Binary-safe directory snapshot. `exists` distinguishes an absent directory
+ * from an intentionally empty one so a full restore can reproduce either.
+ */
+export interface PortableDirectoryBundle {
+  exists: boolean;
+  directories: string[];
+  files: PortableFileBundle[];
+  sha256?: string;
+}
+
 /**
  * 单个 Kimi Code 环境的配置（用于全量备份的 environments[] 元素）。
  * Provider/Model/MCP/Profile 均按环境隔离，含真实密钥与 enabled 状态。
  */
 export interface EnvironmentConfigBundle {
   environment: KimiCodeEnvironment;
+  mainConfig?: MainConfig;
+  tuiDocument?: string;
+  agentsDocument?: string;
+  skillsDirectory?: PortableDirectoryBundle;
+  pluginsDirectory?: PortableDirectoryBundle;
   providers: Record<string, ProviderConfig>;
   models: Record<string, ModelConfig>;
   mcpServers: Record<string, McpServerConfig>;

@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   buildWebDavUrl,
   deleteWebDavPath,
+  downloadWebDavFile,
   ensureWebDavCollection,
   getWebDavAuthHeader,
   getWebDavBaseUrl,
@@ -59,6 +60,11 @@ describe("webdav URL helpers", () => {
     expect(() => getWebDavBaseUrl(settings({ backup_webdav_url: "   " } as Partial<PanelSettings>))).toThrow(/required/);
   });
 
+  it("rejects plaintext HTTP because backups contain credentials", () => {
+    expect(() => getWebDavBaseUrl(settings({ backup_webdav_url: "http://dav.example.com/dav" } as Partial<PanelSettings>)))
+      .toThrow(/HTTPS/);
+  });
+
   it("splits path into trimmed non-empty segments and appends extras", () => {
     expect(getWebDavPathSegments(settings(), ["snap one"])).toEqual(["kimi", "backups", "snap one"]);
   });
@@ -97,17 +103,93 @@ describe("ensureWebDavCollection", () => {
 });
 
 describe("uploadWebDavFile / deleteWebDavPath", () => {
-  it("PUTs content and rejects on non-ok status", async () => {
-    mockedInvoke.mockResolvedValue(httpReply(201));
+  it("encrypts backup content client-side, decrypts it on download, and rejects upload errors", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["a".repeat(64)] as never
+        : httpReply(201) as never
+    ));
     await uploadWebDavFile(settings(), "https://dav.example.com/f.toml", "body");
     expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
       method: "PUT",
       url: "https://dav.example.com/f.toml",
-      body: "body",
     }));
+    const putCall = mockedInvoke.mock.calls.find(([command]) => command === "http_request")!;
+    const encryptedBody = (putCall[1] as { body: string }).body;
+    expect(encryptedBody).not.toBe("body");
+    expect(JSON.parse(encryptedBody)).toMatchObject({
+      format: "kimi-code-switch-gui-encrypted-v3",
+      kdf: "PBKDF2-SHA256",
+    });
 
-    mockedInvoke.mockResolvedValue(httpReply(500));
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["a".repeat(64)] as never
+        : httpReply(200, encryptedBody) as never
+    ));
+    await expect(downloadWebDavFile(settings(), "https://dav.example.com/f.toml")).resolves.toBe("body");
+
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["a".repeat(64)] as never
+        : httpReply(500) as never
+    ));
     await expect(uploadWebDavFile(settings(), "https://dav.example.com/f.toml", "body")).rejects.toThrow(/upload failed: 500/);
+  });
+
+  it("keeps v3 encryption independent from the mutable WebDAV login password", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["c".repeat(64)] as never
+        : httpReply(201) as never
+    ));
+    await expect(uploadWebDavFile(
+      settings({ backup_webdav_password: "" } as Partial<PanelSettings>),
+      "https://dav.example.com/f.toml",
+      "body",
+    )).resolves.toBeUndefined();
+  });
+
+  it("refuses plaintext backup downgrade on download", async () => {
+    mockedInvoke.mockResolvedValue(httpReply(200, "plaintext-config"));
+    await expect(downloadWebDavFile(settings(), "https://dav.example.com/f.toml"))
+      .rejects.toThrow(/plaintext downgrade/);
+  });
+
+  it("accepts plaintext only through the explicit legacy migration option", async () => {
+    mockedInvoke.mockResolvedValue(httpReply(200, "legacy-plaintext"));
+    await expect(downloadWebDavFile(
+      settings(),
+      "https://dav.example.com/legacy/config.toml",
+      { allowLegacyPlaintext: true },
+    )).resolves.toBe("legacy-plaintext");
+  });
+
+  it("keeps v2 encrypted backups portable across WebDAV host/path migrations", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["b".repeat(64)] as never
+        : httpReply(201) as never
+    ));
+    await uploadWebDavFile(
+      settings(),
+      "https://old.example/root-a/backup-1/config.toml",
+      "portable-body",
+    );
+    const encrypted = (mockedInvoke.mock.calls.find(([command]) => command === "http_request")![1] as { body: string }).body;
+
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (command: string) => (
+      command === "get_backup_encryption_secret_candidates"
+        ? ["b".repeat(64)] as never
+        : httpReply(200, encrypted) as never
+    ));
+    await expect(downloadWebDavFile(
+      settings(),
+      "https://new.example/root-b/backup-1/config.toml",
+    )).resolves.toBe("portable-body");
   });
 
   it("tolerates 404 on delete but rejects other errors", async () => {

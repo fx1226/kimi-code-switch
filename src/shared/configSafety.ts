@@ -2,6 +2,7 @@ import {
   buildConfigDocument,
   buildPanelSettingsDocument,
   createLineDiff,
+  extractSecondaryModel,
   normalizeStatePaths,
 } from "./configStore";
 import { buildMcpConfigDocument, isUnsupportedSseServer } from "./mcpStore";
@@ -118,6 +119,7 @@ export function buildConfigDoctorReport(
 
   validateManagedPaths(normalizedState, issues);
   validateModelReferences(state, issues);
+  validateAdvancedConfig(state, issues);
   validateOfficialAccountUsage(state, issues);
   validateMcpServers(state.mcpConfig.mcpServers, issues);
   validateBackupSettings(state, normalizedState, issues);
@@ -182,6 +184,21 @@ function validateModelReferences(state: AppState, issues: DoctorIssue[]): void {
     );
   }
 
+  // E1：secondary_model.default_model 与 default_model 一样校验 model alias 存在性。
+  const secondary = extractSecondaryModel(state.mainConfig.extra);
+  if (secondary && secondary.default_model.trim() && !state.mainConfig.models[secondary.default_model]) {
+    issues.push(
+      createDoctorIssue(
+        "config.secondary-model.missing",
+        "error",
+        "config",
+        `Secondary model "${secondary.default_model}" does not exist.`,
+        "config.extra.secondary_model.default_model",
+        "Point secondary_model.default_model to an existing key under [models].",
+      ),
+    );
+  }
+
   for (const [modelName, model] of Object.entries(state.mainConfig.models)) {
     if (state.mainConfig.providers[model.provider]) {
       continue;
@@ -223,6 +240,23 @@ function validateModelReferences(state: AppState, issues: DoctorIssue[]): void {
         `Active profile "${state.activeProfile || "(empty)"}" does not exist.`,
         "activeProfile",
         "Pick an existing profile as the active profile.",
+      ),
+    );
+  }
+}
+
+/** E1：高级 config 字段的显式/有效语义检查（当前：builtin_product_skills 显式 false）。 */
+function validateAdvancedConfig(state: AppState, issues: DoctorIssue[]): void {
+  const extra = state.mainConfig.extra;
+  if (isRecordShim(extra) && extra.builtin_product_skills === false) {
+    issues.push(
+      createDoctorIssue(
+        "config.builtin-product-skills.disabled",
+        "info",
+        "config",
+        "builtin_product_skills is explicitly false: built-in product Skills are disabled for all sessions.",
+        "config.extra.builtin_product_skills",
+        "Set it to true (or remove the key to use the official default true) to re-enable product Skills.",
       ),
     );
   }
@@ -667,12 +701,18 @@ interface FieldNode {
   open?: boolean;
 }
 
-const PROVIDER_NODE: FieldNode = { known: ["type", "base_url", "api_key", "env", "custom_headers"] };
+const PROVIDER_NODE: FieldNode = {
+  known: [
+    "type", "base_url", "api_key", "oauth", "env", "custom_headers",
+    "model_source", "default_model", "source",
+  ],
+};
 const MODEL_NODE: FieldNode = {
   known: [
-    "provider", "model", "max_context_size", "max_output_size", "capabilities",
+    "provider", "provider_id", "protocol", "model", "aliases", "max_context_size",
+    "max_input_size", "max_output_size", "off_effort", "base_url", "beta_api", "capabilities",
     "support_efforts", "default_effort", "display_name", "reasoning_key",
-    "adaptive_thinking", "auth_mode", "official_account_scope", "pricing", "overrides",
+    "adaptive_thinking", "overrides",
   ],
 };
 
@@ -767,4 +807,115 @@ function walkUnknownFields(
       walkUnknownFields(file, child, childNode, childPath, drift);
     }
   }
+}
+
+/**
+ * B4：对 local / WebDAV / history 恢复的文档级危险内容审查。
+ * 与 `assessFullBackupRisk`（外来全量导入）语义一致的降级版：不依赖 FullBackupBundle，
+ * 而是从恢复读取到的原始文档中识别自动执行 hook/command、stdio MCP 命令、
+ * 远端 MCP endpoint 和 AGENTS instructions 文件。
+ * 返回扁平风险行 + 每类计数，供 UI 展示完整清单（可展开/导出）。
+ */
+export interface RestoreDocumentsRiskSummary {
+  /** 扁平风险清单（用于展示/确认/导出）。 */
+  items: string[];
+  /** 结构化分档。 */
+  tiers: {
+    configHooks: string[];
+    stdioMcpCommands: string[];
+    remoteMcpEndpoints: string[];
+    agentsDocuments: string[];
+  };
+}
+
+function redactTrustUrl(value: string): string {
+  // 保留 scheme+host，隐匿 query/路径中可能的 token。
+  const match = value.match(/^(https?:\/\/[^/\s]+)(.*)$/i);
+  if (!match) return value;
+  const stripped = match[2].replace(/[?&](token|api[_-]?key|access[_-]?token|key|password|secret)=[^&\s]+/gi, "$1=[REDACTED]");
+  return `${match[1]}${stripped}`;
+}
+
+export function assessRestoreDocumentsRisk(documents: {
+  configDocument?: string;
+  mcpDocument?: string;
+  agentsDocument?: string;
+}): RestoreDocumentsRiskSummary {
+  const configHooks: string[] = [];
+  const stdioMcpCommands: string[] = [];
+  const remoteMcpEndpoints: string[] = [];
+  const agentsDocuments: string[] = [];
+
+  const configDocument = documents.configDocument ?? "";
+  // config.toml 中的 hooks / command / ProcessWrapper / local_command 自动执行点。
+  const hookPatterns = [
+    /^\s*\[\[?hooks?\]?/gm,
+    /(?:matchers?\s*=\s*\[\s*"[^"]*")/g,
+    /(?:command\s*=\s*"[^"]*")/g,
+    /(?:ProcessWrapper)/g,
+    /(?:local_command|run_command)\s*(?:=|\()/g,
+  ];
+  for (const pattern of hookPatterns) {
+    const matches = configDocument.match(pattern);
+    if (matches) {
+      configHooks.push(`config.toml: ${matches.length} auto-execute hooks/commands detected`);
+      break;
+    }
+  }
+  // 粗略扫描 config.toml 中的绝对命令（不以 https 开头的 = value 含 /usr /bin 等）。
+  const commandLines = configDocument
+    .split("\n")
+    .filter((line) => /(?:command|cmd)\s*=\s*["'\/]/.test(line) && !/https?:\/\//.test(line))
+    .slice(0, 20)
+    .map((line) => `config.toml: ${line.trim().slice(0, 200)}`);
+  for (const line of commandLines) configHooks.push(line);
+
+  const mcpDocument = documents.mcpDocument ?? "";
+  if (mcpDocument.trim()) {
+    try {
+      const parsed = JSON.parse(mcpDocument) as { mcpServers?: Record<string, Record<string, unknown>> };
+      if (parsed && Array.isArray((parsed as { mcpServers?: unknown }).mcpServers)) {
+        // 白名单「已有 JSON」。实际 mcpStore 结构 mcpServers: Record。
+      }
+      const servers = isRecordShim(parsed) && parsed.mcpServers && typeof parsed.mcpServers === "object"
+        ? parsed.mcpServers
+        : {};
+      for (const [name, server] of Object.entries(servers)) {
+        if (!server || typeof server !== "object") continue;
+        const command = typeof (server as { command?: unknown }).command === "string"
+          ? (server as { command: string }).command.trim()
+          : "";
+        const url = typeof (server as { url?: unknown }).url === "string"
+          ? (server as { url: string }).url.trim()
+          : "";
+        if (command) {
+          stdioMcpCommands.push(`MCP ${name}: ${command}`);
+        } else if (url) {
+          remoteMcpEndpoints.push(`MCP ${name}: ${redactTrustUrl(url)}`);
+        }
+      }
+    } catch {
+      // 无法解析的 mcp.json 也属于风险（恢复后将破坏官方解析）。
+      configHooks.push("mcp.json: not a valid JSON document");
+    }
+  }
+
+  const agentsDocument = documents.agentsDocument ?? "";
+  if (agentsDocument.trim()) {
+    agentsDocuments.push(`AGENTS.md (${agentsDocument.length} characters)`);
+  }
+
+  return {
+    items: [
+      ...configHooks,
+      ...stdioMcpCommands,
+      ...remoteMcpEndpoints,
+      ...agentsDocuments,
+    ],
+    tiers: { configHooks, stdioMcpCommands, remoteMcpEndpoints, agentsDocuments },
+  };
+}
+
+function isRecordShim(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

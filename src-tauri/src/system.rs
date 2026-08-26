@@ -14,6 +14,25 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as Tokio
 
 static KIMI_OAUTH_LOGIN_RUNNING: AtomicBool = AtomicBool::new(false);
 
+#[tauri::command]
+pub fn read_environment_variable(name: String) -> Result<Option<String>, String> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err("environment variable name is invalid".to_string());
+    }
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err("environment variable is not valid Unicode".to_string())
+        }
+    }
+}
+
 /// 验证命令的 **program 名** 是否在白名单中。
 ///
 /// 安全边界（重要）：本函数只校验可执行文件名（basename），**不校验 args**。
@@ -337,6 +356,214 @@ pub struct ExecResult {
     pub stderr: String,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiProviderCommandRequest {
+    action: String,
+    provider_id: Option<String>,
+    filter: Option<String>,
+    url: Option<String>,
+    api_key: Option<String>,
+    default_model: Option<String>,
+    base_url: Option<String>,
+}
+
+fn safe_provider_argument(value: &str, label: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > 512 || trimmed.contains('\0') {
+        return Err(format!("invalid {label}"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn safe_provider_url(value: &str, label: &str) -> Result<String, String> {
+    let value = safe_provider_argument(value, label)?;
+    let parsed = url::Url::parse(&value).map_err(|_| format!("invalid {label}"))?;
+    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+        return Err(format!("{label} must use HTTP or HTTPS"));
+    }
+    Ok(value)
+}
+
+fn safe_provider_registry_url(value: &str, label: &str) -> Result<String, String> {
+    let value = safe_provider_url(value, label)?;
+    let parsed = url::Url::parse(&value).map_err(|_| format!("invalid {label}"))?;
+    if parsed.scheme() != "https" {
+        return Err(format!(
+            "{label} must use HTTPS when credentials are supplied"
+        ));
+    }
+    validate_http_url(&value).map_err(|error| format!("invalid {label}: {error}"))?;
+    Ok(value)
+}
+
+fn safe_provider_catalog_url(value: &str, label: &str) -> Result<String, String> {
+    let value = safe_provider_url(value, label)?;
+    validate_http_url(&value).map_err(|error| format!("invalid {label}: {error}"))?;
+    Ok(value)
+}
+
+async fn validate_provider_remote_resolution(value: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(value).map_err(|_| "invalid provider source URL".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "provider source URL has no host".to_string())?;
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(());
+    }
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addresses: Vec<_> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| format!("cannot resolve provider source host {host}: {error}"))?
+        .collect();
+    if addresses.is_empty() {
+        return Err(format!("provider source host {host} did not resolve"));
+    }
+    if addresses.iter().any(|address| ip_is_blocked(address.ip())) {
+        return Err(format!(
+            "provider source host {host} resolves to a loopback/private/link-local address"
+        ));
+    }
+    Ok(())
+}
+
+fn safe_provider_id(value: &str) -> Result<String, String> {
+    let value = safe_provider_argument(value, "provider id")?;
+    let mut characters = value.chars();
+    let starts_safely = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric());
+    let remainder_is_safe = characters.all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+    });
+    if !starts_safely || !remainder_is_safe {
+        return Err("invalid provider id".to_string());
+    }
+    Ok(value)
+}
+
+fn build_kimi_provider_command(
+    request: &KimiProviderCommandRequest,
+) -> Result<(Vec<String>, Option<String>), String> {
+    let mut args = vec!["provider".to_string()];
+    let mut registry_api_key = None;
+    match request.action.as_str() {
+        "catalog-list" => {
+            args.extend(["catalog".to_string(), "list".to_string()]);
+            if let Some(provider_id) = request.provider_id.as_deref() {
+                if !provider_id.trim().is_empty() {
+                    args.push(safe_provider_id(provider_id)?);
+                }
+            }
+            if let Some(filter) = request.filter.as_deref() {
+                if !filter.trim().is_empty() {
+                    args.extend([
+                        "--filter".to_string(),
+                        safe_provider_argument(filter, "filter")?,
+                    ]);
+                }
+            }
+            if let Some(url) = request.url.as_deref() {
+                if !url.trim().is_empty() {
+                    args.extend([
+                        "--url".to_string(),
+                        safe_provider_catalog_url(url, "catalog URL")?,
+                    ]);
+                }
+            }
+            args.push("--json".to_string());
+        }
+        "catalog-add" => {
+            let provider_id = request
+                .provider_id
+                .as_deref()
+                .ok_or("provider id is required")?;
+            args.extend([
+                "catalog".to_string(),
+                "add".to_string(),
+                safe_provider_id(provider_id)?,
+            ]);
+            registry_api_key = Some(safe_provider_argument(
+                request.api_key.as_deref().ok_or("API key is required")?,
+                "API key",
+            )?);
+            if let Some(default_model) = request.default_model.as_deref() {
+                if !default_model.trim().is_empty() {
+                    args.extend([
+                        "--default-model".to_string(),
+                        safe_provider_argument(default_model, "default model")?,
+                    ]);
+                }
+            }
+            if let Some(base_url) = request.base_url.as_deref() {
+                if !base_url.trim().is_empty() {
+                    args.extend([
+                        "--base-url".to_string(),
+                        safe_provider_url(base_url, "base URL")?,
+                    ]);
+                }
+            }
+            if let Some(url) = request.url.as_deref() {
+                if !url.trim().is_empty() {
+                    args.extend([
+                        "--url".to_string(),
+                        safe_provider_registry_url(url, "catalog URL")?,
+                    ]);
+                }
+            }
+        }
+        "registry-add" => {
+            let url = request.url.as_deref().ok_or("registry URL is required")?;
+            args.extend([
+                "add".to_string(),
+                safe_provider_registry_url(url, "registry URL")?,
+            ]);
+            registry_api_key = Some(safe_provider_argument(
+                request.api_key.as_deref().ok_or("API key is required")?,
+                "API key",
+            )?);
+        }
+        "configured-list" => args.extend(["list".to_string(), "--json".to_string()]),
+        _ => return Err(format!("unsupported provider action: {}", request.action)),
+    }
+    Ok((args, registry_api_key))
+}
+
+#[tauri::command]
+pub async fn run_kimi_provider_command(
+    home_path: String,
+    request: KimiProviderCommandRequest,
+) -> Result<ExecResult, String> {
+    let (args, registry_api_key) = build_kimi_provider_command(&request)?;
+    if let Some(url) = request
+        .url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        // B3 boundary：预检查强制 HTTPS（带凭据）+ DNS 预解析拒绝本机/私网/链路本地地址。
+        // 遗留间隙：官方 `kimi` 子进程在真实 fetch 时会重新解析 DNS 并可能跟随 redirect，
+        // GUI 无法约束其最终目标。此场景已通过 UI 的显式 trust 确认（KIMI_REGISTRY_API_KEY
+        // 由 Rust 注入环境而非 argv），并把"可能重定向到其他主机"写入确认文案，不伪装为完整 SSRF 防护。
+        validate_provider_remote_resolution(url).await?;
+    }
+    let mut command = tokio::process::Command::new("kimi");
+    command.args(&args);
+    command.env("PATH", augmented_path());
+    command.env("KIMI_CODE_HOME", crate::fs_access::resolve_home(&home_path));
+    if let Some(api_key) = registry_api_key {
+        command.env("KIMI_REGISTRY_API_KEY", api_key);
+    }
+    let output = tokio::time::timeout(Duration::from_secs(90), command.output())
+        .await
+        .map_err(|_| "Kimi provider command timed out".to_string())?
+        .map_err(|error| format!("cannot run kimi provider command: {error}"))?;
+    Ok(ExecResult {
+        code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
 #[derive(Clone, serde::Serialize)]
 pub struct KimiOAuthLoginEvent {
     pub kind: String,
@@ -616,6 +843,53 @@ pub async fn exec_command(
     }
 }
 
+/// Resolve a short-lived Google ADC access token through the official gcloud
+/// helper. The generic exec surface intentionally does not allow gcloud; this
+/// narrow command fixes the argv and only accepts documented Google variables.
+#[tauri::command]
+pub async fn get_google_adc_access_token(env: HashMap<String, String>) -> Result<String, String> {
+    const ALLOWED_ENV: &[&str] = &[
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "GOOGLE_CLOUD_QUOTA_PROJECT",
+    ];
+    let mut command = tokio::process::Command::new("gcloud");
+    command.args([
+        "auth",
+        "application-default",
+        "print-access-token",
+        "--quiet",
+    ]);
+    command.env("PATH", augmented_path());
+    for (key, value) in env {
+        if !ALLOWED_ENV.contains(&key.as_str()) {
+            continue;
+        }
+        if value.len() > 4096 || value.contains('\0') {
+            return Err(format!("invalid Google ADC environment value for {key}"));
+        }
+        command.env(key, value);
+    }
+    let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+        .await
+        .map_err(|_| "gcloud ADC token request timed out".to_string())?
+        .map_err(|error| format!("cannot run gcloud for Vertex ADC: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "gcloud could not resolve Application Default Credentials".to_string()
+        } else {
+            format!("gcloud could not resolve Application Default Credentials: {detail}")
+        });
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() || token.len() > 8192 {
+        return Err("gcloud returned an invalid ADC access token".to_string());
+    }
+    Ok(token)
+}
+
 /// 启动当前配置目标的官方 `kimi login` 设备码登录流程。
 ///
 /// 该命令不持有、不读取、不写入 OAuth token；token 仍由对应 CLI 自己写入本机。
@@ -624,6 +898,7 @@ pub async fn exec_command(
 pub async fn start_kimi_oauth_login(
     app: tauri::AppHandle,
     target: String,
+    home_path: Option<String>,
 ) -> Result<ExecResult, String> {
     let target = KimiOAuthTarget::from_config_target(&target);
     let target_label = target.label();
@@ -652,9 +927,14 @@ pub async fn start_kimi_oauth_login(
     let result =
         tauri::async_runtime::spawn_blocking(move || {
             let login_command = find_oauth_login_command(target);
-            let mut child = StdCommand::new(&login_command.program)
+            let mut command = StdCommand::new(&login_command.program);
+            command
                 .args(&login_command.args)
-                .env("PATH", augmented_path())
+                .env("PATH", augmented_path());
+            if let Some(home_path) = home_path.filter(|value| !value.trim().is_empty()) {
+                command.env("KIMI_CODE_HOME", crate::fs_access::resolve_home(&home_path));
+            }
+            let mut child = command
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -804,6 +1084,55 @@ pub fn file_stat(path: String) -> Result<Option<FileStat>, String> {
         mtime_ms,
         ino,
     }))
+}
+
+fn resolve_workspace_directory_path(
+    project_root: &str,
+    input_path: &str,
+) -> Result<PathBuf, String> {
+    let input = input_path.trim();
+    if input.is_empty() || input.contains(['\0', '\r', '\n']) {
+        return Err("workspace.additional_dir must exist and be a directory".to_string());
+    }
+    let expanded = crate::fs_access::resolve_home(input);
+    let candidate = if expanded.is_absolute() {
+        expanded
+    } else {
+        crate::fs_access::resolve_home(project_root).join(expanded)
+    };
+    let resolved = normalize_lexical_path(&candidate);
+    let metadata = std::fs::metadata(&resolved)
+        .map_err(|_| "workspace.additional_dir must exist and be a directory".to_string())?;
+    if !metadata.is_dir() {
+        return Err("workspace.additional_dir must exist and be a directory".to_string());
+    }
+    Ok(resolved)
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let rooted = path.has_root();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() && !rooted {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+#[tauri::command]
+pub fn resolve_workspace_directory(
+    project_root: String,
+    input_path: String,
+) -> Result<String, String> {
+    resolve_workspace_directory_path(&project_root, &input_path)
+        .map(|path| path.to_string_lossy().to_string())
 }
 
 /// 从指定偏移读取一段字节并按 UTF-8（lossy）返回。供 tail 增量读取日志。
@@ -1197,6 +1526,153 @@ mod tests {
                 .iter()
                 .any(|part| part.ends_with("AppData/Roaming/npm")));
         }
+    }
+
+    #[test]
+    fn provider_command_builder_keeps_secrets_out_of_argv() {
+        let request = KimiProviderCommandRequest {
+            action: "catalog-add".to_string(),
+            provider_id: Some("anthropic".to_string()),
+            filter: None,
+            url: None,
+            api_key: Some("secret-key".to_string()),
+            default_model: Some("claude-opus".to_string()),
+            base_url: None,
+        };
+        let (args, secret) = build_kimi_provider_command(&request).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "provider",
+                "catalog",
+                "add",
+                "anthropic",
+                "--default-model",
+                "claude-opus"
+            ]
+        );
+        assert_eq!(secret.as_deref(), Some("secret-key"));
+        assert!(!args.iter().any(|argument| argument.contains("secret-key")));
+    }
+
+    #[test]
+    fn provider_command_builder_rejects_unsafe_registry_schemes() {
+        let request = KimiProviderCommandRequest {
+            action: "registry-add".to_string(),
+            provider_id: None,
+            filter: None,
+            url: Some("file:///tmp/api.json".to_string()),
+            api_key: Some("secret".to_string()),
+            default_model: None,
+            base_url: None,
+        };
+        assert!(build_kimi_provider_command(&request).is_err());
+    }
+
+    #[test]
+    fn provider_command_builder_rejects_insecure_or_private_registry_urls() {
+        for url in [
+            "http://registry.example/api.json",
+            "https://127.0.0.1/api.json",
+        ] {
+            let request = KimiProviderCommandRequest {
+                action: "registry-add".to_string(),
+                provider_id: None,
+                filter: None,
+                url: Some(url.to_string()),
+                api_key: Some("secret".to_string()),
+                default_model: None,
+                base_url: None,
+            };
+            assert!(
+                build_kimi_provider_command(&request).is_err(),
+                "accepted {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_catalog_builder_rejects_private_custom_urls() {
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://127.0.0.1/catalog.json",
+            "https://localhost/catalog.json",
+        ] {
+            let request = KimiProviderCommandRequest {
+                action: "catalog-list".to_string(),
+                provider_id: None,
+                filter: None,
+                url: Some(url.to_string()),
+                api_key: None,
+                default_model: None,
+                base_url: None,
+            };
+            assert!(
+                build_kimi_provider_command(&request).is_err(),
+                "accepted {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_command_builder_rejects_option_like_provider_ids() {
+        for action in ["catalog-add", "catalog-list"] {
+            let request = KimiProviderCommandRequest {
+                action: action.to_string(),
+                provider_id: Some("--help".to_string()),
+                filter: None,
+                url: None,
+                api_key: Some("secret".to_string()),
+                default_model: None,
+                base_url: None,
+            };
+            assert!(build_kimi_provider_command(&request).is_err());
+        }
+    }
+
+    #[test]
+    fn workspace_directory_resolution_accepts_relative_directories_and_rejects_files() {
+        let test_root =
+            std::env::temp_dir().join(format!("kimi-switch-workspace-dir-{}", std::process::id()));
+        let project = test_root.join("project");
+        let shared = test_root.join("shared");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(test_root.join("not-a-dir"), b"x").unwrap();
+
+        let resolved =
+            resolve_workspace_directory_path(project.to_string_lossy().as_ref(), "../shared")
+                .unwrap();
+        assert_eq!(resolved, shared);
+        assert_eq!(
+            resolve_workspace_directory_path(project.to_string_lossy().as_ref(), ".").unwrap(),
+            project
+        );
+        assert!(
+            resolve_workspace_directory_path(project.to_string_lossy().as_ref(), "   ",).is_err()
+        );
+        assert!(resolve_workspace_directory_path(
+            project.to_string_lossy().as_ref(),
+            "../not-a-dir",
+        )
+        .is_err());
+        assert!(
+            resolve_workspace_directory_path(project.to_string_lossy().as_ref(), "../missing",)
+                .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = project.join("shared-link");
+            symlink(&shared, &link).unwrap();
+            let linked =
+                resolve_workspace_directory_path(project.to_string_lossy().as_ref(), "shared-link")
+                    .unwrap();
+            assert_eq!(linked, link, "symlink identity should remain lexical");
+        }
+
+        std::fs::remove_dir_all(&test_root).unwrap();
     }
 
     #[test]

@@ -13,11 +13,16 @@ vi.mock("@shared/configStore", () => ({
   parsePanelSettingsDocument: () => ({ shortcuts: [] }),
   loadAppState: vi.fn(async () => ({ tag: "loaded" })),
   createLineDiff: () => "diff",
+  getKimiCodeTuiConfigPath: (home: string) => `${home}/tui.toml`,
 }));
 vi.mock("@shared/configSafety", () => ({
   buildConfigDoctorReport: () => ({ ok: true, generatedAt: "", issues: [], errorCount: 0, warningCount: 0, infoCount: 0 }),
   buildManagedDocuments: () => ({ config: "", panel: "", mcp: "" }),
   redactDocumentText: (t: string) => ({ text: t }),
+  assessRestoreDocumentsRisk: vi.fn(() => ({
+    items: [],
+    tiers: { configHooks: [], stdioMcpCommands: [], remoteMcpEndpoints: [], agentsDocuments: [] },
+  })),
 }));
 vi.mock("@shared/mcpStore", () => ({ buildMcpConfigDocument: () => "mcp-doc" }));
 vi.mock("@shared/shortcutStore", () => ({ normalizeShortcuts: () => [] }));
@@ -28,14 +33,19 @@ vi.mock("./fileAccess", () => ({
   tauriFileAccess: {
     readText: vi.fn(async () => "current-doc"),
     writeText: vi.fn(async () => undefined),
+    writeTextCas: vi.fn(async () => "written-hash"),
+    removeTextCas: vi.fn(async () => undefined),
     ensureDir: vi.fn(async () => undefined),
   },
+  beginRestoreTransaction: vi.fn(async () => undefined),
+  completeRestoreTransaction: vi.fn(async () => undefined),
 }));
 vi.mock("./fileSnapshots", () => ({
   captureSnapshotForState: vi.fn(async () => ({ capturedAt: "now", files: {} })),
   detectExternalChangeConflict: vi.fn(async () => ({ conflict: null, snapshot: { capturedAt: "now", files: {} } })),
 }));
 vi.mock("./panelSettingsStore", () => ({
+  exportPanelSettings: vi.fn(async () => "original-panel"),
   importPanelSettings: vi.fn(async () => true),
 }));
 vi.mock("./webdav", () => ({
@@ -50,6 +60,7 @@ vi.mock("./webdav", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
+import { assessRestoreDocumentsRisk } from "@shared/configSafety";
 import { tauriFileAccess } from "./fileAccess";
 import { captureSnapshotForState, detectExternalChangeConflict } from "./fileSnapshots";
 import { importPanelSettings } from "./panelSettingsStore";
@@ -58,7 +69,9 @@ import {
   createBackupSnapshot,
   deleteBackup,
   listBackups,
+  migrateLegacyWebDavBackup,
   restoreBackupSafe,
+  restoreBackupDryRun,
   testBackupWebdav,
 } from "./backup";
 
@@ -67,6 +80,7 @@ const fa = vi.mocked(tauriFileAccess);
 const webdav = vi.mocked(webdavMod);
 const mockedDetectConflict = vi.mocked(detectExternalChangeConflict);
 const mockedImportPanelSettings = vi.mocked(importPanelSettings);
+const mockedAssessRisk = vi.mocked(assessRestoreDocumentsRisk);
 void captureSnapshotForState;
 
 function state(destination: "local" | "webdav"): AppState {
@@ -109,9 +123,9 @@ describe("createBackupSnapshot — local branch", () => {
     // stamp is YYYYMMDD-HHMMSS-mmm, host sanitized to lowercase
     expect(result.backupName).toMatch(/^backup-\d{8}-\d{6}-\d{3}-my-laptop$/);
     expect(result.backupPath).toContain("/backups/backup-");
-    // 4 backup docs + 1 metadata file written; profiles live in config.panel.json.
-    expect(fa.writeText).toHaveBeenCalledTimes(5);
-    expect(fa.ensureDir).toHaveBeenCalled();
+    // 6 backup docs + 1 metadata file written; profiles live in config.panel.json.
+    expect(fa.writeText).toHaveBeenCalledTimes(7);
+    expect(mockedInvoke).toHaveBeenCalledWith("ensure_private_dir", expect.objectContaining({ path: expect.stringContaining("/backups/backup-") }));
     expect(webdav.uploadWebDavFile).not.toHaveBeenCalled();
   });
 
@@ -133,8 +147,8 @@ describe("createBackupSnapshot — webdav branch", () => {
 
     expect(result.ok).toBe(true);
     expect(webdav.ensureWebDavCollection).toHaveBeenCalled();
-    // 4 backup docs + metadata uploaded; profiles live in config.panel.json.
-    expect(webdav.uploadWebDavFile).toHaveBeenCalledTimes(5);
+    // 6 backup docs + metadata uploaded; profiles live in config.panel.json.
+    expect(webdav.uploadWebDavFile).toHaveBeenCalledTimes(7);
     expect(webdav.pruneWebDavBackups).toHaveBeenCalled();
     expect(fa.writeText).not.toHaveBeenCalled();
   });
@@ -180,7 +194,41 @@ describe("testBackupWebdav", () => {
   });
 });
 
+describe("migrateLegacyWebDavBackup", () => {
+  it("explicitly reads legacy plaintext and rewrites every discovered file encrypted", async () => {
+    webdav.downloadWebDavFile.mockResolvedValue("legacy-doc");
+
+    const result = await migrateLegacyWebDavBackup(state("webdav"), "backup-old");
+
+    expect(result).toEqual({ ok: true, migratedFiles: 9 });
+    expect(webdav.downloadWebDavFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("backup-old/config.toml"),
+      { allowLegacyPlaintext: true, legacyEncryptionPassword: "" },
+    );
+    expect(webdav.uploadWebDavFile).toHaveBeenCalledTimes(9);
+  });
+
+  it("is unavailable for local backup destinations", async () => {
+    await expect(migrateLegacyWebDavBackup(state("local"), "backup-old"))
+      .rejects.toThrow(/only available for WebDAV/);
+  });
+});
+
 describe("restoreBackupSafe — rollback point", () => {
+  it("includes TUI and AGENTS in the restore dry-run preview", async () => {
+    const result = await restoreBackupDryRun(state("local"), "backup-x");
+    expect("filePlans" in result).toBe(true);
+    if (!("filePlans" in result)) return;
+    expect(result.filePlans.map((plan) => plan.id)).toEqual(expect.arrayContaining([
+      "config",
+      "panel",
+      "mcp",
+      "tui",
+      "agents",
+    ]));
+  });
+
   it("creates a pre-restore rollback snapshot, writes restored docs, and returns rollbackBackupName", async () => {
     const result = await restoreBackupSafe(state("local"), "backup-x", { allowOverwrite: true });
 
@@ -188,9 +236,9 @@ describe("restoreBackupSafe — rollback point", () => {
     if (!result.ok) return;
     // rollback snapshot is itself a backup -> rollbackBackupName follows the backup naming
     expect(result.rollbackBackupName).toMatch(/^backup-/);
-    // restored documents are written back to the managed paths (3 ids)
-    const restoredWrites = fa.writeText.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
-    expect(restoredWrites).toHaveLength(2);
+    // config/MCP plus TUI/AGENTS are restored; panel settings use SQLite import.
+    const restoredWrites = fa.writeTextCas!.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
+    expect(restoredWrites).toHaveLength(4);
     expect(mockedImportPanelSettings).toHaveBeenCalledWith(expect.any(String));
   });
 
@@ -207,5 +255,29 @@ describe("restoreBackupSafe — rollback point", () => {
     // no restored docs written to managed paths
     const restoredWrites = fa.writeText.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
     expect(restoredWrites).toHaveLength(0);
+  });
+
+  it("B4: blocks dangerous restore content by default and honors explicit allowRisk", async () => {
+    // 1) 默认拒绝：危险内容出现时不写盘。
+    mockedAssessRisk.mockReturnValueOnce({
+      items: ["config.toml: auto-execute commands detected"],
+      tiers: { configHooks: ["config.toml: auto-execute commands detected"], stdioMcpCommands: [], remoteMcpEndpoints: [], agentsDocuments: [] },
+    } as never);
+    const blocked = await restoreBackupSafe(state("local"), "backup-x", { allowOverwrite: true });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.reason).toBe("dangerous-content");
+    const writesBefore = fa.writeTextCas!.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
+    expect(writesBefore).toHaveLength(0);
+
+    // 2) 显式 allowRisk 通过后走正常恢复。
+    mockedAssessRisk.mockReturnValueOnce({
+      items: ["config.toml: auto-execute commands detected"],
+      tiers: { configHooks: ["config.toml: auto-execute commands detected"], stdioMcpCommands: [], remoteMcpEndpoints: [], agentsDocuments: [] },
+    } as never);
+    const allowed = await restoreBackupSafe(state("local"), "backup-x", { allowOverwrite: true, allowRisk: true });
+    expect(allowed.ok).toBe(true);
+    if (!allowed.ok) return;
+    const restoredWrites = fa.writeTextCas!.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
+    expect(restoredWrites).toHaveLength(4);
   });
 });

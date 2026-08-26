@@ -126,16 +126,26 @@
 ```text
 ~/.kimi-code/config.toml
 ~/.kimi-code/mcp.json
+~/.kimi-code/tui.toml
+~/.kimi-code/AGENTS.md
 ~/.kimi-code/skills/
-~/.kimi-code/.panel/app.db
+~/.kimi-code-switch-gui/app.db
 ```
 
 说明：
 
 - `config.toml`：Kimi Code 标准主配置，保存当前生效的默认模型、Provider、Model 和其他 CLI 配置。
 - `mcp.json`：Kimi Code 标准 MCP Server 定义。
+- `tui.toml`：Kimi Code 终端界面设置。
+- `AGENTS.md`：Kimi Code 用户级代理指令。
 - `skills/`：Kimi Code 标准 Skills 目录。
-- `.panel/app.db`：GUI 自身 SQLite 数据库，保存 Profile、当前激活 Profile、语言、主题、快捷键、备份策略和终端应用等面板私有配置。
+- `~/.kimi-code-switch-gui/app.db`：GUI 自身 SQLite 数据库，只保存 Profile、语言、主题、快捷键、备份策略、禁用项归档和用量/历史索引等面板私有数据；活动 Provider、Model 和 MCP 以 Kimi 标准文件为准。
+
+每个环境还可配置独立“项目工作目录”。GUI 从该目录启动 Kimi，并向上查找最近的 `.git` 根，以展示项目级 `.kimi-code/skills`、`.agents/skills`、项目根 `.mcp.json` 与 cwd 本地 `.kimi-code/mcp.json`。MCP 按“用户 < 项目根 < cwd 本地”覆盖；只有存在可解析的官方 workspace-trust marker 时项目 MCP 才标为有效，未信任时仅显示声明且不会写回用户 `mcp.json`。
+
+Provider 页面通过官方 `kimi provider catalog list/add` 与 `kimi provider add` 接入 models.dev 和自定义 `api.json` registry：离线快照回退、协议判断、模型过滤及 `source` 刷新生命周期均由当前环境中的 Kimi Code CLI 负责。Kimi Code 设置页还会读取 `plugins/installed.json` 与 plugin manifest，以只读方式展示 plugin Skills、MCP、hooks 和诊断；MCP 运行名遵循 `plugin-<plugin>:<server>`。
+
+MCP 表单结构化支持 `cwd`、`bearerTokenEnvVar`、`auth: oauth`、启动/工具超时及工具 allow/deny 列表。OAuth 登录按钮会在活动环境和项目工作目录中启动官方 `/mcp-config login <server>` 流程。TUI 高级设置支持 LaTeX、cache hint、通知、自动升级、paste-burst 与 status line，并继续保留未知 `tui.toml` 字段。
 
 `config.profiles.toml` 不是 Kimi Code 标准配置文件。旧版本生成过该文件时，GUI 会在启动时读取其中的 Profile 数据并迁移到 SQLite，后续不会继续写入该文件。
 
@@ -147,17 +157,13 @@
 - Profiles 列表行里的终端按钮：使用鼠标悬浮行对应的 Profile，不改变当前激活 Profile。
 - 终端类型可在设置页选择 `系统终端` 或 `iTerm2`。
 
-启动时会生成临时配置文件，并执行：
+启动时显式指定当前环境的 `KIMI_CODE_HOME`，Profile 设置通过公开 CLI 参数传入：
 
 ```bash
-kimi --config-file <临时配置文件>
+KIMI_CODE_HOME=<环境目录> kimi -m <模型> [--yolo|--auto] [--plan]
 ```
 
-临时配置位于：
-
-```text
-~/.kimi/.panel/tmp/terminal/
-```
+命令会先 `cd` 到环境配置的项目工作目录。环境切换只影响 GUI 启动的 Kimi 进程，不再搬迁或切换全局 `~/.kimi-code` 软链接。新环境复制包含配置、MCP、TUI、AGENTS、Skills 和已安装 Plugins（托管 root 会重映射到新环境），不复制 credentials、sessions、logs、updates 或 bin；目标目录非空时拒绝创建，避免继承孤儿 credentials/session。
 
 ## 备份与恢复
 
@@ -172,7 +178,9 @@ kimi --config-file <临时配置文件>
 - 定时自动备份。
 - 修改后自动备份。
 
-备份文件包含主配置、面板设置（含 Profiles、当前激活 Profile、快捷键等 GUI 私有配置）和 MCP 配置。恢复前会创建回滚点，避免误恢复后无法回退。
+普通备份优先保存标准文件原文，包含主配置、MCP、TUI、AGENTS 和面板设置（含 Profiles、当前激活 Profile、快捷键等 GUI 私有配置）；全量 JSON 备份还包含所有环境，以及二进制安全的 Skills 与 Plugins 目录（保留可执行位并重映射 managed plugin roots）。默认不复制 credentials、sessions、logs 或 CLI 二进制。恢复前会创建回滚点，标准文本文件与可移植目录使用 CAS 防止覆盖预览后的并发修改。
+
+WebDAV 必须使用 HTTPS。新版备份使用独立随机恢复密钥派生 AES-GCM 密钥，WebDAV 密码只用于服务器认证，因此后续修改登录密码不会影响新版历史备份。本机密钥位于 `~/.kimi-code-switch-gui/backup-encryption.key`（权限 0600）；设置页提供恢复密钥导出/导入，替换时旧密钥会保留为 `backup-encryption.key.previous`。迁移设备或重装前应离线保存恢复密钥。旧版明文 WebDAV 备份不会被普通恢复接受，只能在备份记录中经单独确认后执行一次性加密迁移；早期 v1/v2 密文迁移时仍需创建它们时使用的旧 WebDAV 密码。
 
 ## 配置历史
 
@@ -180,17 +188,19 @@ kimi --config-file <临时配置文件>
 
 **核心特性：**
 
-- **自动快照** — 每次保存配置时自动捕获 Kimi 标准配置（config.toml、mcp.json）和 GUI SQLite 面板设置快照
-- **智能去重** — SHA256 内容去重，相同内容不重复存储
+- **自动快照** — 每次保存配置时自动捕获 Kimi 标准配置（config.toml、mcp.json、tui.toml、AGENTS.md、Skills）和 GUI SQLite 面板设置快照
+- **环境内去重** — 以环境 ID、文件类型和 SHA256 联合去重
 - **gzip 压缩** — 快照文件 gzip 压缩存储，5KB 配置压缩后约 500B
-- **版本查询** — 按文件类型过滤、时间倒序查询历史快照
+- **版本查询** — 按环境和文件类型过滤、时间倒序查询历史快照
 - **一键回滚** — 回滚前自动创建"回滚点"快照，支持撤销回滚操作
+- **旧记录分配** — 升级前缺少环境归属的 config/MCP/TUI/AGENTS 快照可先在历史页显式分配到已注册环境，再恢复到由环境注册表推导的安全目标
 - **自动清理** — 每次保存后自动清理 30 天前的旧快照，释放磁盘空间
+- **崩溃恢复** — 跨 config/MCP/panel/TUI 保存前写入私有 transaction journal；启动时只在 revision 可证明时提交或 CAS 回滚半完成事务
 
 **存储位置：**
 
-- 元数据：`~/.kimi/.panel/usage/index.db`（SQLite `config_history` 表）
-- 快照文件：`~/.kimi/.panel/history/{timestamp}-{file_id}.toml.gz`
+- 元数据：`~/.kimi-code-switch-gui/app.db`（SQLite `config_history` 表）
+- 快照文件：`~/.kimi-code-switch-gui/history/{timestamp}-{environment_id}-{file_id}.toml.gz`
 
 **API 调用：**
 
@@ -204,10 +214,10 @@ import {
 } from "@renderer/tauri/configHistory";
 
 // 捕获快照
-const snapshotId = await captureSnapshot("config", "~/.kimi/config.toml", "手动备份");
+const snapshotId = await captureSnapshot("config", "~/.kimi-code/config.toml", "手动备份", "default");
 
 // 查询历史（最近 50 条）
-const snapshots = await listSnapshots("config", 50);
+const snapshots = await listSnapshots("default", "config", 50);
 
 // 获取快照内容
 const content = await getSnapshotContent(snapshotId);

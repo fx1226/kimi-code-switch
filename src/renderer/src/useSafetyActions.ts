@@ -141,6 +141,38 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
 
     const normalizedState = normalizeStatePaths(state);
     const expectedSnapshot = fileSnapshotRef?.current ?? fileSnapshot ?? undefined;
+    const applyRestoredState = (restored: {
+      state: AppState;
+      snapshot: FileSnapshotBundle;
+      doctor: ConfigDoctorReport;
+      rollbackBackupName: string;
+    }): void => {
+      const normalizedRestored = normalizeStatePaths(restored.state);
+      setState(normalizedRestored);
+      setSavedState(normalizedRestored);
+      setFileSnapshot(restored.snapshot);
+      setDoctorReport(restored.doctor);
+      applyAppearanceMode(normalizedRestored.panelSettings.theme);
+      applyAppearanceTheme(normalizedRestored.panelSettings.appearance_theme);
+      applyUiFontSize(normalizedRestored.panelSettings.ui_font_size);
+      applyPrimarySelections(
+        getRetainedPrimarySelections(normalizedRestored, currentSelections),
+        {
+          setSelectedProvider,
+          setSelectedModel,
+          setSelectedProfile,
+          setSelectedMcpServer,
+        },
+      );
+      void refreshPreview(normalizedRestored);
+      setError("");
+      setNotice(
+        formatMessage(t(locale, "backupRestoreSuccessWithRollback"), {
+          name: backupName,
+          rollback: restored.rollbackBackupName,
+        }),
+      );
+    };
     const dryRun = await api.restoreBackupDryRun(normalizedState, backupName, {
       expectedSnapshot,
     });
@@ -179,32 +211,44 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
       setFileSnapshot(restored.snapshot);
       throw new Error(t(locale, "externalChangeCanceled"));
     }
+    if (isDangerousContentBlocked(restored)) {
+      // B4：危险内容门禁——展示完整风险清单（不截断），由用户显式确认后才允许恢复。
+      const riskItems = restored.risk.items;
+      const riskPreview = riskItems.slice(0, 20).join("\n")
+        + (riskItems.length > 20 ? `\n... (共 ${riskItems.length} 项)` : "");
+      const confirmed = await requestConfirm({
+        title: t(locale, "backupRestoreRiskTitle"),
+        description: formatMessage(t(locale, "backupRestoreRiskDescription"), {
+          count: riskItems.length,
+          preview: riskPreview,
+        }),
+        confirmLabel: t(locale, "backupRestoreRiskAllow"),
+        cancelLabel: t(locale, "cancel"),
+        tone: "danger",
+        kind: "delete",
+      });
+      if (!confirmed) {
+        setDoctorReport(restored.doctor);
+        throw new Error(t(locale, "backupRestoreRiskDenied"));
+      }
+      const confirmedRestore = await api.restoreBackupSafe(normalizedState, backupName, {
+        expectedSnapshot,
+        allowOverwrite: true,
+        allowRisk: true,
+      });
+      if (isExternalChangeConflict(confirmedRestore)) {
+        setDoctorReport(confirmedRestore.doctor);
+        setFileSnapshot(confirmedRestore.snapshot);
+        throw new Error(t(locale, "externalChangeCanceled"));
+      }
+      if (isDangerousContentBlocked(confirmedRestore)) {
+        setDoctorReport(confirmedRestore.doctor);
+        throw new Error(t(locale, "backupRestoreRiskDenied"));
+      }
+      return applyRestoredState(confirmedRestore);
+    }
 
-    const normalized = normalizeStatePaths(restored.state);
-    setState(normalized);
-    setSavedState(normalized);
-    setFileSnapshot(restored.snapshot);
-    setDoctorReport(restored.doctor);
-    applyAppearanceMode(normalized.panelSettings.theme);
-    applyAppearanceTheme(normalized.panelSettings.appearance_theme);
-    applyUiFontSize(normalized.panelSettings.ui_font_size);
-    applyPrimarySelections(
-      getRetainedPrimarySelections(normalized, currentSelections),
-      {
-        setSelectedProvider,
-        setSelectedModel,
-        setSelectedProfile,
-        setSelectedMcpServer,
-      },
-    );
-    void refreshPreview(normalized);
-    setError("");
-    setNotice(
-      formatMessage(t(locale, "backupRestoreSuccessWithRollback"), {
-        name: backupName,
-        rollback: restored.rollbackBackupName,
-      }),
-    );
+    applyRestoredState(restored);
   };
 
   return {
@@ -218,4 +262,19 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isDangerousContentBlocked(result: unknown): result is {
+  ok: false;
+  reason: "dangerous-content";
+  doctor: ConfigDoctorReport;
+  risk: { items: string[]; tiers: Record<string, string[]> };
+} {
+  return Boolean(
+    result
+    && typeof result === "object"
+    && (result as { ok?: unknown }).ok === false
+    && (result as { reason?: unknown }).reason === "dangerous-content"
+    && Array.isArray((result as { risk?: { items?: unknown } }).risk?.items),
+  );
 }

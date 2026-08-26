@@ -26,7 +26,7 @@ fn lock_conn<'a>(
 /// 配置历史表 schema。
 ///
 /// 设计要点：
-/// - UNIQUE(file_id, sha256) 实现去重（相同内容不重复存储）
+/// - UNIQUE(kimi_code_environment_id, file_id, sha256) 实现环境内去重
 /// - snapshot_at 索引支持时间范围查询
 /// - file_id 索引支持按文件类型过滤
 pub const SCHEMA_SQL: &str = r#"
@@ -38,8 +38,9 @@ CREATE TABLE IF NOT EXISTS config_history (
   sha256 TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   snapshot_path TEXT NOT NULL,
+  target_path TEXT NOT NULL DEFAULT '',
   description TEXT,
-  UNIQUE(file_id, sha256)
+  UNIQUE(kimi_code_environment_id, file_id, sha256)
 );
 
 CREATE INDEX IF NOT EXISTS idx_history_time
@@ -66,6 +67,7 @@ fn legacy_history_dirs() -> Result<Vec<PathBuf>, String> {
 fn ensure_history_dir() -> Result<PathBuf, String> {
     let target = history_dir()?;
     std::fs::create_dir_all(&target).map_err(|e| format!("create history dir: {e}"))?;
+    set_private_directory_permissions(&target)?;
 
     if let Ok(legacy_dirs) = legacy_history_dirs() {
         for legacy in legacy_dirs {
@@ -106,6 +108,34 @@ fn ensure_history_dir() -> Result<PathBuf, String> {
     Ok(target)
 }
 
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .map_err(|e| format!("set history directory permissions: {e}"))
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &std::path::Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn write_private_snapshot(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("create private snapshot {}: {e}", path.display()))?;
+    file.write_all(content)
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("write private snapshot {}: {e}", path.display()))
+}
+
 fn migrate_history_snapshot_paths(
     conn: &rusqlite::Connection,
     legacy: &PathBuf,
@@ -142,24 +172,179 @@ fn migrate_history_snapshot_paths(
 }
 
 fn ensure_config_history_environment_column(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute(
-        "ALTER TABLE config_history ADD COLUMN kimi_code_environment_id TEXT NOT NULL DEFAULT ''",
-        [],
-    )
-    .or_else(|e| {
-        if e.to_string().contains("duplicate column name") {
-            Ok(0)
-        } else {
-            Err(e)
-        }
-    })
-    .map_err(|e| format!("add config_history environment column: {e}"))?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_history_environment_time ON config_history(kimi_code_environment_id, snapshot_at DESC)",
-        [],
-    )
-    .map_err(|e| format!("create config_history environment index: {e}"))?;
+    // C4：多步 schema 迁移放进单一 savepoint。任一步失败则回滚到 SAVEPOINT，
+    // 避免中途崩溃/报错留下半迁移状态。migrate_config_history_unique_constraint 内部的
+    // BEGIN/COMMIT 在已开启外层 write 事务时被 SQLite 当作同一事务的一部分处理，
+    // savepoint 保证整个迁移原子可回滚。
+    conn.execute_batch("SAVEPOINT cfg_history_migration;")
+        .map_err(|e| format!("begin config_history migration transaction: {e}"))?;
+    let migration_result = (|| -> Result<(), String> {
+        conn.execute(
+            "ALTER TABLE config_history ADD COLUMN kimi_code_environment_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .or_else(|e| {
+            if e.to_string().contains("duplicate column name") {
+                Ok(0)
+            } else {
+                Err(e)
+            }
+        })
+        .map_err(|e| format!("add config_history environment column: {e}"))?;
+        conn.execute(
+            "ALTER TABLE config_history ADD COLUMN target_path TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .or_else(|e| {
+            if e.to_string().contains("duplicate column name") {
+                Ok(0)
+            } else {
+                Err(e)
+            }
+        })
+        .map_err(|e| format!("add config_history target path column: {e}"))?;
 
+        conn.execute(
+            "UPDATE config_history SET kimi_code_environment_id = 'legacy-unassigned'
+             WHERE TRIM(kimi_code_environment_id) = ''",
+            [],
+        )
+        .map_err(|e| format!("mark legacy config_history rows: {e}"))?;
+
+        migrate_config_history_unique_constraint(conn)?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_history_environment_time ON config_history(kimi_code_environment_id, snapshot_at DESC)",
+            [],
+        )
+        .map_err(|e| format!("create config_history environment index: {e}"))?;
+        Ok(())
+    })();
+    match migration_result {
+        Ok(()) => conn
+            .execute_batch("RELEASE SAVEPOINT cfg_history_migration;")
+            .map_err(|e| format!("commit config_history migration: {e}")),
+        Err(error) => {
+            let rollback = conn.execute_batch("ROLLBACK TO SAVEPOINT cfg_history_migration;");
+            let _ = conn.execute_batch("RELEASE SAVEPOINT cfg_history_migration;");
+            if let Err(rollback_error) = rollback {
+                return Err(format!(
+                    "migrate config_history environment column failed ({error}) and rollback failed ({rollback_error})"
+                ));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn migrate_config_history_unique_constraint(conn: &rusqlite::Connection) -> Result<(), String> {
+    let create_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'config_history'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("read config_history schema: {e}"))?;
+    let normalized = create_sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.contains("UNIQUE(kimi_code_environment_id, file_id, sha256)") {
+        return Ok(());
+    }
+
+    let migration_result = conn.execute_batch(
+        r#"
+        SAVEPOINT cfg_history_unique_migration;
+        DROP INDEX IF EXISTS idx_history_time;
+        DROP INDEX IF EXISTS idx_history_file;
+        DROP INDEX IF EXISTS idx_history_environment_time;
+        ALTER TABLE config_history RENAME TO config_history_legacy;
+        CREATE TABLE config_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          snapshot_at TEXT NOT NULL,
+          kimi_code_environment_id TEXT NOT NULL DEFAULT 'legacy-unassigned',
+          file_id TEXT NOT NULL,
+          sha256 TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          snapshot_path TEXT NOT NULL,
+          target_path TEXT NOT NULL DEFAULT '',
+          description TEXT,
+          UNIQUE(kimi_code_environment_id, file_id, sha256)
+        );
+        INSERT INTO config_history (
+          id, snapshot_at, kimi_code_environment_id, file_id, sha256,
+          size_bytes, snapshot_path, target_path, description
+        )
+        SELECT
+          id, snapshot_at,
+          CASE WHEN TRIM(kimi_code_environment_id) = '' THEN 'legacy-unassigned'
+               ELSE kimi_code_environment_id END,
+          file_id, sha256, size_bytes, snapshot_path, target_path, description
+        FROM config_history_legacy;
+        DROP TABLE config_history_legacy;
+        CREATE INDEX idx_history_time ON config_history(snapshot_at DESC);
+        CREATE INDEX idx_history_file ON config_history(file_id, snapshot_at DESC);
+        RELEASE SAVEPOINT cfg_history_unique_migration;
+        "#,
+    );
+    if let Err(error) = migration_result {
+        let _ = conn.execute_batch("ROLLBACK TO SAVEPOINT cfg_history_unique_migration;");
+        let _ = conn.execute_batch("RELEASE SAVEPOINT cfg_history_unique_migration;");
+        return Err(format!("migrate config_history unique constraint: {error}"));
+    }
+    Ok(())
+}
+
+fn backfill_history_target_paths(conn: &rusqlite::Connection) -> Result<(), String> {
+    let panel_table_exists: bool = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='panel_settings'")
+        .map_err(|e| format!("prepare panel_settings existence check: {e}"))?
+        .exists([])
+        .map_err(|e| format!("check panel_settings existence: {e}"))?;
+    if !panel_table_exists {
+        return Ok(());
+    }
+
+    let environments_json: Option<String> = conn
+        .query_row(
+            "SELECT kimi_code_environments FROM panel_settings WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(environments_json) = environments_json else {
+        return Ok(());
+    };
+    let environments = serde_json::from_str::<serde_json::Value>(&environments_json)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+
+    for environment in environments {
+        let Some(environment_id) = environment.get("id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let Some(home_path) = environment.get("homePath").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if environment_id.trim().is_empty() || home_path.trim().is_empty() {
+            continue;
+        }
+        let home = home_path.trim_end_matches('/');
+        for (file_id, file_name) in [
+            ("config", "config.toml"),
+            ("mcp", "mcp.json"),
+            ("tui", "tui.toml"),
+            ("agents", "AGENTS.md"),
+            ("skills", "skills"),
+        ] {
+            let target_path = format!("{home}/{file_name}");
+            conn.execute(
+                "UPDATE config_history SET target_path = ?1
+                 WHERE kimi_code_environment_id = ?2 AND file_id = ?3
+                   AND TRIM(target_path) = ''",
+                rusqlite::params![target_path, environment_id, file_id],
+            )
+            .map_err(|e| format!("backfill history target for {environment_id}/{file_id}: {e}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -175,6 +360,7 @@ pub fn init_config_history(state: tauri::State<crate::usage::UsageState>) -> Res
     conn.execute_batch(SCHEMA_SQL)
         .map_err(|e| format!("init config_history schema: {e}"))?;
     ensure_config_history_environment_column(conn)?;
+    backfill_history_target_paths(conn)?;
 
     // 确保 history 目录存在，并把旧目录中的快照路径迁移到 Kimi Code 标准目录。
     let target_history_dir = ensure_history_dir()?;
@@ -224,6 +410,12 @@ pub fn capture_snapshot(
     kimi_code_environment_id: Option<String>,
     state: tauri::State<crate::usage::UsageState>,
 ) -> Result<Option<i64>, String> {
+    if !matches!(
+        file_id.as_str(),
+        "config" | "panel" | "mcp" | "tui" | "agents" | "skills"
+    ) {
+        return Err(format!("unsupported snapshot file_id: {file_id}"));
+    }
     // 读取配置内容
     let content = if file_id == "panel" {
         // Panel settings 从 SQLite 导出 JSON
@@ -231,6 +423,15 @@ pub fn capture_snapshot(
             Some(json) => json,
             None => {
                 log::warn!("Panel settings not found in database, skipping snapshot");
+                return Ok(None);
+            }
+        }
+    } else if file_id == "skills" {
+        match crate::fs_access::export_portable_directory(file_path.clone()) {
+            Ok(bundle) => serde_json::to_string(&bundle)
+                .map_err(|error| format!("serialize Skills snapshot: {error}"))?,
+            Err(error) => {
+                log::error!("Failed to read Skills for snapshot: {error}");
                 return Ok(None);
             }
         }
@@ -253,10 +454,14 @@ pub fn capture_snapshot(
     let guard = lock_conn(&state)?;
     let conn = guard.as_ref().ok_or("usage db not open")?;
 
+    let environment_id = kimi_code_environment_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "legacy-unassigned".to_string());
     let exists: bool = conn
         .query_row(
-            "SELECT 1 FROM config_history WHERE file_id = ?1 AND sha256 = ?2",
-            [&file_id, &sha256],
+            "SELECT 1 FROM config_history
+             WHERE kimi_code_environment_id = ?1 AND file_id = ?2 AND sha256 = ?3",
+            rusqlite::params![environment_id, file_id, sha256],
             |_| Ok(true),
         )
         .unwrap_or(false);
@@ -283,10 +488,28 @@ pub fn capture_snapshot(
         .map(|d| d.as_millis())
         .unwrap_or(0);
 
-    let snapshot_filename = format!("{}-{}.toml.gz", timestamp_ms, file_id);
+    let safe_environment_id: String = environment_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let extension = if file_id == "panel" || file_id == "skills" {
+        "json"
+    } else {
+        "toml"
+    };
+    let snapshot_filename = format!(
+        "{}-{}-{}.{}.gz",
+        timestamp_ms, safe_environment_id, file_id, extension
+    );
     let snapshot_path = history_dir.join(&snapshot_filename);
 
-    if let Err(e) = fs::write(&snapshot_path, &compressed) {
+    if let Err(e) = write_private_snapshot(&snapshot_path, &compressed) {
         log::error!("Failed to write snapshot file: {e}");
         return Ok(None);
     }
@@ -294,11 +517,11 @@ pub fn capture_snapshot(
     // 插入 SQLite 记录
     let snapshot_at = chrono::Utc::now().to_rfc3339();
     let snapshot_path_str = snapshot_path.to_string_lossy().to_string();
-    let environment_id = kimi_code_environment_id.unwrap_or_default();
-
     match conn.execute(
-        "INSERT INTO config_history (snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes, snapshot_path, description)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO config_history (
+           snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes,
+           snapshot_path, target_path, description
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             snapshot_at,
             environment_id,
@@ -306,6 +529,7 @@ pub fn capture_snapshot(
             sha256,
             size_bytes,
             snapshot_path_str,
+            file_path,
             description
         ],
     ) {
@@ -328,10 +552,12 @@ pub fn capture_snapshot(
 pub struct SnapshotRecord {
     pub id: i64,
     pub snapshot_at: String,
+    pub kimi_code_environment_id: String,
     pub file_id: String,
     pub sha256: String,
     pub size_bytes: i64,
     pub snapshot_path: String,
+    pub target_path: String,
     pub description: Option<String>,
 }
 
@@ -344,6 +570,7 @@ pub struct SnapshotRecord {
 /// 返回：按时间倒序排列的快照列表
 #[tauri::command]
 pub fn list_snapshots(
+    kimi_code_environment_id: String,
     file_id: Option<String>,
     limit: Option<i64>,
     state: tauri::State<crate::usage::UsageState>,
@@ -353,24 +580,32 @@ pub fn list_snapshots(
 
     let limit = limit.unwrap_or(100);
 
+    let environment_id = if kimi_code_environment_id.trim().is_empty() {
+        "legacy-unassigned".to_string()
+    } else {
+        kimi_code_environment_id
+    };
     let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = if let Some(fid) = file_id {
         (
-            "SELECT id, snapshot_at, file_id, sha256, size_bytes, snapshot_path, description
+            "SELECT id, snapshot_at, kimi_code_environment_id, file_id, sha256,
+                    size_bytes, snapshot_path, target_path, description
              FROM config_history
-             WHERE file_id = ?1
+             WHERE kimi_code_environment_id = ?1 AND file_id = ?2
              ORDER BY snapshot_at DESC
-             LIMIT ?2"
+             LIMIT ?3"
                 .to_string(),
-            vec![Box::new(fid), Box::new(limit)],
+            vec![Box::new(environment_id), Box::new(fid), Box::new(limit)],
         )
     } else {
         (
-            "SELECT id, snapshot_at, file_id, sha256, size_bytes, snapshot_path, description
+            "SELECT id, snapshot_at, kimi_code_environment_id, file_id, sha256,
+                    size_bytes, snapshot_path, target_path, description
              FROM config_history
+             WHERE kimi_code_environment_id = ?1
              ORDER BY snapshot_at DESC
-             LIMIT ?1"
+             LIMIT ?2"
                 .to_string(),
-            vec![Box::new(limit)],
+            vec![Box::new(environment_id), Box::new(limit)],
         )
     };
 
@@ -381,11 +616,13 @@ pub fn list_snapshots(
             Ok(SnapshotRecord {
                 id: row.get(0)?,
                 snapshot_at: row.get(1)?,
-                file_id: row.get(2)?,
-                sha256: row.get(3)?,
-                size_bytes: row.get(4)?,
-                snapshot_path: row.get(5)?,
-                description: row.get(6)?,
+                kimi_code_environment_id: row.get(2)?,
+                file_id: row.get(3)?,
+                sha256: row.get(4)?,
+                size_bytes: row.get(5)?,
+                snapshot_path: row.get(6)?,
+                target_path: row.get(7)?,
+                description: row.get(8)?,
             })
         })
         .map_err(|e| format!("query: {e}"))?;
@@ -396,6 +633,74 @@ pub fn list_snapshots(
     }
 
     Ok(result)
+}
+
+fn assign_legacy_snapshot(
+    conn: &rusqlite::Connection,
+    snapshot_id: i64,
+    environment_id: &str,
+) -> Result<(), String> {
+    if environment_id.trim().is_empty() || environment_id == "legacy-unassigned" {
+        return Err("choose a registered Kimi Code environment".to_string());
+    }
+    let (current_environment_id, file_id): (String, String) = conn
+        .query_row(
+            "SELECT kimi_code_environment_id, file_id FROM config_history WHERE id = ?1",
+            [snapshot_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| format!("snapshot not found: {error}"))?;
+    if current_environment_id != "legacy-unassigned" && !current_environment_id.trim().is_empty() {
+        return Err(format!(
+            "snapshot #{snapshot_id} is already assigned to {current_environment_id}"
+        ));
+    }
+    if file_id != "config"
+        && file_id != "mcp"
+        && file_id != "tui"
+        && file_id != "agents"
+        && file_id != "skills"
+    {
+        return Err(format!(
+            "legacy {file_id} snapshots cannot be assigned to an environment"
+        ));
+    }
+    let target =
+        registered_environment_target(conn, environment_id, &file_id)?.ok_or_else(|| {
+            format!("environment {environment_id} is not registered; assignment is disabled")
+        })?;
+    conn.execute(
+        "UPDATE config_history
+         SET kimi_code_environment_id = ?1, target_path = ?2
+         WHERE id = ?3",
+        rusqlite::params![environment_id, target.to_string_lossy(), snapshot_id],
+    )
+    .map_err(|error| format!("assign legacy snapshot: {error}"))?;
+    Ok(())
+}
+
+/// Bind a pre-environment snapshot to a registered environment. The restore
+/// destination is derived from the environment registry, never supplied by the
+/// renderer or backup payload.
+#[tauri::command]
+pub fn assign_legacy_snapshot_environment(
+    snapshot_id: i64,
+    kimi_code_environment_id: String,
+    state: tauri::State<crate::usage::UsageState>,
+) -> Result<(), String> {
+    let guard = lock_conn(&state)?;
+    let conn = guard.as_ref().ok_or("usage db not open")?;
+    conn.execute_batch("BEGIN IMMEDIATE;")
+        .map_err(|error| format!("begin legacy snapshot assignment: {error}"))?;
+    match assign_legacy_snapshot(conn, snapshot_id, &kimi_code_environment_id) {
+        Ok(()) => conn
+            .execute_batch("COMMIT;")
+            .map_err(|error| format!("commit legacy snapshot assignment: {error}")),
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
 }
 
 /// 获取快照内容。
@@ -453,11 +758,17 @@ pub fn restore_snapshot(
     let conn = guard.as_ref().ok_or("usage db not open")?;
 
     // 1. 查询快照信息
-    let (file_id, snapshot_path, snapshot_environment_id): (String, String, String) = conn
+    let (file_id, snapshot_path, snapshot_environment_id, snapshot_target_path): (
+        String,
+        String,
+        String,
+        String,
+    ) = conn
         .query_row(
-            "SELECT file_id, snapshot_path, kimi_code_environment_id FROM config_history WHERE id = ?1",
+            "SELECT file_id, snapshot_path, kimi_code_environment_id, target_path
+             FROM config_history WHERE id = ?1",
             [snapshot_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| format!("snapshot not found: {e}"))?;
 
@@ -485,31 +796,113 @@ pub fn restore_snapshot(
     }
 
     // 其他配置文件：写入磁盘
-    let config_file_path = match file_id.as_str() {
-        "config" => "~/.kimi-code/config.toml",
-        "mcp" => "~/.kimi-code/mcp.json",
+    match file_id.as_str() {
+        "config" | "mcp" | "tui" | "agents" | "skills" => {}
         "profiles" => return Err(
             "profiles snapshots are legacy-only; Profile data is stored in SQLite panel settings"
                 .to_string(),
         ),
         _ => return Err(format!("unknown file_id: {file_id}")),
+    }
+
+    let target_path =
+        resolve_snapshot_restore_target(&snapshot_environment_id, &snapshot_target_path)?;
+    let registered_target =
+        registered_environment_target(conn, &snapshot_environment_id, &file_id)?.ok_or_else(
+            || {
+                format!(
+                    "environment {} is not registered; automatic restore is disabled",
+                    snapshot_environment_id
+                )
+            },
+        )?;
+    if target_path != registered_target {
+        log::warn!(
+            "Snapshot target {} moved to registered environment path {}",
+            target_path.display(),
+            registered_target.display()
+        );
+    }
+    let target_path = registered_target;
+
+    if file_id == "skills" {
+        let snapshot_bundle: crate::fs_access::PortableDirectoryBundle =
+            serde_json::from_str(&snapshot_content)
+                .map_err(|error| format!("parse Skills snapshot: {error}"))?;
+        let current_bundle =
+            crate::fs_access::export_portable_directory(target_path.to_string_lossy().to_string())?;
+        let current_content = serde_json::to_string(&current_bundle)
+            .map_err(|error| format!("serialize current Skills rollback point: {error}"))?;
+        let current_hash = compute_sha256(&current_content);
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM config_history
+                 WHERE kimi_code_environment_id = ?1 AND file_id = 'skills' AND sha256 = ?2",
+                rusqlite::params![snapshot_environment_id, current_hash],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !exists {
+            let compressed = gzip_compress(&current_content)
+                .map_err(|error| format!("compress Skills rollback point: {error}"))?;
+            let history_dir = ensure_history_dir()?;
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0);
+            let rollback_path = history_dir.join(format!("{timestamp_ms}-skills.json.gz"));
+            write_private_snapshot(&rollback_path, &compressed)
+                .map_err(|error| format!("write Skills rollback point: {error}"))?;
+            conn.execute(
+                "INSERT INTO config_history (
+                   snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes,
+                   snapshot_path, target_path, description
+                 ) VALUES (?1, ?2, 'skills', ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    chrono::Utc::now().to_rfc3339(),
+                    snapshot_environment_id,
+                    current_hash,
+                    current_content.len() as i64,
+                    rollback_path.to_string_lossy(),
+                    target_path.to_string_lossy(),
+                    format!("Rollback point before restoring snapshot #{}", snapshot_id),
+                ],
+            )
+            .map_err(|error| format!("insert Skills rollback point: {error}"))?;
+        }
+        crate::fs_access::replace_portable_directory_inner(
+            target_path.to_string_lossy().as_ref(),
+            snapshot_bundle,
+            current_bundle.sha256,
+            &crate::fs_access::PathGrantState::default(),
+        )?;
+        log::info!("Restored snapshot #{snapshot_id} to skills");
+        return Ok(());
+    }
+
+    // 4. 创建"回滚点"快照（当前配置），并保留 hash 作为最终 CAS 基线。
+    let current_content = if target_path.exists() {
+        Some(
+            fs::read_to_string(&target_path)
+                .map_err(|e| format!("read current config for rollback point: {e}"))?,
+        )
+    } else {
+        None
     };
-
-    let target_path = crate::fs_access::resolve_home(config_file_path);
-
-    // 4. 创建"回滚点"快照（当前配置）
-    if target_path.exists() {
-        let current_content = fs::read_to_string(&target_path)
-            .map_err(|e| format!("read current config for rollback point: {e}"))?;
-
-        let sha256 = compute_sha256(&current_content);
+    let expected_target_hash = current_content
+        .as_deref()
+        .map(compute_sha256)
+        .unwrap_or_default();
+    if let Some(current_content) = current_content {
+        let sha256 = expected_target_hash.clone();
         let size_bytes = current_content.len() as i64;
 
         // 检查是否已存在（去重）
         let exists: bool = conn
             .query_row(
-                "SELECT 1 FROM config_history WHERE file_id = ?1 AND sha256 = ?2",
-                [&file_id, &sha256],
+                "SELECT 1 FROM config_history
+                 WHERE kimi_code_environment_id = ?1 AND file_id = ?2 AND sha256 = ?3",
+                rusqlite::params![snapshot_environment_id, file_id, sha256],
                 |_| Ok(true),
             )
             .unwrap_or(false);
@@ -530,7 +923,7 @@ pub fn restore_snapshot(
             let rollback_point_path = history_dir.join(&rollback_point_filename);
 
             // 写入文件失败应该阻止回滚
-            fs::write(&rollback_point_path, &compressed)
+            write_private_snapshot(&rollback_point_path, &compressed)
                 .map_err(|e| format!("write rollback point file: {e}"))?;
 
             let snapshot_at = chrono::Utc::now().to_rfc3339();
@@ -538,8 +931,10 @@ pub fn restore_snapshot(
 
             // 插入记录失败也应该阻止回滚
             conn.execute(
-                "INSERT INTO config_history (snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes, snapshot_path, description)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO config_history (
+                   snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes,
+                   snapshot_path, target_path, description
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     snapshot_at,
                     snapshot_environment_id,
@@ -547,6 +942,7 @@ pub fn restore_snapshot(
                     sha256,
                     size_bytes,
                     rollback_point_path_str,
+                    snapshot_target_path,
                     format!("Rollback point before restoring snapshot #{}", snapshot_id)
                 ],
             )
@@ -561,11 +957,77 @@ pub fn restore_snapshot(
     }
 
     // 5. 覆盖配置文件
-    fs::write(&target_path, snapshot_content).map_err(|e| format!("write config file: {e}"))?;
+    crate::fs_access::atomic_write_text(
+        &target_path,
+        &snapshot_content,
+        Some(&expected_target_hash),
+    )
+    .map_err(|e| format!("write config file: {e}"))?;
 
     log::info!("Restored snapshot #{snapshot_id} to {file_id}");
 
     Ok(())
+}
+
+fn resolve_snapshot_restore_target(
+    environment_id: &str,
+    target_path: &str,
+) -> Result<PathBuf, String> {
+    if environment_id.trim().is_empty() || environment_id == "legacy-unassigned" {
+        return Err(
+            "legacy snapshot has no environment assignment; choose a target environment before restoring"
+                .to_string(),
+        );
+    }
+    if target_path.trim().is_empty() {
+        return Err(
+            "snapshot has no recorded target path; automatic restore is disabled".to_string(),
+        );
+    }
+    let resolved = crate::fs_access::resolve_home(target_path);
+    // 记录路径仅拒绝穿越；权威 gate 是调用方的 registered_environment_target（从受信环境注册表解析）。
+    crate::fs_access::validate_read_scope(&resolved)?;
+    Ok(resolved)
+}
+
+fn registered_environment_target(
+    conn: &rusqlite::Connection,
+    environment_id: &str,
+    file_id: &str,
+) -> Result<Option<PathBuf>, String> {
+    let environments_json: Option<String> = conn
+        .query_row(
+            "SELECT kimi_code_environments FROM panel_settings WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(environments_json) = environments_json else {
+        return Ok(None);
+    };
+    let environments = serde_json::from_str::<serde_json::Value>(&environments_json)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let Some(home_path) = environments.iter().find_map(|environment| {
+        (environment.get("id").and_then(|value| value.as_str()) == Some(environment_id))
+            .then(|| environment.get("homePath").and_then(|value| value.as_str()))
+            .flatten()
+    }) else {
+        return Ok(None);
+    };
+    let file_name = match file_id {
+        "config" => "config.toml",
+        "mcp" => "mcp.json",
+        "tui" => "tui.toml",
+        "agents" => "AGENTS.md",
+        "skills" => "skills",
+        _ => return Err(format!("unsupported environment file_id: {file_id}")),
+    };
+    let home = crate::fs_access::resolve_home(home_path);
+    let target = home.join(file_name);
+    crate::fs_access::validate_path_scope_including(&target, Some(&home))?;
+    Ok(Some(target))
 }
 
 /// 清理旧快照。
@@ -640,6 +1102,16 @@ mod tests {
         let exists = stmt.exists([]).unwrap();
         assert!(exists, "idx_history_time index should exist");
 
+        let create_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='config_history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(create_sql.contains("target_path TEXT NOT NULL"));
+        assert!(create_sql.contains("UNIQUE(kimi_code_environment_id, file_id, sha256)"));
+
         assert!(
             !SCHEMA_SQL.contains("idx_history_environment_time"),
             "environment index must be created after legacy column migration"
@@ -668,7 +1140,6 @@ mod tests {
             "#,
         )
         .unwrap();
-
         conn.execute_batch(SCHEMA_SQL).unwrap();
         ensure_config_history_environment_column(&conn).unwrap();
 
@@ -684,6 +1155,107 @@ mod tests {
             .unwrap();
         assert!(has_column);
         assert!(has_index);
+        let has_target_path: bool = conn
+            .prepare(
+                "SELECT name FROM pragma_table_info('config_history') WHERE name = 'target_path'",
+            )
+            .unwrap()
+            .exists([])
+            .unwrap();
+        let create_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='config_history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_target_path);
+        assert!(create_sql.contains("UNIQUE(kimi_code_environment_id, file_id, sha256)"));
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_environment_column_to_legacy_schema() {
+        // C4：迁移任一步失败时 savepoint 回滚——表结构必须停留在「旧 schema」，
+        // 绝不能留下半迁移状态（列已加但唯一约束/索引未更新）。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE config_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              snapshot_at TEXT NOT NULL,
+              file_id TEXT NOT NULL,
+              sha256 TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL,
+              snapshot_path TEXT NOT NULL,
+              description TEXT,
+              UNIQUE(file_id, sha256)
+            );
+            CREATE INDEX IF NOT EXISTS idx_history_time
+              ON config_history(snapshot_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_file
+              ON config_history(file_id, snapshot_at DESC);
+            -- 让 RENAME 阶段失败：已存在同名 legacy 表。
+            CREATE TABLE config_history_legacy (id INTEGER PRIMARY KEY);
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO config_history (snapshot_at, file_id, sha256, size_bytes, snapshot_path)
+             VALUES ('2026-06-08T00:00:00Z', 'config', 'abc123', 1024, '/path/1.gz')",
+            [],
+        )
+        .unwrap();
+
+        let result = ensure_config_history_environment_column(&conn);
+        assert!(
+            result.is_err(),
+            "migration must fail when rename target exists"
+        );
+
+        // ALTER ADD COLUMN 已执行，但 savepoint 回滚必须撤销它们。
+        let has_environment_column: bool = conn
+            .prepare("SELECT name FROM pragma_table_info('config_history') WHERE name = 'kimi_code_environment_id'")
+            .unwrap()
+            .exists([])
+            .unwrap();
+        let has_target_path: bool = conn
+            .prepare(
+                "SELECT name FROM pragma_table_info('config_history') WHERE name = 'target_path'",
+            )
+            .unwrap()
+            .exists([])
+            .unwrap();
+        assert!(!has_environment_column, "column must be rolled back");
+        assert!(!has_target_path, "target_path column must be rolled back");
+
+        // 旧表唯一约束与索引保留，数据未丢失。
+        let create_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='config_history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let normalized = create_sql.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            normalized.contains("UNIQUE(file_id, sha256)"),
+            "legacy unique constraint must survive rollback"
+        );
+        let row_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM config_history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(row_count, 1, "data must survive rollback");
+
+        // 重新执行迁移（排除冲突表后）应成功——证明状态可重试。
+        conn.execute_batch("DROP TABLE config_history_legacy;")
+            .unwrap();
+        ensure_config_history_environment_column(&conn).unwrap();
+        let has_environment_column_after: bool = conn
+            .prepare("SELECT name FROM pragma_table_info('config_history') WHERE name = 'kimi_code_environment_id'")
+            .unwrap()
+            .exists([])
+            .unwrap();
+        assert!(has_environment_column_after);
     }
 
     #[test]
@@ -705,7 +1277,7 @@ mod tests {
         )
         .unwrap();
 
-        // 尝试插入相同 file_id + sha256 应失败
+        // 同一环境内相同 file_id + sha256 应失败。
         let result = conn.execute(
             "INSERT INTO config_history (snapshot_at, file_id, sha256, size_bytes, snapshot_path)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -722,6 +1294,23 @@ mod tests {
             result.is_err(),
             "duplicate file_id+sha256 should be rejected"
         );
+
+        // 不同环境允许保存相同内容。
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            [
+                "2026-06-08T02:00:00Z",
+                "work",
+                "config",
+                "abc123",
+                "1024",
+                "/path/work.gz",
+            ],
+        )
+        .expect("same content in another environment should be retained");
     }
 
     #[test]
@@ -819,5 +1408,115 @@ mod tests {
             .unwrap();
         let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn restore_target_requires_a_scoped_environment_and_uses_the_recorded_path() {
+        assert!(
+            resolve_snapshot_restore_target("legacy-unassigned", "~/.kimi-code/config.toml")
+                .is_err()
+        );
+        assert!(resolve_snapshot_restore_target("work", "").is_err());
+
+        let resolved = resolve_snapshot_restore_target("work", "/tmp/kimi-work/config.toml")
+            .expect("scoped snapshots should restore to their recorded path");
+        assert_eq!(resolved, PathBuf::from("/tmp/kimi-work/config.toml"));
+    }
+
+    #[test]
+    fn backfills_existing_snapshot_targets_from_the_environment_registry() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE panel_settings (
+              id INTEGER PRIMARY KEY,
+              kimi_code_environments TEXT
+            );
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO panel_settings (id, kimi_code_environments) VALUES (1, ?1)",
+            [r#"[{"id":"work","homePath":"/tmp/kimi-work"}]"#],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-01', 'work', 'config', 'hash', 1, '/tmp/snapshot.gz', '')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-02', 'work', 'skills', 'skills-hash', 1, '/tmp/skills.gz', '')",
+            [],
+        )
+        .unwrap();
+
+        backfill_history_target_paths(&conn).unwrap();
+
+        let target: String = conn
+            .query_row(
+                "SELECT target_path FROM config_history WHERE file_id = 'config'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(target, "/tmp/kimi-work/config.toml");
+        let skills_target: String = conn
+            .query_row(
+                "SELECT target_path FROM config_history WHERE file_id = 'skills'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(skills_target, "/tmp/kimi-work/skills");
+    }
+
+    #[test]
+    fn assigns_legacy_snapshot_to_a_registered_environment_target() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE panel_settings (
+              id INTEGER PRIMARY KEY,
+              kimi_code_environments TEXT
+            );
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO panel_settings (id, kimi_code_environments) VALUES (1, ?1)",
+            [r#"[{"id":"work","homePath":"/tmp/kimi-work"}]"#],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-01', 'legacy-unassigned', 'mcp', 'legacy-hash', 1, '/tmp/snapshot.gz', '')",
+            [],
+        )
+        .unwrap();
+        let snapshot_id = conn.last_insert_rowid();
+
+        assign_legacy_snapshot(&conn, snapshot_id, "work").unwrap();
+
+        let assigned: (String, String) = conn
+            .query_row(
+                "SELECT kimi_code_environment_id, target_path FROM config_history WHERE id = ?1",
+                [snapshot_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(assigned.0, "work");
+        assert_eq!(assigned.1, "/tmp/kimi-work/mcp.json");
+        assert!(assign_legacy_snapshot(&conn, snapshot_id, "work").is_err());
     }
 }

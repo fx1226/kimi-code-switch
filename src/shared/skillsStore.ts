@@ -1,3 +1,6 @@
+import { parse as parseYaml } from "yaml";
+import type { PluginSkillRoot } from "./types";
+
 // POSIX 路径工具（内联实现，避免依赖 node:path，使本模块可在 renderer 直接运行）。
 function join(...segments: string[]): string {
   return segments
@@ -12,23 +15,24 @@ function basename(path: string): string {
   return index >= 0 ? normalized.slice(index + 1) : normalized;
 }
 
-export type SkillType = "prompt" | "flow";
+export type SkillType = "prompt" | "inline" | "flow" | "reference";
 export type SkillDiscoveryMode = "auto";
 /**
  * 发现目录的类别。
  * - "builtin"：CLI 内置技能，仅作说明项，不扫描磁盘。
  * - "user-brand"：Kimi Code 用户级技能目录（$KIMI_CODE_HOME/skills）。
  * - "user-common"：通用代理技能目录（~/.agents/skills）。
- * - "project"：工作区（workspaces.json 根）下的项目级技能目录。
+ * - "project"：当前工作目录向上找到的最近 Git 项目下的技能目录。
  * - "extra"：config.toml extra_skill_dirs 追加目录。
  * UI 只对 "builtin" 特判，其余组共用同一渲染路径。
  */
-export type SkillPathGroup = "builtin" | "user-brand" | "user-common" | "project" | "extra";
+export type SkillPathGroup = "builtin" | "user-brand" | "user-common" | "project" | "plugin" | "extra";
 
 export interface SkillFileAccess {
   readText(path: string): Promise<string | null>;
   listDir(path: string): Promise<Array<{ name: string; isDirectory: boolean }>>;
   pathExists(path: string): Promise<boolean>;
+  realPath?(path: string): Promise<string>;
 }
 
 export interface SkillDiscoveryPath {
@@ -40,6 +44,8 @@ export interface SkillDiscoveryPath {
   selected: boolean;
   priority: number;
   reason: string;
+  pluginId?: string;
+  rootSkillOnly?: boolean;
 }
 
 export interface SkillMetadata {
@@ -48,7 +54,12 @@ export interface SkillMetadata {
   type: SkillType;
   license: string;
   compatibility: string;
+  whenToUse: string;
+  disableModelInvocation: boolean;
+  arguments: string[];
   metadata: Record<string, string>;
+  hasSubSkill: boolean;
+  isSubSkill?: boolean;
 }
 
 export interface SkillEntry {
@@ -71,6 +82,8 @@ export interface SkillEntry {
   hasScripts: boolean;
   hasReferences: boolean;
   hasAssets: boolean;
+  valid: boolean;
+  diagnostics: string[];
 }
 
 export interface SkillsScanSummary {
@@ -93,14 +106,12 @@ export interface SkillsScanReport {
 
 /**
  * 扫描选项。注入项用于对接真实运行时：
- * - userHome: 默认缩略主目录路径（如 "~"），用于展开 ~ 起始的 extra_skill_dirs 与 workspaces.json。
+ * - userHome: 默认缩略主目录路径（如 "~"），用于展开 ~ 起始的 extra_skill_dirs。
  *   缺省按 "~" 处理，方可与纯 ~ 路径断言共存。
  * - envHome: KIMI_CODE_HOME 生效时的用户级技能主目录路径（如 "~/.my-kimi-home"）。
  *   缺失时回退 `~/.kimi-code`。
- * - projectRoots: 工作区根列表（来自 workspaces.json 的 root 字段）。每个根下扫描
- *   `.kimi-code/skills` + `.agents/skills`。
- * - readJson: 用于读取并解析 workspaces.json 等轻量 JSON 文档的钩子（Tauri 适配器注入，
- *   测试注入内存 FS）。缺失时不解析任何 JSON。
+ * - projectWorkingDirectory: GUI 启动 Kimi 时使用的 cwd；向上寻找最近 `.git`。
+ * - projectRoots: 测试或集成显式注入的项目根，与最近 Git 根合并去重。
  * - extraSkillDirs: config.toml extra_skill_dirs（绝对或 ~ 起始路径）。缺省为空。
  */
 export interface ScanSkillsOptions {
@@ -108,8 +119,9 @@ export interface ScanSkillsOptions {
   userHome?: string;
   envHome?: string;
   projectRoots?: string[];
+  projectWorkingDirectory?: string;
+  pluginSkillRoots?: PluginSkillRoot[];
   extraSkillDirs?: string[];
-  readJson?: (path: string) => Promise<string | null>;
 }
 
 export async function scanSkills(
@@ -126,8 +138,26 @@ export async function scanSkills(
   const firstLoadedByName = new Map<string, SkillEntry>();
 
   for (const path of scannedPaths) {
-    const discovered = await loadSkillsFromPath(files, path);
+    let discovered: SkillEntry[];
+    try {
+      const scanResult = await loadSkillsFromPath(files, path);
+      discovered = scanResult.skills;
+      if (scanResult.warnings.length > 0) {
+        path.reason = `${path.reason} Warnings: ${scanResult.warnings.join("; ")}`.trim();
+      }
+    } catch (error) {
+      path.selected = false;
+      path.reason = `Skill scan failed: ${error instanceof Error ? error.message : String(error)}`;
+      continue;
+    }
     for (const skill of discovered) {
+      if (!skill.valid) {
+        skill.enabled = false;
+        skill.effective = false;
+        skill.overriddenBy = "Invalid Skill metadata";
+        skills.push(skill);
+        continue;
+      }
       if (!skill.enabled) {
         skill.effective = false;
         skill.overriddenBy = "Disabled directory";
@@ -135,9 +165,10 @@ export async function scanSkills(
         continue;
       }
 
-      const existing = firstLoadedByName.get(skill.name);
+      const identity = skill.name.toLocaleLowerCase();
+      const existing = firstLoadedByName.get(identity);
       if (!existing) {
-        firstLoadedByName.set(skill.name, skill);
+        firstLoadedByName.set(identity, skill);
       } else {
         skill.effective = false;
         skill.overriddenBy = `${existing.name} · ${existing.sourceLabel}`;
@@ -162,7 +193,7 @@ export async function scanSkills(
  * 构造 0.38.0 技能发现目录集，回到 CLI 的真实扫描行为：
  * - 用户级 brand：$KIMI_CODE_HOME/skills（默认 ~/.kimi-code/skills）。
  * - 用户级 common：~/.agents/skills。
- * - 项目级：每个工作区根（workspaces.json）下的 .kimi-code/skills 与 .agents/skills。
+ * - 项目级：当前 cwd 向上最近 Git 根下的 .kimi-code/skills 与 .agents/skills。
  * - extra_skill_dirs：config.toml 追加目录。
  * `~/.claude/skills`、`~/.codex/skills`、`~/.config/agents/skills` 不再扫描（CLI 不扫）。
  *
@@ -175,11 +206,17 @@ async function buildDiscoveryPaths(
 ): Promise<SkillDiscoveryPath[]> {
   const userHome = options.userHome ?? "~";
   const kimiCodeHome = options.envHome ?? "~/.kimi-code";
-  const workspacesFile = join(kimiCodeHome, "workspaces.json");
-
-  // 显式注入的工作区根优先；未注入时从 workspaces.json 读取（CLI 真实来源）。
-  const fileRoots = await readWorkspacesRoots(workspacesFile, options.readJson);
-  const workspacesRoots = dedupe([...(options.projectRoots ?? []), ...fileRoots]);
+  const normalizedWorkingDirectory = options.projectWorkingDirectory
+    ?.trim()
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  const nearestProjectRoot = normalizedWorkingDirectory
+    ? await resolveNearestGitProjectRoot(files, normalizedWorkingDirectory) ?? normalizedWorkingDirectory
+    : null;
+  const workspacesRoots = dedupe([
+    ...(nearestProjectRoot ? [nearestProjectRoot] : []),
+    ...(options.projectRoots ?? []),
+  ]);
 
   const candidates: SkillDiscoveryPath[] = [
     createCandidate("builtin", "builtin", "(managed by CLI package)"),
@@ -195,25 +232,71 @@ async function buildDiscoveryPaths(
     candidates.push(createCandidate(`project-${slugify(root)}-agents`, "project", join(root, ".agents", "skills")));
   }
 
-  // extra_skill_dirs：config.toml 追加目录（绝对或 ~ 起始路径）。
+  for (const root of options.pluginSkillRoots ?? []) {
+    const candidate = createCandidate(
+      `plugin-${slugify(root.pluginId)}-${slugify(root.path)}`,
+      "plugin",
+      root.path,
+    );
+    candidate.pluginId = root.pluginId;
+    candidate.rootSkillOnly = root.rootSkillOnly;
+    candidates.push(candidate);
+  }
+
+  // extra_skill_dirs：官方按绝对路径 / OS home / 最近 Git project root 解析。
+  const seenExtraRoots = new Set<string>();
   for (const dir of options.extraSkillDirs ?? []) {
     const trimmed = dir.trim();
     if (!trimmed) {
       continue;
     }
-    const resolved = normalizedUserPath(trimmed, userHome);
+    let resolved = normalizedConfiguredPath(trimmed, userHome, nearestProjectRoot);
+    if (files.realPath && await files.pathExists(resolved)) {
+      try {
+        resolved = await files.realPath(resolved);
+      } catch {
+        // Existence and scan diagnostics below remain authoritative when the
+        // path disappears or becomes unreadable between probes.
+      }
+    }
+    if (seenExtraRoots.has(resolved)) continue;
+    seenExtraRoots.add(resolved);
     candidates.push(createCandidate(`extra-${slugify(resolved)}`, "extra", resolved));
   }
 
-  const candidatesWithExistence = await Promise.all(
-    candidates.map(async (candidate) => ({
+  const realizedCandidates = await Promise.all(candidates.map(async (candidate) => {
+    const exists = candidate.group === "builtin" ? true : await files.pathExists(candidate.path);
+    let resolvedPath = candidate.path;
+    if (exists && candidate.group !== "builtin" && files.realPath) {
+      try {
+        resolvedPath = await files.realPath(candidate.path);
+      } catch {
+        // Keep the lexical candidate so the later scanner can report the race.
+      }
+    }
+    return {
       ...candidate,
-      exists: candidate.group === "builtin" ? true : await files.pathExists(candidate.path),
+      path: resolvedPath,
+      label: pathLabel(candidate.group, resolvedPath),
+      exists,
       selected: false,
       priority: Number.MAX_SAFE_INTEGER,
       reason: candidate.group === "builtin" ? "Built-in skills are documented but not scanned from disk." : "",
-    })),
-  );
+    };
+  }));
+  const seenResolvedRoots = new Set<string>();
+  const candidatesWithExistence = realizedCandidates.filter((candidate) => {
+    if (!candidate.exists || candidate.group === "builtin") return true;
+    const sourceIdentity = candidate.group === "user-brand" || candidate.group === "user-common"
+      ? "user"
+      : candidate.group === "plugin"
+        ? `plugin:${candidate.pluginId ?? ""}`
+        : candidate.group;
+    const key = `${sourceIdentity}\0${candidate.path}`;
+    if (seenResolvedRoots.has(key)) return false;
+    seenResolvedRoots.add(key);
+    return true;
+  });
 
   let priority = 0;
   const paths: SkillDiscoveryPath[] = [];
@@ -285,56 +368,34 @@ async function buildDiscoveryPaths(
     }
   }
 
+  // Plugin 是比显式 extra 更低的来源；当前实现按 first-wins 合并，
+  // 因此必须在 extra 之后扫描，才能得到 workspace > user > extra > plugin > builtin。
+  for (const entry of candidatesWithExistence) {
+    if (entry.group === "plugin") {
+      mark(entry, () => {
+        entry.reason = `Loaded from enabled plugin ${entry.pluginId ?? "unknown"}.`;
+      });
+    }
+  }
+
   paths.push(...candidatesWithExistence);
   return paths;
 }
 
-/**
- * 读取并解析 ~/.kimi-code/workspaces.json，返回各工作区 root 列表。
- * 形如 {"version":1,"workspaces":{"<key>":{"root":"/abs/path","name":"..."}}}。
- */
-async function readWorkspacesRoots(
-  workspacesFile: string,
-  readJson?: ScanSkillsOptions["readJson"],
-): Promise<string[]> {
-  if (!readJson) {
-    return [];
+export async function resolveNearestGitProjectRoot(
+  files: SkillFileAccess,
+  start: string,
+): Promise<string | null> {
+  let current = start.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!current) return null;
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (await files.pathExists(join(current, ".git"))) return current;
+    const slash = current.lastIndexOf("/");
+    const parent = slash <= 0 ? (current.startsWith("/") ? "/" : "") : current.slice(0, slash);
+    if (!parent || parent === current) return null;
+    current = parent;
   }
-  let raw: string | null = null;
-  try {
-    raw = await readJson(workspacesFile);
-  } catch {
-    return [];
-  }
-  if (!raw?.trim()) {
-    return [];
-  }
-  try {
-    return parseWorkspacesRoots(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
-
-function parseWorkspacesRoots(data: unknown): string[] {
-  if (!data || typeof data !== "object") {
-    return [];
-  }
-  const workspaces = (data as { workspaces?: unknown }).workspaces;
-  if (!workspaces || typeof workspaces !== "object") {
-    return [];
-  }
-  const roots: string[] = [];
-  for (const value of Object.values(workspaces as Record<string, unknown>)) {
-    if (!value || typeof value !== "object") {
-      continue;
-    }
-    const root = (value as { root?: unknown }).root;
-    if (typeof root === "string" && root.trim()) {
-      roots.push(root.trim());
-    }
-  }
-  return roots;
+  return null;
 }
 
 /** ~ 起始路径按 userHome 展开为绝对路径；绝对路径原样保留。 */
@@ -346,6 +407,15 @@ function normalizedUserPath(path: string, userHome: string): string {
     return join(userHome, path.slice(2));
   }
   return path.replace(/\/+$/, "");
+}
+
+function normalizedConfiguredPath(path: string, userHome: string, projectRoot: string | null): string {
+  const expanded = normalizedUserPath(path, userHome);
+  const isAbsolute = expanded.startsWith("/") || /^[A-Za-z]:[\\/]/.test(expanded);
+  if (isAbsolute || !projectRoot || expanded === userHome || path.startsWith("~/")) {
+    return expanded;
+  }
+  return join(projectRoot, expanded);
 }
 
 /** 去重并保留顺序。 */
@@ -370,35 +440,161 @@ function slugify(path: string): string {
 async function loadSkillsFromPath(
   files: SkillFileAccess,
   source: SkillDiscoveryPath,
-): Promise<SkillEntry[]> {
+): Promise<{ skills: SkillEntry[]; warnings: string[] }> {
+  const warnings: string[] = [];
   if (!source.exists || source.group === "builtin") {
+    return { skills: [], warnings };
+  }
+  const rootSkillPath = join(source.path, "SKILL.md");
+  if (source.rootSkillOnly) {
+    try {
+      const rootSkill = await buildSkillEntry(files, {
+        rootPath: source.path,
+        directoryName: basename(source.path),
+        source,
+      });
+      return { skills: rootSkill ? [rootSkill] : [], warnings };
+    } catch (error) {
+      warnings.push(`${rootSkillPath}: ${error instanceof Error ? error.message : String(error)}`);
+      return { skills: [], warnings };
+    }
+  }
+  return {
+    skills: await walkSkillDirectory(files, source, source.path, true, 0, undefined, warnings, rootSkillPath),
+    warnings,
+  };
+}
+
+const MAX_SKILL_SCAN_DEPTH = 8;
+
+async function walkSkillDirectory(
+  files: SkillFileAccess,
+  source: SkillDiscoveryPath,
+  directoryPath: string,
+  isTopLevel: boolean,
+  depth: number,
+  parentSkillName: string | undefined,
+  warnings: string[],
+  rootSkillPath?: string,
+): Promise<SkillEntry[]> {
+  if (depth > MAX_SKILL_SCAN_DEPTH) return [];
+  let entries: Array<{ name: string; isDirectory: boolean }>;
+  try {
+    entries = (await files.listDir(directoryPath))
+      .filter((entry) => entry.name !== "node_modules" && !entry.name.startsWith("."))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  } catch (error) {
+    warnings.push(`${directoryPath}: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
+  const result: SkillEntry[] = [];
 
-  const rootSkillPath = join(source.path, "SKILL.md");
-  if (await files.pathExists(rootSkillPath)) {
-    const skill = await buildSkillEntry(files, {
-      rootPath: source.path,
-      directoryName: basename(source.path),
-      source,
-    });
-    return skill ? [skill] : [];
+  if (isTopLevel && source.group === "plugin" && rootSkillPath) {
+    try {
+      if (await files.pathExists(rootSkillPath)) {
+        const rootSkill = await buildSkillEntry(files, {
+          rootPath: directoryPath,
+          directoryName: basename(directoryPath),
+          source,
+        });
+        if (rootSkill) result.push(parentSkillName ? qualifySubSkill(rootSkill, parentSkillName) : rootSkill);
+      }
+    } catch (error) {
+      warnings.push(`${rootSkillPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  const entries = await files.listDir(source.path);
-  const skills = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory)
-      .map((entry) =>
-        buildSkillEntry(files, {
-          rootPath: join(source.path, entry.name),
-          directoryName: entry.name,
-          source,
-        }),
-      ),
+  const directories = entries.filter((entry) => entry.isDirectory);
+  const bundles = await Promise.all(directories.map(async (entry) => {
+    const skillPath = join(directoryPath, entry.name, "SKILL.md");
+    try {
+      return { entry, hasSkill: await files.pathExists(skillPath) };
+    } catch (error) {
+      warnings.push(`${skillPath}: ${error instanceof Error ? error.message : String(error)}`);
+      return { entry, hasSkill: false };
+    }
+  }));
+  const bundleNames = new Set(
+    bundles.filter((bundle) => bundle.hasSkill).map((bundle) => bundle.entry.name),
   );
+  const bundleSkills = new Map<string, SkillEntry>();
+  for (const bundle of bundles) {
+    if (!bundle.hasSkill) continue;
+    let skill: SkillEntry | null;
+    try {
+      skill = await buildSkillEntry(files, {
+        rootPath: join(directoryPath, bundle.entry.name),
+        directoryName: bundle.entry.name,
+        source,
+      });
+    } catch (error) {
+      warnings.push(`${join(directoryPath, bundle.entry.name, "SKILL.md")}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (!skill) continue;
+    const qualified = parentSkillName ? qualifySubSkill(skill, parentSkillName) : skill;
+    bundleSkills.set(bundle.entry.name, qualified);
+    result.push(qualified);
+  }
 
-  return skills.filter((entry): entry is SkillEntry => Boolean(entry));
+  if (isTopLevel) {
+    for (const entry of entries) {
+      if (entry.isDirectory || entry.name === "SKILL.md" || !entry.name.endsWith(".md")) continue;
+      const flatName = entry.name.slice(0, -3);
+      if (bundleNames.has(flatName)) continue;
+      let skill: SkillEntry | null;
+      try {
+        skill = await buildSkillEntry(files, {
+          rootPath: directoryPath,
+          directoryName: flatName,
+          skillFilePath: join(directoryPath, entry.name),
+          source,
+        });
+      } catch (error) {
+        warnings.push(`${join(directoryPath, entry.name)}: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      if (skill) result.push(parentSkillName ? qualifySubSkill(skill, parentSkillName) : skill);
+    }
+  }
+
+  for (const bundle of bundles) {
+    if (bundle.hasSkill) {
+      const parent = bundleSkills.get(bundle.entry.name);
+      if (!parent?.valid || !parent.metadata.hasSubSkill) continue;
+      result.push(...await walkSkillDirectory(
+        files,
+        source,
+        join(directoryPath, bundle.entry.name),
+        false,
+        depth + 1,
+        parent.name,
+        warnings,
+      ));
+    } else {
+      result.push(...await walkSkillDirectory(
+        files,
+        source,
+        join(directoryPath, bundle.entry.name),
+        false,
+        depth + 1,
+        parentSkillName,
+        warnings,
+      ));
+    }
+  }
+  return result;
+}
+
+function qualifySubSkill(skill: SkillEntry, parentName: string): SkillEntry {
+  const name = skill.name === parentName || skill.name.startsWith(`${parentName}.`)
+    ? skill.name
+    : `${parentName}.${skill.name}`;
+  return {
+    ...skill,
+    name,
+    metadata: { ...skill.metadata, name, isSubSkill: true },
+  };
 }
 
 async function buildSkillEntry(
@@ -406,18 +602,24 @@ async function buildSkillEntry(
   options: {
     rootPath: string;
     directoryName: string;
+    skillFilePath?: string;
     source: SkillDiscoveryPath;
   },
 ): Promise<SkillEntry | null> {
-  const skillFilePath = join(options.rootPath, "SKILL.md");
+  const skillFilePath = options.skillFilePath ?? join(options.rootPath, "SKILL.md");
   const content = await files.readText(skillFilePath);
   if (!content?.trim()) {
     return null;
   }
 
   const frontmatter = parseFrontmatter(content);
-  const metadata = normalizeMetadata(frontmatter.attributes, options.directoryName, frontmatter.body);
-  const children = await files.listDir(options.rootPath);
+  const isFlatFile = options.skillFilePath !== undefined;
+  const diagnostics = [
+    ...(frontmatter.parseError ? [`Invalid YAML frontmatter: ${frontmatter.parseError}`] : []),
+    ...validateSkillFrontmatter(frontmatter.attributes, isFlatFile),
+  ];
+  const metadata = normalizeMetadata(frontmatter.attributes, options.directoryName, frontmatter.body, isFlatFile);
+  const children = options.skillFilePath ? [] : await files.listDir(options.rootPath);
 
   return {
     id: `${options.source.id}:${metadata.name}:${options.directoryName}`,
@@ -438,15 +640,42 @@ async function buildSkillEntry(
     hasScripts: children.some((entry) => entry.isDirectory && entry.name === "scripts"),
     hasReferences: children.some((entry) => entry.isDirectory && entry.name === "references"),
     hasAssets: children.some((entry) => entry.isDirectory && entry.name === "assets"),
+    valid: diagnostics.length === 0,
+    diagnostics,
   };
+}
+
+function validateSkillFrontmatter(
+  attributes: Record<string, unknown>,
+  isFlatFile: boolean,
+): string[] {
+  const diagnostics: string[] = [];
+  if (!isFlatFile) {
+    if (typeof attributes.name !== "string" || !attributes.name.trim()) {
+      diagnostics.push("Directory-form Skills require a name in YAML frontmatter.");
+    }
+    if (typeof attributes.description !== "string" || !attributes.description.trim()) {
+      diagnostics.push("Directory-form Skills require a description in YAML frontmatter.");
+    }
+  }
+  if (attributes.type !== undefined) {
+    const type = typeof attributes.type === "string" ? attributes.type.trim() : "";
+    if (!type || (type !== "prompt" && type !== "inline" && type !== "flow" && type !== "reference")) {
+      diagnostics.push(`Unsupported Skill type: ${String(attributes.type)}`);
+    }
+  }
+  return diagnostics;
 }
 
 function parseFrontmatter(document: string): {
   hasFrontmatter: boolean;
-  attributes: Record<string, string | Record<string, string>>;
+  attributes: Record<string, unknown>;
   body: string;
+  parseError?: string;
 } {
-  if (!document.startsWith("---\n") && !document.startsWith("---\r\n")) {
+  const normalized = document.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  if (lines[0]?.trim() !== "---") {
     return {
       hasFrontmatter: false,
       attributes: {},
@@ -454,9 +683,8 @@ function parseFrontmatter(document: string): {
     };
   }
 
-  const normalized = document.replace(/\r\n/g, "\n");
-  const endIndex = normalized.indexOf("\n---\n", 4);
-  if (endIndex < 0) {
+  const closingLine = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (closingLine < 0) {
     return {
       hasFrontmatter: false,
       attributes: {},
@@ -464,102 +692,123 @@ function parseFrontmatter(document: string): {
     };
   }
 
-  const header = normalized.slice(4, endIndex).split("\n");
-  const body = normalized.slice(endIndex + 5);
-  const attributes: Record<string, string | Record<string, string>> = {};
-  let currentObjectKey = "";
-
-  for (let index = 0; index < header.length; index += 1) {
-    const rawLine = header[index];
-    const line = rawLine.trimEnd();
-    if (!line.trim()) {
-      continue;
+  const header = lines.slice(1, closingLine).join("\n");
+  const body = lines.slice(closingLine + 1).join("\n");
+  try {
+    const parsed = parseYaml(header, {
+      maxAliasCount: 50,
+      strict: true,
+      uniqueKeys: true,
+    }) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { hasFrontmatter: true, attributes: {}, body, parseError: "frontmatter root must be a mapping" };
     }
-
-    if (/^\s{2,}[A-Za-z0-9._-]+\s*:/.test(rawLine) && currentObjectKey) {
-      const match = rawLine.match(/^\s+([A-Za-z0-9._-]+)\s*:\s*(.*)$/);
-      if (!match) {
-        continue;
-      }
-      const current = attributes[currentObjectKey];
-      if (typeof current === "object" && current !== null && !Array.isArray(current)) {
-        current[match[1]] = stripQuotes(match[2]);
-      }
-      continue;
-    }
-
-    const pair = line.match(/^([A-Za-z0-9._-]+)\s*:\s*(.*)$/);
-    if (!pair) {
-      currentObjectKey = "";
-      continue;
-    }
-
-    const [, key, rawValue] = pair;
-    const indentedBlock = collectIndentedBlock(header, index + 1);
-    if (isBlockScalar(rawValue)) {
-      attributes[key] = normalizeBlockScalar(indentedBlock.lines);
-      currentObjectKey = "";
-      index = indentedBlock.nextIndex - 1;
-      continue;
-    }
-    if (!rawValue.trim()) {
-      if (indentedBlock.lines.length === 0) {
-        attributes[key] = "";
-        currentObjectKey = "";
-        continue;
-      }
-      if (isIndentedKeyValueBlock(indentedBlock.lines)) {
-        attributes[key] = {};
-        currentObjectKey = key;
-        index = indentedBlock.startIndex - 1;
-      } else {
-        attributes[key] = normalizeBlockScalar(indentedBlock.lines);
-        currentObjectKey = "";
-        index = indentedBlock.nextIndex - 1;
-      }
-      continue;
-    }
-    attributes[key] = stripQuotes(rawValue);
-    currentObjectKey = "";
+    return { hasFrontmatter: true, attributes: parsed as Record<string, unknown>, body };
+  } catch (error) {
+    return {
+      hasFrontmatter: true,
+      attributes: {},
+      body,
+      parseError: error instanceof Error ? error.message : String(error),
+    };
   }
-
-  return {
-    hasFrontmatter: true,
-    attributes,
-    body,
-  };
 }
 
 function normalizeMetadata(
-  attributes: Record<string, string | Record<string, string>>,
+  attributes: Record<string, unknown>,
   directoryName: string,
   body: string,
+  isFlatFile: boolean,
 ): SkillMetadata {
   const rawName = typeof attributes.name === "string" ? attributes.name : directoryName;
   const rawDescription =
     typeof attributes.description === "string" && attributes.description.trim()
       ? attributes.description
-      : "No description provided.";
-  const rawType = typeof attributes.type === "string" ? attributes.type.trim().toLowerCase() : "";
+      : isFlatFile
+        ? firstBodyLine(body)
+        : "No description provided.";
+  const rawType = typeof attributes.type === "string" ? attributes.type.trim() : "";
   const metadata =
     typeof attributes.metadata === "object" && attributes.metadata !== null && !Array.isArray(attributes.metadata)
       ? Object.fromEntries(
           Object.entries(attributes.metadata).map(([key, value]) => [key, String(value)]),
         )
       : {};
+  const nestedMetadata = typeof attributes.metadata === "object"
+    && attributes.metadata !== null
+    && !Array.isArray(attributes.metadata)
+    ? attributes.metadata as Record<string, unknown>
+    : {};
+  const hasSubSkill = readAliasedStrictBoolean(attributes, ["hasSubSkill", "has-sub-skill"])
+    || readAliasedStrictBoolean(nestedMetadata, ["hasSubSkill", "has-sub-skill"]);
 
   return {
     name: rawName.trim() || directoryName,
     description: normalizeInlineText(rawDescription) || "No description provided.",
-    type: rawType === "flow" || inferFlowFromContent(body) ? "flow" : "prompt",
+    type: rawType === "flow"
+      ? "flow"
+      : rawType === "inline"
+        ? "inline"
+        : rawType === "reference"
+          ? "reference"
+        : rawType === "prompt"
+          ? "prompt"
+          : "prompt",
     license: typeof attributes.license === "string" ? attributes.license.trim() : "",
     compatibility: typeof attributes.compatibility === "string" ? attributes.compatibility.trim() : "",
+    whenToUse: readAliasedString(attributes, ["whenToUse", "when-to-use", "when_to_use"]),
+    disableModelInvocation: readAliasedStrictBoolean(attributes, [
+      "disableModelInvocation",
+      "disable-model-invocation",
+      "disable_model_invocation",
+    ]),
+    arguments: parseSkillArguments(attributes.arguments),
     metadata,
+    hasSubSkill,
   };
 }
 
-function inferFlowFromContent(content: string): boolean {
-  return /```(?:mermaid|d2)\b/.test(content);
+function firstBodyLine(body: string): string {
+  return body.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.slice(0, 240)
+    ?? "No description provided.";
+}
+
+function readAliasedString(
+  attributes: Record<string, unknown>,
+  keys: string[],
+): string {
+  for (const key of keys) {
+    const value = attributes[key];
+    if (typeof value === "string" && value.trim()) return normalizeInlineText(value);
+  }
+  return "";
+}
+
+function readAliasedStrictBoolean(
+  attributes: Record<string, unknown>,
+  keys: string[],
+): boolean {
+  return keys.some((key) => attributes[key] === true);
+}
+
+function parseSkillArguments(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (typeof value !== "string") return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1)
+      .split(",")
+      .map((item) => stripQuotes(item).trim())
+      .filter(Boolean);
+  }
+  return value
+    .split(/\r?\n|\s+/)
+    .map((item) => item.trim().replace(/^[-]+/, ""))
+    .filter(Boolean);
 }
 
 function buildSummary(skills: SkillEntry[]): SkillsScanSummary {
@@ -567,8 +816,8 @@ function buildSummary(skills: SkillEntry[]): SkillsScanSummary {
     total: skills.length,
     effective: skills.filter((skill) => skill.effective).length,
     overrides: skills.filter((skill) => !skill.effective).length,
-    warnings: 0,
-    errors: 0,
+    warnings: skills.filter((skill) => skill.valid && !skill.effective).length,
+    errors: skills.filter((skill) => !skill.valid).length,
     flow: skills.filter((skill) => skill.metadata.type === "flow").length,
   };
 }
@@ -597,7 +846,9 @@ function pathLabel(group: SkillPathGroup, path: string): string {
         ? "User Common"
         : group === "project"
           ? "Project"
-          : "Extra";
+          : group === "plugin"
+            ? "Plugin"
+            : "Extra";
   return `${prefix} · ${path}`;
 }
 
@@ -609,27 +860,6 @@ function stripQuotes(value: string): string {
   return trimmed;
 }
 
-function isBlockScalar(value: string): boolean {
-  return /^[>|][+-]?\s*$/.test(value.trim());
-}
-
-function normalizeBlockScalar(lines: string[]): string {
-  const nonEmptyIndents = lines
-    .filter((line) => line.trim().length > 0)
-    .map((line) => line.match(/^(\s*)/)?.[1].length ?? 0);
-  const sharedIndent = nonEmptyIndents.length > 0 ? Math.min(...nonEmptyIndents) : 0;
-
-  return lines
-    .map((line) => {
-      if (!line.trim()) {
-        return "";
-      }
-      return line.slice(sharedIndent);
-    })
-    .join("\n")
-    .trim();
-}
-
 function normalizeInlineText(value: string): string {
   return value
     .split(/\r?\n/)
@@ -638,34 +868,4 @@ function normalizeInlineText(value: string): string {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function collectIndentedBlock(lines: string[], startIndex: number): {
-  lines: string[];
-  startIndex: number;
-  nextIndex: number;
-} {
-  const blockLines: string[] = [];
-  let cursor = startIndex;
-  while (cursor < lines.length) {
-    const nextLine = lines[cursor];
-    if (nextLine.trim() && !/^\s+/.test(nextLine)) {
-      break;
-    }
-    blockLines.push(nextLine);
-    cursor += 1;
-  }
-  return {
-    lines: blockLines,
-    startIndex,
-    nextIndex: cursor,
-  };
-}
-
-function isIndentedKeyValueBlock(lines: string[]): boolean {
-  const contentLines = lines.filter((line) => line.trim().length > 0);
-  if (contentLines.length === 0) {
-    return false;
-  }
-  return contentLines.every((line) => /^\s+[A-Za-z0-9._-]+\s*:\s*.*$/.test(line));
 }

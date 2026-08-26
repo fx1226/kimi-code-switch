@@ -1,0 +1,10 @@
+{
+  "acme": {
+    "name": "Acme Inference",
+    "type": "openai",
+    "models": {
+      "acme-7b": { "id": "acme-7b", "name": "Acme 7B", "capability": { "tool_use": true, "max_context_tokens": 8192 } },
+      "acme-70b": { "id": "acme-70b", "name": "Acme 70B", "capability": { "tool_use": true, "thinking": true, "max_context_tokens": 32768 } }
+    }
+  }
+}

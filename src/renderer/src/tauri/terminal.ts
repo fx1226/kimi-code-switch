@@ -99,31 +99,59 @@ export async function openKimiInTerminal(
 ): Promise<{ ok: true }> {
   const settings = "settings" in request ? request.settings : request;
   const targetProfileName = "settings" in request ? request.profileName?.trim() : "";
-  const appName = TERMINAL_APP_NAMES[settings.terminal_app];
-  const appLabel = TERMINAL_APP_LABELS[settings.terminal_app];
+  const activeEnvironment = getActiveKimiCodeEnvironment(settings);
+  const homePath = activeEnvironment.homePath.trim() || dirname(resolveHome(settings.config_path.trim() || DEFAULT_CONFIG_PATH));
+  const workingDirectory = activeEnvironment.workingDirectory?.trim() || homePath;
+  const kimiArgs = targetProfileName ? buildProfileKimiArgs(request as OpenKimiTerminalRequest, targetProfileName) : [];
+  const shellCommand = buildKimiShellCommand(workingDirectory, homePath, kimiArgs);
 
+  await launchShellCommandInTerminal(settings.terminal_app, shellCommand);
+  return { ok: true };
+}
+
+async function launchShellCommandInTerminal(
+  terminalApp: TerminalApp,
+  shellCommand: string,
+): Promise<void> {
+  const appName = TERMINAL_APP_NAMES[terminalApp];
+  const appLabel = TERMINAL_APP_LABELS[terminalApp];
   const probe = await exec("open", ["-Ra", appName]);
   if (probe.code !== 0) throw new Error(`Configured terminal app is not installed: ${appLabel}`);
 
-  const activeEnvironment = getActiveKimiCodeEnvironment(settings);
-  const workingDirectory = activeEnvironment.homePath.trim() || dirname(resolveHome(settings.config_path.trim() || DEFAULT_CONFIG_PATH));
-  const kimiArgs = targetProfileName ? buildProfileKimiArgs(request as OpenKimiTerminalRequest, targetProfileName) : [];
-  const shellCommand = buildKimiShellCommand(workingDirectory, workingDirectory, kimiArgs);
-
   let scriptPath: string | undefined;
-  if (settings.terminal_app === "iterm2") {
+  if (terminalApp === "iterm2") {
     scriptPath = `${DEFAULT_PANEL_DIRECTORY}/tmp/terminal/kimi-launch.sh`;
     await invoke("write_executable", { path: scriptPath, content: `#!/bin/sh\n${shellCommand}\n` });
   }
 
-  const lines = buildAppleScriptLines(settings.terminal_app, shellCommand, scriptPath);
+  const lines = buildAppleScriptLines(terminalApp, shellCommand, scriptPath);
   const r = await exec("osascript", appleScriptArgs(lines));
   if (r.code !== 0) throw new Error(`Failed to launch terminal app: ${r.stderr}`);
+}
+
+export async function openKimiMcpLoginInTerminal(
+  serverName: string,
+  settings: PanelSettings,
+): Promise<{ ok: true }> {
+  // Kimi 0.38 exposes MCP OAuth through a structured SDK RPC, not a CLI
+  // subcommand. Until that RPC is bridged into Tauri, open an interactive Kimi
+  // session and never interpolate the untrusted server name into a `kimi -p`
+  // model turn.
+  void serverName;
+  const activeEnvironment = getActiveKimiCodeEnvironment(settings);
+  const homePath = activeEnvironment.homePath.trim() || dirname(resolveHome(settings.config_path.trim() || DEFAULT_CONFIG_PATH));
+  const workingDirectory = activeEnvironment.workingDirectory?.trim() || homePath;
+  const shellCommand = buildKimiShellCommand(workingDirectory, homePath, []);
+  await launchShellCommandInTerminal(settings.terminal_app, shellCommand);
   return { ok: true };
 }
 
-export async function openSessionTerminal(sessionId: string, terminalApp: TerminalApp): Promise<{ ok: true }> {
-  const cmd = `kimi -r ${sessionId}`;
+export async function openSessionTerminal(
+  sessionId: string,
+  terminalApp: TerminalApp,
+  homePath = "~/.kimi-code",
+): Promise<{ ok: true }> {
+  const cmd = `export KIMI_CODE_HOME=${quotePathForShell(homePath)}; kimi -S ${quoteForShell(sessionId)}`;
   const escaped = escapeForAppleScript(cmd);
   const lines = terminalApp === "iterm2"
     ? ['tell application "iTerm"', "activate", "tell current window", "create tab with default profile",

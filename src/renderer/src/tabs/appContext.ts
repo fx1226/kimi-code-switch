@@ -101,7 +101,7 @@ export interface AppContext {
   updateImmediateState: (updater: (draft: AppState) => void, options?: { recordHistory?: boolean; historySummary?: string }) => void;
   runAfterUnsavedHandled: (action: () => void | Promise<void>) => void;
   onSave: () => Promise<void>;
-  persistState: (nextState: AppState) => Promise<void>;
+  persistState: (nextState: AppState) => Promise<boolean>;
   confirmDeleteResource: (resourceLabel: string, name: string) => Promise<boolean>;
   requestConfirm: (options: ConfirmDialogState) => Promise<boolean>;
   closeMcpImportDialog: () => void;

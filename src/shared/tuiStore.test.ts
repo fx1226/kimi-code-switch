@@ -1,10 +1,13 @@
 import {
+  EFFECTIVE_TUI_DEFAULTS,
   TUI_CONFIG_FILENAME,
   TuiConfigFromProfile,
   buildTuiConfigDocument,
   hasTuiConfigValues,
   mergeTuiConfigDocument,
+  normalizeTuiConfig,
   parseTuiConfigDocument,
+  parseTuiConfigDocumentWithDiagnostics,
 } from "./tuiStore";
 import type { Profile } from "./types";
 
@@ -49,13 +52,26 @@ describe("tuiStore", () => {
       const source = {
         theme: "dark",
         disable_paste_burst: true,
+        renderLatex: false,
+        cacheExpiryHint: true,
         editorCommand: "vim",
         notificationsEnabled: true,
         notificationCondition: "unfocused" as const,
         upgradeAutoInstall: true,
+        statusLine: { items: ["mode", "model"], command: "/tmp/status.sh" },
       };
       const parsed = parseTuiConfigDocument(buildTuiConfigDocument(source));
       expect(parsed).toEqual(source);
+    });
+
+    it("reports malformed TOML and filters unknown status-line items", () => {
+      expect(parseTuiConfigDocumentWithDiagnostics("theme = ").errors.length).toBeGreaterThan(0);
+      const result = parseTuiConfigDocumentWithDiagnostics(`
+[status_line]
+items = ["model", "unknown", "cwd"]
+`);
+      expect(result.config.statusLine?.items).toEqual(["model", "cwd"]);
+      expect(result.warnings).toContain("Unknown status_line item skipped: unknown");
     });
 
     it("returns an empty object for null, empty, or invalid documents", () => {
@@ -124,7 +140,7 @@ describe("tuiStore", () => {
     it("reports present GUI-managed fields", () => {
       expect(hasTuiConfigValues({ theme: "dark" })).toBe(true);
       expect(hasTuiConfigValues({ editorCommand: "vim" })).toBe(true);
-      expect(hasTuiConfigValues({ notificationsEnabled: true })).toBe(false);
+      expect(hasTuiConfigValues({ notificationsEnabled: true })).toBe(true);
       expect(hasTuiConfigValues({})).toBe(false);
     });
 
@@ -148,10 +164,33 @@ describe("tuiStore", () => {
       expect(merged).toContain("enabled = false");
     });
 
-    it("does not rewrite unrelated fields when there are no GUI-managed fields", () => {
+    it("preserves an unchanged document and updates advanced fields when explicitly managed", () => {
       const existing = '[notifications]\nenabled = false\n';
       expect(mergeTuiConfigDocument(existing, {})).toBe(existing);
-      expect(mergeTuiConfigDocument(existing, { notificationsEnabled: true })).toBe(existing);
+      expect(mergeTuiConfigDocument(existing, { notificationsEnabled: true })).toContain("enabled = true");
+    });
+
+    it("merges every official advanced TUI field while keeping unknown keys", () => {
+      const existing = 'unknown_top = "keep"\n[notifications]\ncustom = "keep"\n';
+      const merged = mergeTuiConfigDocument(existing, {
+        disable_paste_burst: true,
+        renderLatex: false,
+        cacheExpiryHint: false,
+        notificationsEnabled: true,
+        notificationCondition: "always",
+        upgradeAutoInstall: false,
+        statusLine: { items: ["model", "cwd"], command: "status.sh" },
+      });
+      expect(merged).toContain('unknown_top = "keep"');
+      expect(parseTuiConfigDocument(merged)).toMatchObject({
+        disable_paste_burst: true,
+        renderLatex: false,
+        cacheExpiryHint: false,
+        notificationsEnabled: true,
+        notificationCondition: "always",
+        upgradeAutoInstall: false,
+        statusLine: { items: ["model", "cwd"], command: "status.sh" },
+      });
     });
 
     it("merges GUI fields into an existing document, preserving unrelated sections", () => {
@@ -192,5 +231,54 @@ describe("tuiStore", () => {
 
   it("exposes the tui.toml filename constant", () => {
     expect(TUI_CONFIG_FILENAME).toBe("tui.toml");
+  });
+
+  describe("E2: normalizeTuiConfig (Explicit → Effective)", () => {
+    it("applies official defaults to an empty explicit config", () => {
+      const effective = normalizeTuiConfig({});
+      expect(effective).toEqual({
+        theme: "auto",
+        disablePasteBurst: false,
+        renderLatex: true,
+        cacheExpiryHint: true,
+        editorCommand: null,
+        notificationsEnabled: true,
+        notificationCondition: "unfocused",
+        upgradeAutoInstall: true,
+        statusLineItems: [],
+        statusLineCommand: null,
+      });
+    });
+
+    it("keeps explicit values and trims editor/status commands", () => {
+      const effective = normalizeTuiConfig({
+        theme: "dark",
+        editorCommand: "  code --wait  ",
+        notificationsEnabled: false,
+        notificationCondition: "always",
+        upgradeAutoInstall: false,
+        statusLine: { items: ["mode", "bogus", "cwd"], command: "  pwd  " },
+        disable_paste_burst: true,
+      });
+      expect(effective.theme).toBe("dark");
+      expect(effective.editorCommand).toBe("code --wait");
+      expect(effective.notificationsEnabled).toBe(false);
+      expect(effective.notificationCondition).toBe("always");
+      expect(effective.upgradeAutoInstall).toBe(false);
+      // 未知 status_line item 被过滤；command 被 trim
+      expect(effective.statusLineItems).toEqual(["mode", "cwd"]);
+      expect(effective.statusLineCommand).toBe("pwd");
+      expect(effective.disablePasteBurst).toBe(true);
+    });
+
+    it("treats blank editor/status commands as null (official default)", () => {
+      const effective = normalizeTuiConfig({ editorCommand: "   ", statusLine: { command: "" } });
+      expect(effective.editorCommand).toBeNull();
+      expect(effective.statusLineCommand).toBeNull();
+    });
+
+    it("round-trips through defaults constant", () => {
+      expect(EFFECTIVE_TUI_DEFAULTS).toEqual(normalizeTuiConfig({}));
+    });
   });
 });

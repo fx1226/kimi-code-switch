@@ -1,0 +1,14 @@
+theme = "auto"
+render_latex = true
+disable_paste_burst = false
+cache_expiry_hint = true
+
+[editor]
+command = ""
+
+[notifications]
+enabled = true
+notification_condition = "unfocused"
+
+[upgrade]
+auto_install = true

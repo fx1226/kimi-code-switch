@@ -5,7 +5,7 @@ import type { AppState } from "@shared/types";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
-import { callKimiMcpServerTool, classifyKimiTargetFromSignals, evaluateCliCompatibility, getCliVersion, getTargetCliVersion, listKimiMcpServerTools, MIN_CLI_VERSION, runKimiConnectivityTest, runKimiMcpServerTest, runProvidersHealthCheck, upgradeKimiCli, upgradeTargetCli } from "./cli";
+import { callKimiMcpServerTool, classifyKimiTargetFromSignals, evaluateCliCompatibility, getCliVersion, getKimiProviderCatalogModels, getTargetCliVersion, importKimiProviderCatalog, importKimiProviderRegistry, listKimiMcpServerTools, listKimiProviderCatalog, MIN_CLI_VERSION, runKimiConnectivityTest, runKimiMcpServerTest, runProvidersHealthCheck, startKimiOAuthLogin, upgradeKimiCli, upgradeTargetCli } from "./cli";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -182,7 +182,7 @@ describe("getCliVersion", () => {
     mockedInvoke
       .mockResolvedValueOnce(exec(0, "kimi-code 1.2.0") as unknown as never)
       .mockResolvedValueOnce(null) // 无缓存
-      .mockResolvedValueOnce('"zh-cn"') // region
+      .mockResolvedValueOnce('"mainland-cn"') // region
       .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
     const result = await getTargetCliVersion("kimi-code", { checkLatest: true });
     expect(result).toMatchObject({
@@ -221,6 +221,37 @@ describe("getCliVersion", () => {
     expect(result.hasUpdate).toBe(true);
     expect(mockedInvoke).not.toHaveBeenCalledWith("http_request", expect.objectContaining({
       url: expect.stringContaining("latest.json"),
+    }));
+  });
+
+  it.each(["mainland-cn", "cn", "zh-cn"])(
+    "uses the mainland CDN for the %s region marker",
+    async (region) => {
+      mockedInvoke
+        .mockResolvedValueOnce(exec(0, "kimi-code 1.2.0") as unknown as never)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(region)
+        .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
+
+      await getCliVersion({ checkLatest: true });
+
+      expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
+        url: "https://code.kimi.com/kimi-code/latest.json",
+      }));
+    },
+  );
+
+  it("falls back to the official mainland region for a missing marker", async () => {
+    mockedInvoke
+      .mockResolvedValueOnce(exec(0, "kimi-code 1.2.0") as unknown as never)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(http(200, JSON.stringify({ version: "1.3.0" })) as unknown as never);
+
+    await getCliVersion({ checkLatest: true });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
+      url: "https://code.kimi.com/kimi-code/latest.json",
     }));
   });
 
@@ -364,6 +395,17 @@ describe("getCliVersion", () => {
 });
 
 describe("upgradeKimiCli / runKimiMcpServerTest", () => {
+  it("passes the active KIMI_CODE_HOME to the native login command", async () => {
+    mockedInvoke.mockResolvedValue(exec(0, "logged in") as unknown as never);
+
+    await startKimiOAuthLogin("kimi-code", undefined, { homePath: "/custom/kimi-home" });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("start_kimi_oauth_login", {
+      target: "kimi-code",
+      homePath: "/custom/kimi-home",
+    });
+  });
+
   it("upgrades via Homebrew and trims output", async () => {
     mockedInvoke.mockResolvedValue(exec(0, " done \n", " warn \n") as unknown as never);
     await expect(upgradeKimiCli()).resolves.toEqual({ ok: true, stdout: "done", stderr: "warn" });
@@ -465,8 +507,7 @@ describe("upgradeKimiCli / runKimiMcpServerTest", () => {
     }));
   });
 
-  it("reports SSE-only endpoints as incompatible with Kimi Code HTTP transport", async () => {
-    mockedInvoke.mockResolvedValue(http(405, "Method Not Allowed") as unknown as never);
+  it("reports legacy SSE as supported by Kimi but unavailable in the GUI tester", async () => {
     await expect(runKimiMcpServerTest("amap-maps", {
       enabled: true,
       transport: "sse",
@@ -475,7 +516,30 @@ describe("upgradeKimiCli / runKimiMcpServerTest", () => {
       command: "",
       args: [],
       env: {},
-    })).rejects.toThrow(/likely an SSE endpoint/);
+    })).rejects.toThrow(/Kimi Code supports this transport/);
+    expect(mockedInvoke).not.toHaveBeenCalled();
+  });
+
+  it("resolves bearerTokenEnvVar for HTTP MCP requests without overriding explicit auth", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "read_environment_variable") return "env-token" as never;
+      if (command === "http_request") return http(200, JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} })) as never;
+      return undefined as never;
+    });
+    await runKimiMcpServerTest("remote", {
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://example.test/mcp",
+      headers: {},
+      command: "",
+      args: [],
+      env: {},
+      extra: { bearerTokenEnvVar: "MCP_TOKEN" },
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("read_environment_variable", { name: "MCP_TOKEN" });
+    expect(mockedInvoke).toHaveBeenCalledWith("http_request", expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer env-token" }),
+    }));
   });
 
   it("parses tools from Streamable HTTP MCP endpoints", async () => {
@@ -612,6 +676,24 @@ describe("runKimiConnectivityTest", () => {
     expect(JSON.parse(call.body)).toMatchObject({ model: "m-1" });
   });
 
+  it("applies model base_url only together with an explicit protocol override", async () => {
+    const withoutProtocol = connectivityState("openai");
+    withoutProtocol.mainConfig.models["p/m"].base_url = "https://model.example/v1";
+    mockedInvoke.mockResolvedValue(http(200, JSON.stringify({ choices: [{ message: { content: "ok" } }] })) as never);
+    await runKimiConnectivityTest(withoutProtocol, "p/m");
+    expect((mockedInvoke.mock.calls.find((call) => call[0] === "http_request")![1] as { url: string }).url)
+      .toBe("https://api.example.com/v1/chat/completions");
+
+    mockedInvoke.mockReset();
+    const withProtocol = connectivityState("openai");
+    withProtocol.mainConfig.models["p/m"].protocol = "openai";
+    withProtocol.mainConfig.models["p/m"].base_url = "https://model.example/v1";
+    mockedInvoke.mockResolvedValue(http(200, JSON.stringify({ choices: [{ message: { content: "ok" } }] })) as never);
+    await runKimiConnectivityTest(withProtocol, "p/m");
+    expect((mockedInvoke.mock.calls.find((call) => call[0] === "http_request")![1] as { url: string }).url)
+      .toBe("https://model.example/v1/chat/completions");
+  });
+
   it("builds an anthropic request with x-api-key + version headers", async () => {
     mockedInvoke.mockResolvedValue(http(200, JSON.stringify({ content: [{ text: "hi there" }] })) as unknown as never);
     const result = await runKimiConnectivityTest(connectivityState("anthropic"), "p/m");
@@ -625,6 +707,100 @@ describe("runKimiConnectivityTest", () => {
     expect(call.url).toBe("https://api.example.com/v1/v1/messages");
     expect(call.headers["x-api-key"]).toBe("sk-1");
     expect(call.headers["anthropic-version"]).toBe("2023-06-01");
+  });
+
+  it("uses the Google GenAI generateContent protocol and its default host", async () => {
+    const state = connectivityState("google-genai");
+    state.mainConfig.providers.p.base_url = "";
+    mockedInvoke.mockResolvedValue(http(200, JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "gemini-ok" }] } }],
+    })) as unknown as never);
+
+    const result = await runKimiConnectivityTest(state, "p/m");
+
+    expect(result.stdout).toBe("gemini-ok");
+    expect(result.endpoint).not.toContain("sk-1");
+    const call = mockedInvoke.mock.calls.find((item) => item[0] === "http_request")![1] as {
+      url: string;
+      body: string;
+    };
+    expect(call.url).toBe("https://generativelanguage.googleapis.com/v1beta/models/m-1:generateContent?key=sk-1");
+    expect(JSON.parse(call.body)).toMatchObject({
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+  });
+
+  it("uses Vertex generateContent with ADC and configured project/location", async () => {
+    const state = connectivityState("vertexai");
+    state.mainConfig.providers.p.base_url = "";
+    state.mainConfig.providers.p.api_key = "";
+    state.mainConfig.providers.p.env = {
+      GOOGLE_CLOUD_PROJECT: "project-1",
+      GOOGLE_CLOUD_LOCATION: "asia-east1",
+    };
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "get_google_adc_access_token") return "adc-token" as never;
+      if (command === "http_request") {
+        return http(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: "vertex-ok" }] } }] })) as never;
+      }
+      return undefined as never;
+    });
+
+    const result = await runKimiConnectivityTest(state, "p/m");
+
+    expect(result.stdout).toBe("vertex-ok");
+    const call = mockedInvoke.mock.calls.find((item) => item[0] === "http_request")![1] as {
+      url: string;
+      headers: Record<string, string>;
+    };
+    expect(call.url).toBe("https://asia-east1-aiplatform.googleapis.com/v1beta1/projects/project-1/locations/asia-east1/publishers/google/models/m-1:generateContent");
+    expect(call.headers.authorization).toBe("Bearer adc-token");
+  });
+
+  it("recognizes an OAuth-managed Kimi provider without requiring a static API key", async () => {
+    const state = connectivityState("kimi");
+    state.mainConfig.models["p/m"].provider = "managed:kimi-code";
+    state.mainConfig.providers = {
+      "managed:kimi-code": {
+        type: "kimi",
+        base_url: "https://api.kimi.com/coding/v1",
+        api_key: "",
+        oauth: { storage: "file", key: "kimi-code" },
+      },
+    };
+    mockedInvoke.mockResolvedValue({
+      active_account_id: "account-1",
+      credentials_present: true,
+      standard_credentials_path: "~/.kimi-code/credentials",
+    } as never);
+
+    const result = await runKimiConnectivityTest(state, "p/m");
+
+    expect(result.stdout).toContain("credentials are active");
+    expect(mockedInvoke.mock.calls.some((item) => item[0] === "http_request")).toBe(false);
+  });
+
+  it("does not read default credential slots for an isolated managed OAuth environment", async () => {
+    const state = connectivityState("kimi");
+    state.mainConfig.models["p/m"].provider = "managed:kimi-code";
+    state.mainConfig.providers = {
+      "managed:kimi-code": {
+        type: "kimi",
+        base_url: "https://api.kimi.com/coding/v1",
+        api_key: "",
+        oauth: { storage: "file", key: "kimi-code" },
+      },
+    };
+    state.panelSettings = {
+      active_kimi_code_environment_id: "work",
+      kimi_code_environments: [{ id: "work", name: "Work", homePath: "/custom/kimi-home" }],
+    } as AppState["panelSettings"];
+
+    await expect(runKimiConnectivityTest(state, "p/m"))
+      .rejects.toThrow(/isolated in its KIMI_CODE_HOME/);
+    const [health] = await runProvidersHealthCheck(state);
+    expect(health.reason).toBe("oauth-unverified");
+    expect(mockedInvoke).not.toHaveBeenCalled();
   });
 
   it("throws a descriptive error when the upstream returns non-ok", async () => {
@@ -647,6 +823,7 @@ describe("evaluateCliCompatibility", () => {
   });
 
   it("treats the minimum version and above as compatible", () => {
+    expect(MIN_CLI_VERSION).toBe("0.38.0");
     expect(evaluateCliCompatibility({ version: MIN_CLI_VERSION, installed: true })).toBe("compatible");
     expect(evaluateCliCompatibility({ version: "9.9.9", installed: true })).toBe("compatible");
   });
@@ -695,5 +872,57 @@ describe("runProvidersHealthCheck", () => {
     expect(byName.broken.reason).toBe("network-error");
     expect(byName.nomodel.reason).toBe("no-model");
     expect(byName.nokey.reason).toBe("missing-api-key");
+  });
+});
+
+describe("official Kimi provider catalog bridge", () => {
+  it("lists models.dev providers through the official CLI JSON output", async () => {
+    mockedInvoke.mockResolvedValue(exec(0, JSON.stringify({
+      anthropic: { name: "Anthropic", type: "anthropic", models: { opus: {}, sonnet: {} } },
+      openai: { name: "OpenAI", type: "openai", models: { gpt: {} } },
+    })) as never);
+
+    await expect(listKimiProviderCatalog("/kimi-home", { filter: "an" })).resolves.toEqual([
+      { id: "anthropic", name: "Anthropic", type: "anthropic", modelCount: 2 },
+      { id: "openai", name: "OpenAI", type: "openai", modelCount: 1 },
+    ]);
+    expect(mockedInvoke).toHaveBeenCalledWith("run_kimi_provider_command", {
+      homePath: "/kimi-home",
+      request: { action: "catalog-list", filter: "an", url: undefined },
+    });
+  });
+
+  it("loads normalized model details and delegates catalog/registry imports", async () => {
+    mockedInvoke.mockResolvedValueOnce(exec(0, JSON.stringify({
+      providerId: "anthropic",
+      models: [{
+        id: "claude-opus",
+        name: "Claude Opus",
+        capability: { tool_use: true, thinking: true, max_context_tokens: 200000 },
+      }],
+    })) as never);
+    await expect(getKimiProviderCatalogModels("/kimi-home", "anthropic")).resolves.toEqual([{
+      id: "claude-opus",
+      displayName: "Claude Opus",
+      maxContextTokens: 200000,
+      capabilities: ["tool_use", "thinking"],
+    }]);
+
+    mockedInvoke.mockResolvedValue(exec(0) as never);
+    await importKimiProviderCatalog("/kimi-home", {
+      providerId: "anthropic",
+      apiKey: "secret",
+      defaultModel: "claude-opus",
+    });
+    await importKimiProviderRegistry("/kimi-home", {
+      url: "https://registry.example/api.json",
+      apiKey: "registry-secret",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("run_kimi_provider_command", expect.objectContaining({
+      request: expect.objectContaining({ action: "catalog-add", apiKey: "secret" }),
+    }));
+    expect(mockedInvoke).toHaveBeenCalledWith("run_kimi_provider_command", expect.objectContaining({
+      request: expect.objectContaining({ action: "registry-add", apiKey: "registry-secret" }),
+    }));
   });
 });

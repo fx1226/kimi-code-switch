@@ -10,11 +10,15 @@ vi.mock("@shared/configStore", () => ({
   loadAppState: vi.fn(),
   saveAppState: vi.fn(),
 }));
+vi.mock("./panelSettingsStore", () => ({
+  savePanelSettings: vi.fn().mockResolvedValue(true),
+}));
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { exit } from "@tauri-apps/plugin-process";
 import { applyProfile, loadAppState, saveAppState } from "@shared/configStore";
+import { savePanelSettings } from "./panelSettingsStore";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
@@ -22,6 +26,7 @@ const mockedExit = vi.mocked(exit);
 const mockedApplyProfile = vi.mocked(applyProfile);
 const mockedLoadAppState = vi.mocked(loadAppState);
 const mockedSaveAppState = vi.mocked(saveAppState);
+const mockedSavePanelSettings = vi.mocked(savePanelSettings);
 
 type TrayHandler = (e: { payload: string }) => Promise<void> | void;
 type TrayModule = typeof import("./tray");
@@ -78,6 +83,8 @@ beforeEach(async () => {
   mockedApplyProfile.mockReset();
   mockedLoadAppState.mockReset();
   mockedSaveAppState.mockReset();
+  mockedSavePanelSettings.mockReset();
+  mockedSavePanelSettings.mockResolvedValue(true);
 
   capturedHandler = null;
   mockedListen.mockReset();
@@ -164,30 +171,33 @@ describe("tray://command action routing", () => {
 
   it("profile:<name> applies the profile, persists, reloads and rebuilds the tray", async () => {
     const state = createState();
-    mockedLoadAppState.mockResolvedValue(createState());
+    const latest = createState();
+    mockedLoadAppState.mockResolvedValue(latest);
     const onReload = vi.fn();
     await dispatch("profile:default", () => state, onReload);
 
-    expect(mockedApplyProfile).toHaveBeenCalledWith(state, "default");
-    expect(mockedSaveAppState).toHaveBeenCalled();
+    expect(mockedApplyProfile).toHaveBeenCalledWith(latest, "default");
+    expect(mockedSaveAppState).toHaveBeenCalledWith(expect.anything(), latest);
     expect(mockedLoadAppState).toHaveBeenCalled();
     expect(onReload).toHaveBeenCalled();
   });
 
-  it("locale:<loc> mutates locale, saves and rebuilds", async () => {
+  it("locale:<loc> saves panel settings without rewriting Kimi config", async () => {
     const state = createState();
     const onReload = vi.fn();
     await dispatch("locale:en-US", () => state, onReload);
     expect(state.panelSettings.locale).toBe("en-US");
-    expect(mockedSaveAppState).toHaveBeenCalled();
+    expect(mockedSavePanelSettings).toHaveBeenCalledWith(state.panelSettings);
+    expect(mockedSaveAppState).not.toHaveBeenCalled();
     expect(onReload).toHaveBeenCalled();
   });
 
-  it("theme:<value> mutates theme, saves and rebuilds", async () => {
+  it("theme:<value> saves panel settings without rewriting Kimi config", async () => {
     const state = createState();
     await dispatch("theme:light", () => state);
     expect(state.panelSettings.theme).toBe("light");
-    expect(mockedSaveAppState).toHaveBeenCalled();
+    expect(mockedSavePanelSettings).toHaveBeenCalledWith(state.panelSettings);
+    expect(mockedSaveAppState).not.toHaveBeenCalled();
   });
 
   it("ignores commands when state is unavailable at dispatch time", async () => {

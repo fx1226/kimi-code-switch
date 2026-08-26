@@ -8,7 +8,7 @@ export interface SourcePreset {
   descKey: string;
   defaultEndpoint: string;
   /** 必须是 kimi-code-cli 认识的 provider type（见 appOptions.PROVIDER_TYPE_OPTIONS）。 */
-  providerType: "kimi" | "openai_legacy" | "openai_responses" | "anthropic" | "gemini" | "vertexai";
+  providerType: "kimi" | "openai" | "openai_responses" | "anthropic" | "google-genai" | "vertexai";
   /** 仅用于向导 UI：决定是否显示 API Key 输入及其占位符；真实鉴权方式由 providerType 隐含。 */
   authType: "bearer" | "x-api-key" | "none";
   commonModels: string[];
@@ -66,7 +66,7 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     nameKey: "sourceDeepseekName",
     descKey: "sourceDeepseekDesc",
     defaultEndpoint: "https://api.deepseek.com/v1",
-    providerType: "openai_legacy",
+    providerType: "openai",
     authType: "bearer",
     commonModels: ["deepseek-chat", "deepseek-reasoner", "deepseek-v3.2", "deepseek-r1", "deepseek-coder"],
     defaultContextSize: 64000,
@@ -79,7 +79,7 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     nameKey: "sourceGlmName",
     descKey: "sourceGlmDesc",
     defaultEndpoint: "https://open.bigmodel.cn/api/paas/v4",
-    providerType: "openai_legacy",
+    providerType: "openai",
     authType: "bearer",
     commonModels: ["glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-z1-air"],
     defaultContextSize: 128000,
@@ -92,7 +92,7 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     nameKey: "sourceCustomName",
     descKey: "sourceCustomDesc",
     defaultEndpoint: "",
-    providerType: "openai_legacy",
+    providerType: "openai",
     authType: "bearer",
     commonModels: [],
     defaultContextSize: 128000,

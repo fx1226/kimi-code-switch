@@ -174,9 +174,9 @@ export interface KimiOAuthLoginEvent {
 }
 
 // GUI 期望的 Kimi Code 版本范围：低于 MIN 判定为过旧（功能可能不兼容）。
-// 0.38.0 依据：从 0.21.0 起 default_thinking 废弃、providers/models 新 schema 开始落地，
-// 本 GUI 的 Provider/Model 字段补齐与连通性测试基于该新 schema。低于此版本功能不保证兼容。
-export const MIN_CLI_VERSION = "0.21.0";
+// 本 GUI 的读写契约和 fixture 固定到 0.38.0；更早版本进入升级提示，避免用
+// 新 schema 改写旧配置。EXPECTED 仅表示当前已验证基线。
+export const MIN_CLI_VERSION = "0.38.0";
 export const EXPECTED_CLI_VERSION = "0.38.0";
 
 export type CliCompatStatus = "compatible" | "outdated" | "unknown";
@@ -437,9 +437,9 @@ async function detectKimiCodeVersion(): Promise<CliVersionResult> {
 
 // ── 更新检测（Kimi Code 0.38.0：走官方 CDN manifest）──
 // CLI 自带 manifest：https://code.{kimi.com|kimi.ai}/kimi-code/latest.json
-// 全球/大陆分域：区域信息在 ~/.kimi-code/region（如 "zh-cn" / "global"）。
-//   - "zh-cn" → code.kimi.com（大陆分域）
-//   - "global"（或缺省）→ code.kimi.ai（全球分域）
+// 全球/大陆分域：0.38.0 官方标记为 "mainland-cn" / "global"；兼容早期
+// 安装脚本写入的 "cn" 与旧 GUI 使用过的 "zh-cn"。缺失或未知值沿用
+// Kimi Code 官方默认 mainland-cn，避免把大陆安装误导向全球 CDN。
 // 本地缓存 ~/.kimi-code/updates/latest.json 形如
 // { source, checkedAt, latest, manifest: { version, ... } }，优先读取它避免每次请求网络。
 // brew / GitHub releases 仅作为安装源信息回退，不再是版本检测主路径。
@@ -471,17 +471,20 @@ async function readKimiCodeRegion(): Promise<string> {
   try {
     const raw = await invoke<string | null>("read_text", { path: KIMI_CODE_REGION_PATH });
     if (!raw) {
-      return "";
+      return "mainland-cn";
     }
     const trimmed = raw.trim().replace(/^["']|["']$/g, "").toLowerCase();
-    return trimmed === "zh-cn" ? "zh-cn" : "global";
+    if (trimmed === "global") {
+      return "global";
+    }
+    return "mainland-cn";
   } catch {
-    return "global";
+    return "mainland-cn";
   }
 }
 
 function kimiCodeCdnHost(region: string): string {
-  return region === "zh-cn" ? "code.kimi.com" : "code.kimi.ai";
+  return region === "global" ? "code.kimi.ai" : "code.kimi.com";
 }
 
 async function getKimiCodeLatestVersionFromCdn(): Promise<string | null> {
@@ -593,21 +596,35 @@ export async function upgradeKimiCli(): Promise<{ ok: true; stdout: string; stde
 export async function startKimiOAuthLogin(
   target: ConfigTarget,
   onEvent?: (event: KimiOAuthLoginEvent) => void,
-  options?: { accountId?: string; activate?: boolean },
+  options?: { accountId?: string; activate?: boolean; homePath?: string },
 ): Promise<{ ok: true; stdout: string; stderr: string }> {
   const unlisten = onEvent
     ? await listen<KimiOAuthLoginEvent>("kimi-oauth-login", (event) => onEvent(event.payload))
     : null;
+  let previousAccountId = "";
   try {
     if (options?.accountId) {
+      previousAccountId = (await officialAccounts.getOfficialAccountCredentialsStatus()).active_account_id;
       await officialAccounts.prepareOfficialAccountLogin(options.accountId);
     }
-    const r = await invoke<ExecResult>("start_kimi_oauth_login", { target });
+    const r = await invoke<ExecResult>("start_kimi_oauth_login", {
+      target,
+      homePath: options?.homePath ?? null,
+    });
     if (r.code !== 0) throw new Error(r.stderr || "kimi login failed");
     if (options?.accountId) {
       await officialAccounts.completeOfficialAccountLogin(options.accountId, options.activate ?? true);
     }
     return { ok: true, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+  } catch (error) {
+    if (options?.accountId && previousAccountId) {
+      try {
+        await officialAccounts.activateOfficialAccount(previousAccountId);
+      } catch (restoreError) {
+        console.error("Failed to restore the previous official account after login failure:", restoreError);
+      }
+    }
+    throw error;
   } finally {
     unlisten?.();
   }
@@ -617,6 +634,9 @@ export async function runKimiMcpServerTest(
   name: string,
   server: McpServerConfig,
 ): Promise<{ ok: true; stdout: string; stderr: string }> {
+  if (server.transport === "sse") {
+    throw new Error(`MCP server "${name}" uses legacy SSE. Kimi Code supports this transport, but the GUI connectivity test does not implement SSE.`);
+  }
   if (server.transport === "stdio") {
     if (!server.command.trim()) {
       throw new Error(`MCP server "${name}" uses stdio transport but has no command.`);
@@ -638,7 +658,7 @@ export async function runKimiMcpServerTest(
     "POST",
     server.url.trim(),
     {
-      ...server.headers,
+      ...await resolvedMcpStaticHeaders(server),
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
@@ -684,9 +704,22 @@ function mcpInitializedNotification(): McpStdioRpcRequest {
   return { method: "notifications/initialized" };
 }
 
-function mcpHttpHeaders(server: McpServerConfig, sessionId?: string, protocolVersion = MCP_PROTOCOL_VERSION): Record<string, string> {
+async function resolvedMcpStaticHeaders(server: McpServerConfig): Promise<Record<string, string>> {
+  const headers = { ...server.headers };
+  const bearerTokenEnvVar = typeof server.extra?.bearerTokenEnvVar === "string"
+    ? server.extra.bearerTokenEnvVar.trim()
+    : "";
+  if (bearerTokenEnvVar && !Object.keys(headers).some((key) => key.toLowerCase() === "authorization")) {
+    const token = await invoke<string | null>("read_environment_variable", { name: bearerTokenEnvVar });
+    if (!token) throw new Error(`MCP bearer token environment variable is not set: ${bearerTokenEnvVar}`);
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function mcpHttpHeaders(server: McpServerConfig, sessionId?: string, protocolVersion = MCP_PROTOCOL_VERSION): Promise<Record<string, string>> {
   return {
-    ...server.headers,
+    ...await resolvedMcpStaticHeaders(server),
     ...(sessionId ? { "mcp-session-id": sessionId } : {}),
     Accept: "application/json, text/event-stream",
     "Content-Type": "application/json",
@@ -710,7 +743,7 @@ async function postMcpJsonRpc(
   };
   if (request.id !== undefined) payload.id = request.id;
   if (request.params !== undefined) payload.params = request.params;
-  const resp = await http("POST", server.url.trim(), mcpHttpHeaders(server, sessionId, protocolVersion), JSON.stringify(payload));
+  const resp = await http("POST", server.url.trim(), await mcpHttpHeaders(server, sessionId, protocolVersion), JSON.stringify(payload));
   if (resp.status === 405) {
     throw new Error(`MCP server "${name}" does not accept Streamable HTTP POST requests. This URL is likely an SSE endpoint; use a real HTTP MCP URL or a stdio bridge.`);
   }
@@ -897,6 +930,9 @@ async function runStdioMcpToolCall(
 }
 
 export async function listKimiMcpServerTools(name: string, server: McpServerConfig): Promise<McpToolListResult> {
+  if (server.transport === "sse") {
+    throw new Error(`MCP server "${name}" uses legacy SSE. Kimi Code supports this transport, but the GUI tool browser does not implement SSE.`);
+  }
   return server.transport === "stdio" ? runStdioMcpToolList(name, server) : runHttpMcpToolList(name, server);
 }
 
@@ -908,6 +944,9 @@ export async function callKimiMcpServerTool(
 ): Promise<McpToolCallResult> {
   if (!toolName.trim()) {
     throw new Error("MCP tool name is required.");
+  }
+  if (server.transport === "sse") {
+    throw new Error(`MCP server "${name}" uses legacy SSE. Kimi Code supports this transport, but the GUI tool browser does not implement SSE.`);
   }
   return server.transport === "stdio"
     ? runStdioMcpToolCall(name, server, toolName, argsJson)
@@ -945,38 +984,146 @@ function readStringPath(value: unknown, path: Array<string | number>): string | 
   return typeof cur === "string" ? cur : null;
 }
 
-type Kind = "chat-completions" | "responses" | "anthropic";
+type Kind = "chat-completions" | "responses" | "anthropic" | "google-genai";
 
-function buildRequest(provider: ProviderConfig, model: ModelConfig, prompt: string): {
+const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+  kimi: "https://api.moonshot.ai/v1",
+  openai: "https://api.openai.com/v1",
+  openai_legacy: "https://api.openai.com/v1",
+  openai_responses: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com",
+  "google-genai": "https://generativelanguage.googleapis.com",
+};
+
+function effectiveProviderType(provider: ProviderConfig, model: ModelConfig): string {
+  return model.protocol?.trim() || provider.type?.trim() || "openai";
+}
+
+function providerEnvValue(provider: ProviderConfig, keys: string[]): string {
+  for (const key of keys) {
+    const value = provider.env?.[key]?.trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function resolvedProviderApiKey(provider: ProviderConfig, type: string): string {
+  const direct = provider.api_key?.trim();
+  if (direct) return direct;
+  if (type === "kimi") return providerEnvValue(provider, ["KIMI_API_KEY"]);
+  if (type === "anthropic") return providerEnvValue(provider, ["ANTHROPIC_API_KEY"]);
+  if (type === "google-genai") return providerEnvValue(provider, ["GOOGLE_API_KEY"]);
+  if (type === "openai" || type === "openai_legacy" || type === "openai_responses") {
+    return providerEnvValue(provider, ["OPENAI_API_KEY"]);
+  }
+  return "";
+}
+
+function resolvedProviderBaseUrl(provider: ProviderConfig, model: ModelConfig, type: string): string {
+  // Kimi only applies per-model base_url when protocol is explicitly declared;
+  // otherwise the field is catalog metadata and provider.base_url remains authoritative.
+  const direct = (model.protocol ? model.base_url?.trim() : "") || provider.base_url?.trim();
+  if (direct) return direct;
+  const envKeys = type === "kimi"
+    ? ["KIMI_BASE_URL"]
+    : type === "anthropic"
+      ? ["ANTHROPIC_BASE_URL"]
+      : type === "google-genai"
+        ? ["GOOGLE_GEMINI_BASE_URL"]
+        : type === "vertexai"
+          ? ["GOOGLE_VERTEX_BASE_URL"]
+          : ["OPENAI_BASE_URL"];
+  return providerEnvValue(provider, envKeys) || PROVIDER_DEFAULT_BASE_URLS[type] || "";
+}
+
+function requestHeaders(provider: ProviderConfig, defaults: Record<string, string>): Record<string, string> {
+  const result = { ...defaults };
+  for (const [key, value] of Object.entries(provider.custom_headers ?? {})) {
+    result[key.toLowerCase()] = value;
+  }
+  return result;
+}
+
+async function buildRequest(provider: ProviderConfig, model: ModelConfig, prompt: string): Promise<{
   endpoint: string;
+  displayEndpoint: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
   kind: Kind;
-} {
-  // 0.38.0 中 openai=chat/completions；openai_legacy 仅作旧别名保留。
-  const type = provider.type || "openai";
+}> {
+  const type = effectiveProviderType(provider, model);
+  const baseUrl = resolvedProviderBaseUrl(provider, model, type);
+  const apiKey = resolvedProviderApiKey(provider, type);
   if (type === "anthropic") {
+    if (!apiKey) throw new Error("Anthropic API key is required.");
     return {
-      endpoint: joinUrlPath(provider.base_url, "/v1/messages"),
-      headers: { "content-type": "application/json", "x-api-key": provider.api_key, "anthropic-version": "2023-06-01" },
+      endpoint: joinUrlPath(baseUrl, "/v1/messages"),
+      displayEndpoint: joinUrlPath(baseUrl, "/v1/messages"),
+      headers: requestHeaders(provider, { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }),
       body: { model: model.model, max_tokens: 64, messages: [{ role: "user", content: prompt }] },
       kind: "anthropic",
     };
   }
   if (type === "openai_responses") {
+    if (!apiKey) throw new Error("OpenAI API key is required.");
     return {
-      endpoint: joinUrlPath(provider.base_url, "/responses"),
-      headers: { "content-type": "application/json", authorization: `Bearer ${provider.api_key}` },
+      endpoint: joinUrlPath(baseUrl, "/responses"),
+      displayEndpoint: joinUrlPath(baseUrl, "/responses"),
+      headers: requestHeaders(provider, { "content-type": "application/json", authorization: `Bearer ${apiKey}` }),
       body: { model: model.model, input: prompt },
       kind: "responses",
     };
   }
-  // google-genai / vertexai / gemini 在 0.38.0 有各自的 wire 格式
-  // （generateContent 等），本 GUI 连通性测试暂不做精确实现，
-  // 统一回退到 chat/completions 兜底探测，仅保证请求可发、结构自洽。
+  if (type === "google-genai") {
+    if (!apiKey) throw new Error("Google GenAI API key is required.");
+    const displayEndpoint = joinUrlPath(baseUrl, `/v1beta/models/${encodeURIComponent(model.model)}:generateContent`);
+    return {
+      endpoint: `${displayEndpoint}?key=${encodeURIComponent(apiKey)}`,
+      displayEndpoint,
+      headers: requestHeaders(provider, { "content-type": "application/json" }),
+      body: {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 64 },
+      },
+      kind: "google-genai",
+    };
+  }
+  if (type === "vertexai") {
+    const project = providerEnvValue(provider, ["GOOGLE_CLOUD_PROJECT"]);
+    const location = providerEnvValue(provider, ["GOOGLE_CLOUD_LOCATION"]);
+    if (!project || !location) {
+      throw new Error("Vertex AI requires GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION in provider.env.");
+    }
+    const root = baseUrl || `https://${location}-aiplatform.googleapis.com`;
+    const endpoint = joinUrlPath(
+      root,
+      `/v1beta1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model.model)}:generateContent`,
+    );
+    const customAuthorization = Object.entries(provider.custom_headers ?? {})
+      .find(([key]) => key.toLowerCase() === "authorization")?.[1];
+    const accessToken = customAuthorization
+      ? ""
+      : await invoke<string>("get_google_adc_access_token", { env: provider.env ?? {} });
+    return {
+      endpoint,
+      displayEndpoint: endpoint,
+      headers: requestHeaders(provider, {
+        "content-type": "application/json",
+        ...(customAuthorization ? {} : { authorization: `Bearer ${accessToken}` }),
+      }),
+      body: {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 64 },
+      },
+      kind: "google-genai",
+    };
+  }
+  if (!baseUrl) throw new Error(`Provider base URL is required for ${type}.`);
+  if (!apiKey) throw new Error(`Provider API key is required for ${type}.`);
   return {
-    endpoint: joinUrlPath(provider.base_url, "/chat/completions"),
-    headers: { "content-type": "application/json", authorization: `Bearer ${provider.api_key}` },
+    endpoint: joinUrlPath(baseUrl, "/chat/completions"),
+    displayEndpoint: joinUrlPath(baseUrl, "/chat/completions"),
+    headers: requestHeaders(provider, { "content-type": "application/json", authorization: `Bearer ${apiKey}` }),
     body: { model: model.model, messages: [{ role: "user", content: prompt }] },
     kind: "chat-completions",
   };
@@ -987,10 +1134,17 @@ function extractText(raw: string, kind: Kind): string {
     const v = JSON.parse(raw) as Record<string, unknown>;
     if (kind === "anthropic") return readStringPath(v, ["content", 0, "text"]) ?? raw;
     if (kind === "responses") return readStringPath(v, ["output_text"]) ?? readStringPath(v, ["output", 0, "content", 0, "text"]) ?? raw;
+    if (kind === "google-genai") return readStringPath(v, ["candidates", 0, "content", "parts", 0, "text"]) ?? raw;
     return readStringPath(v, ["choices", 0, "message", "content"]) ?? raw;
   } catch {
     return raw;
   }
+}
+
+function usesStandardCredentialSlots(state: AppState): boolean {
+  const activeId = state.panelSettings?.active_kimi_code_environment_id ?? "default";
+  const environment = state.panelSettings?.kimi_code_environments?.find((candidate) => candidate.id === activeId);
+  return activeId === "default" && (environment?.homePath ?? "~/.kimi-code") === "~/.kimi-code";
 }
 
 export async function runKimiConnectivityTest(state: AppState, modelName: string): Promise<ProfileConnectivityTestResult> {
@@ -998,7 +1152,10 @@ export async function runKimiConnectivityTest(state: AppState, modelName: string
   if (!model) throw new Error(`Model not found: ${modelName}`);
   const provider = state.mainConfig.providers[model.provider];
   if (!provider) throw new Error(`Provider not found: ${model.provider}`);
-  if (model.auth_mode === "official-account") {
+  if (model.auth_mode === "official-account" || (model.provider === "managed:kimi-code" && provider.oauth)) {
+    if (!usesStandardCredentialSlots(state)) {
+      throw new Error("Managed OAuth credentials for this environment are isolated in its KIMI_CODE_HOME. Test by launching Kimi in that environment; default credential slots are not applicable.");
+    }
     const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
     if (!accountStatus.active_account_id || !accountStatus.credentials_present) {
       throw new Error("Official account mode requires an active logged-in Kimi official account.");
@@ -1018,12 +1175,9 @@ export async function runKimiConnectivityTest(state: AppState, modelName: string
       status: 0,
     };
   }
-  if (!provider.base_url.trim()) throw new Error(`Provider base URL is required: ${model.provider}`);
-  if (!provider.api_key.trim()) throw new Error(`Provider API key is required: ${model.provider}`);
-
   const prompt = "hi";
   const startedAt = performance.now();
-  const req = buildRequest(provider, model, prompt);
+  const req = await buildRequest(provider, model, prompt);
   const resp = await http("POST", req.endpoint, req.headers, JSON.stringify(req.body));
   const totalMs = Math.max(0, Math.round(performance.now() - startedAt));
   const text = extractText(resp.body, req.kind);
@@ -1039,7 +1193,7 @@ export async function runKimiConnectivityTest(state: AppState, modelName: string
     providerName: model.provider,
     providerType: provider.type,
     prompt,
-    endpoint: req.endpoint,
+    endpoint: req.displayEndpoint,
     firstTokenMs: totalMs,
     totalMs,
     status: resp.status,
@@ -1049,7 +1203,7 @@ export async function runKimiConnectivityTest(state: AppState, modelName: string
 // ── 全 provider 批量健康巡检 ──
 // 复用 buildRequest 的请求构造做轻量连通性探测；逐项独立 try/catch，
 // 单个 provider 失败（含 429 限流）不阻断其余。
-export type ProviderHealthReason = "ok" | "no-model" | "missing-base-url" | "missing-api-key" | "rate-limited" | "http-error" | "network-error";
+export type ProviderHealthReason = "ok" | "no-model" | "missing-base-url" | "missing-api-key" | "oauth-unverified" | "rate-limited" | "http-error" | "network-error";
 
 export interface ProviderHealthResult {
   providerName: string;
@@ -1060,6 +1214,137 @@ export interface ProviderHealthResult {
   detail?: string;
 }
 
+export interface ProviderCatalogSummary {
+  id: string;
+  name: string;
+  type: string;
+  modelCount: number;
+}
+
+export interface ProviderCatalogModel {
+  id: string;
+  displayName: string;
+  maxContextTokens?: number;
+  capabilities: string[];
+}
+
+interface KimiProviderCommandRequest {
+  action: "catalog-list" | "catalog-add" | "registry-add" | "configured-list";
+  providerId?: string;
+  filter?: string;
+  url?: string;
+  apiKey?: string;
+  defaultModel?: string;
+  baseUrl?: string;
+}
+
+async function runKimiProviderCommand(
+  homePath: string,
+  request: KimiProviderCommandRequest,
+): Promise<ExecResult> {
+  const result = await invoke<ExecResult>("run_kimi_provider_command", { homePath, request });
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `Kimi provider command failed (${result.code}).`);
+  }
+  return result;
+}
+
+function catalogModelCount(value: unknown): number {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return 0;
+  return Object.keys(value as Record<string, unknown>).length;
+}
+
+export async function listKimiProviderCatalog(
+  homePath: string,
+  options: { filter?: string; url?: string } = {},
+): Promise<ProviderCatalogSummary[]> {
+  const result = await runKimiProviderCommand(homePath, {
+    action: "catalog-list",
+    filter: options.filter,
+    url: options.url,
+  });
+  const catalog = JSON.parse(result.stdout) as unknown;
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
+    throw new Error("Kimi provider catalog returned invalid JSON.");
+  }
+  return Object.entries(catalog as Record<string, unknown>)
+    .map(([id, raw]) => {
+      const entry = raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw as Record<string, unknown>
+        : {};
+      return {
+        id,
+        name: typeof entry.name === "string" && entry.name.trim() ? entry.name : id,
+        type: typeof entry.type === "string" ? entry.type : "",
+        modelCount: catalogModelCount(entry.models),
+      };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export async function getKimiProviderCatalogModels(
+  homePath: string,
+  providerId: string,
+  options: { url?: string } = {},
+): Promise<ProviderCatalogModel[]> {
+  const result = await runKimiProviderCommand(homePath, {
+    action: "catalog-list",
+    providerId,
+    url: options.url,
+  });
+  const payload = JSON.parse(result.stdout) as {
+    models?: Array<{
+      id?: unknown;
+      name?: unknown;
+      capability?: Record<string, unknown>;
+    }>;
+  };
+  if (!Array.isArray(payload.models)) throw new Error("Kimi provider catalog model response is invalid.");
+  return payload.models.flatMap((model) => {
+    if (typeof model.id !== "string" || !model.id.trim()) return [];
+    const capability = model.capability ?? {};
+    const capabilities = [
+      capability.tool_use === true ? "tool_use" : "",
+      capability.thinking === true ? "thinking" : "",
+      capability.image_in === true ? "image_in" : "",
+    ].filter(Boolean);
+    return [{
+      id: model.id,
+      displayName: typeof model.name === "string" && model.name.trim() ? model.name : model.id,
+      maxContextTokens: typeof capability.max_context_tokens === "number"
+        ? capability.max_context_tokens
+        : undefined,
+      capabilities,
+    }];
+  });
+}
+
+export async function importKimiProviderCatalog(
+  homePath: string,
+  options: {
+    providerId: string;
+    apiKey: string;
+    defaultModel?: string;
+    baseUrl?: string;
+    url?: string;
+  },
+): Promise<void> {
+  await runKimiProviderCommand(homePath, {
+    action: "catalog-add",
+    ...options,
+  });
+}
+
+export async function importKimiProviderRegistry(
+  homePath: string,
+  options: { url: string; apiKey: string },
+): Promise<void> {
+  await runKimiProviderCommand(homePath, {
+    action: "registry-add",
+    ...options,
+  });
+}
+
 // 为某 provider 选一个代表 model（首个引用该 provider 的 model）。
 function findRepresentativeModel(state: AppState, providerName: string): { modelName: string; model: ModelConfig } | null {
   for (const [modelName, model] of Object.entries(state.mainConfig.models)) {
@@ -1068,8 +1353,21 @@ function findRepresentativeModel(state: AppState, providerName: string): { model
   return null;
 }
 
-async function probeProvider(providerName: string, provider: ProviderConfig, model: ModelConfig): Promise<ProviderHealthResult> {
-  if (model.auth_mode === "official-account") {
+async function probeProvider(
+  providerName: string,
+  provider: ProviderConfig,
+  model: ModelConfig,
+  credentialSlotsAvailable: boolean,
+): Promise<ProviderHealthResult> {
+  if (model.auth_mode === "official-account" || (model.provider === "managed:kimi-code" && provider.oauth)) {
+    if (!credentialSlotsAvailable) {
+      return {
+        providerName,
+        ok: false,
+        reason: "oauth-unverified",
+        detail: "OAuth credentials are isolated in the active KIMI_CODE_HOME.",
+      };
+    }
     const accountStatus = await officialAccounts.getOfficialAccountCredentialsStatus();
     return {
       providerName,
@@ -1078,15 +1376,17 @@ async function probeProvider(providerName: string, provider: ProviderConfig, mod
       detail: accountStatus.standard_credentials_path,
     };
   }
-  if (!provider.base_url.trim()) {
+  const type = effectiveProviderType(provider, model);
+  const baseUrl = resolvedProviderBaseUrl(provider, model, type);
+  if (!baseUrl && type !== "vertexai") {
     return { providerName, ok: false, reason: "missing-base-url" };
   }
-  if (!provider.api_key.trim()) {
+  if (type !== "vertexai" && !resolvedProviderApiKey(provider, type)) {
     return { providerName, ok: false, reason: "missing-api-key" };
   }
   const startedAt = performance.now();
   try {
-    const req = buildRequest(provider, model, "hi");
+    const req = await buildRequest(provider, model, "hi");
     const resp = await http("POST", req.endpoint, req.headers, JSON.stringify(req.body));
     const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
     if (resp.ok) {
@@ -1112,7 +1412,7 @@ export async function runProvidersHealthCheck(state: AppState): Promise<Provider
       }
       // 逐项独立：单个 provider 探测失败不抛出，统一收敛为结果对象。
       try {
-        return await probeProvider(providerName, provider, rep.model);
+        return await probeProvider(providerName, provider, rep.model, usesStandardCredentialSlots(state));
       } catch (error) {
         return { providerName, ok: false, reason: "network-error", detail: error instanceof Error ? error.message : String(error) };
       }

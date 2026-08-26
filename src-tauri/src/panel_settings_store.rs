@@ -926,10 +926,22 @@ mod tests {
         let loaded_json: serde_json::Value = serde_json::from_str(&loaded).unwrap();
 
         // 缺失字段应读回为空对象 {}，而非 JSON null
-        assert!(loaded_json["profiles"].is_object(), "profiles should be {{}}, got {:?}", loaded_json["profiles"]);
+        assert!(
+            loaded_json["profiles"].is_object(),
+            "profiles should be {{}}, got {:?}",
+            loaded_json["profiles"]
+        );
         assert_eq!(loaded_json["profiles"], serde_json::json!({}));
-        assert!(loaded_json["shortcuts"].is_object(), "shortcuts should be {{}}, got {:?}", loaded_json["shortcuts"]);
-        assert!(loaded_json["mcp_servers"].is_object(), "mcp_servers should be {{}}, got {:?}", loaded_json["mcp_servers"]);
+        assert!(
+            loaded_json["shortcuts"].is_object(),
+            "shortcuts should be {{}}, got {:?}",
+            loaded_json["shortcuts"]
+        );
+        assert!(
+            loaded_json["mcp_servers"].is_object(),
+            "mcp_servers should be {{}}, got {:?}",
+            loaded_json["mcp_servers"]
+        );
     }
 
     #[test]

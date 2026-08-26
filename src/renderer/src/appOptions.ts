@@ -193,17 +193,6 @@ export const PROVIDER_TYPE_OPTIONS: Array<{
     },
   },
   {
-    value: "openai_legacy",
-    label: {
-      "zh-CN": "OpenAI Chat Completions（openai_legacy，旧别名）",
-      "zh-TW": "OpenAI Chat Completions（openai_legacy，舊別名）",
-      "en-US": "OpenAI Chat Completions (openai_legacy, legacy alias)",
-      "ja-JP": "OpenAI Chat Completions（openai_legacy、旧エイリアス）",
-      "de-DE": "OpenAI Chat Completions (openai_legacy, alter Alias)",
-      "es-ES": "OpenAI Chat Completions (openai_legacy, alias antiguo)",
-    },
-  },
-  {
     value: "openai_responses",
     label: {
       "zh-CN": "OpenAI Responses（openai_responses）",
@@ -333,6 +322,10 @@ export const MCP_TRANSPORT_OPTIONS: Array<{
   value: McpTransport;
   label: LocalizedText;
 }> = [
+  {
+    value: "sse",
+    label: { "zh-CN": "SSE（旧版远程传输）", "zh-TW": "SSE（舊版遠端傳輸）", "en-US": "SSE (Legacy Remote)", "ja-JP": "SSE（従来のリモート転送）", "de-DE": "SSE (Legacy Remote)", "es-ES": "SSE (remoto heredado)" },
+  },
   {
     value: "streamable-http",
     label: { "zh-CN": "Streaming HTTP", "zh-TW": "Streaming HTTP", "en-US": "Streaming HTTP", "ja-JP": "Streaming HTTP", "de-DE": "Streaming HTTP", "es-ES": "Streaming HTTP" },

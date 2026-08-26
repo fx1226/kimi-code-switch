@@ -13,6 +13,6 @@
 
 GitHub Release 描述同时包含中文 (`zh-CN`) 和英文 (`en-US`) 两段，由 `.github/workflows/release.yml` 自动提取并写入。
 
-桌面应用内的「关于」页和「检查更新」对话框会按当前界面语言展示对应版本的变更说明：首次启动会从 GitHub `raw.githubusercontent.com` 拉取最新译文缓存到 `~/.kimi/.panel/changelog-cache/`，失败时回退到打包内文件。
+桌面应用内的「关于」页和「检查更新」对话框会按当前界面语言展示对应版本的变更说明：优先从当前 fork 的 GitHub 内容读取，网络失败时回退到打包内文件。
 
 发布新版本流程见 [CLAUDE.md](CLAUDE.md#发布新版本--release-a-new-version--cut-a-release)。

@@ -1,0 +1,39 @@
+default_model = "kimi-code/k3"
+default_permission_mode = "manual"
+default_plan_mode = false
+merge_all_available_skills = true
+builtin_product_skills = true
+telemetry = true
+
+[providers."managed:kimi-code"]
+type = "kimi"
+model_source = "oauth-catalog"
+base_url = "https://api.kimi.com/coding/v1"
+default_model = "kimi-code/k3"
+
+[models."kimi-code/k3"]
+provider = "managed:kimi-code"
+model = "k3"
+max_context_size = 1048576
+capabilities = ["thinking", "always_thinking", "image_in", "video_in", "tool_use"]
+support_efforts = ["low", "high", "max"]
+default_effort = "max"
+
+[secondary_model]
+default_model = "kimi-code/k3"
+force = true
+
+[thinking]
+enabled = true
+effort = "high"
+keep = "all"
+
+[token_counting]
+strategy = "measured+estimated"
+
+[subagent]
+timeout_ms = 7200000
+
+[mcp]
+startup_timeout_ms = 30000
+tool_timeout_ms = 60000

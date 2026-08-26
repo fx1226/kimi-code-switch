@@ -14,23 +14,11 @@
 import parse from "@iarna/toml/parse-string.js";
 import stringify from "@iarna/toml/stringify.js";
 
-import type { Profile } from "./types";
+import type { EffectiveTuiConfig, Profile, TuiConfig } from "./types";
 
-/** tui.toml 中 GUI 管理的字段快照。未设字段为 undefined，序列化时不写入。 */
-export interface TuiConfig {
-  /** 顶层 theme（auto|dark|light 或自定义主题名）。 */
-  theme?: string;
-  /** 顶层 disable_paste_burst。 */
-  disable_paste_burst?: boolean;
-  /** [editor].command（空串 = 使用 $VISUAL/$EDITOR）。 */
-  editorCommand?: string;
-  /** [notifications].enabled。 */
-  notificationsEnabled?: boolean;
-  /** [notifications].notification_condition："unfocused" | "always"。 */
-  notificationCondition?: "unfocused" | "always";
-  /** [upgrade].auto_install。 */
-  upgradeAutoInstall?: boolean;
-}
+export type { EffectiveTuiConfig, TuiConfig } from "./types";
+/** 显式形态即 TuiConfig（文件显式值）；此处提供别名便于语义区分。 */
+export type { TuiConfig as ExplicitTuiConfig } from "./types";
 
 /** tui.toml 文件名（位于 <activeEnvHome> 下，默认环境为 ~/.kimi-code）。 */
 export const TUI_CONFIG_FILENAME = "tui.toml";
@@ -38,6 +26,7 @@ export const TUI_CONFIG_FILENAME = "tui.toml";
 /** 解析时仅接受这两个取值，其它视为未设置。 */
 export const TUI_NOTIFICATION_CONDITIONS = ["unfocused", "always"] as const;
 export type TuiNotificationCondition = (typeof TUI_NOTIFICATION_CONDITIONS)[number];
+export const TUI_STATUS_LINE_ITEMS = ["mode", "goal", "model", "tasks", "cwd", "git", "tips"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -56,6 +45,12 @@ export function buildTuiConfigDocument(tui: TuiConfig): string {
   if (tui.disable_paste_burst !== undefined) {
     raw.disable_paste_burst = tui.disable_paste_burst;
   }
+  if (tui.renderLatex !== undefined) {
+    raw.render_latex = tui.renderLatex;
+  }
+  if (tui.cacheExpiryHint !== undefined) {
+    raw.cache_expiry_hint = tui.cacheExpiryHint;
+  }
   if (tui.editorCommand !== undefined && tui.editorCommand !== "") {
     raw.editor = { command: tui.editorCommand };
   }
@@ -72,6 +67,12 @@ export function buildTuiConfigDocument(tui: TuiConfig): string {
   if (tui.upgradeAutoInstall !== undefined) {
     raw.upgrade = { auto_install: tui.upgradeAutoInstall };
   }
+  if (tui.statusLine && (tui.statusLine.items !== undefined || tui.statusLine.command !== undefined)) {
+    raw.status_line = {
+      ...(tui.statusLine.items !== undefined ? { items: normalizeStatusItems(tui.statusLine.items) } : {}),
+      ...(tui.statusLine.command !== undefined ? { command: tui.statusLine.command } : {}),
+    };
+  }
   return stringify(raw);
 }
 
@@ -80,8 +81,34 @@ export function buildTuiConfigDocument(tui: TuiConfig): string {
  * 未知键被忽略（不会被纳入返回结构；合并时它们仍会被原样保留）。
  */
 export function parseTuiConfigDocument(document: string | null): TuiConfig {
-  const raw = parseTuiDocumentRaw(document);
-  return raw ? parseTuiConfigRaw(raw) : {};
+  return parseTuiConfigDocumentWithDiagnostics(document).config;
+}
+
+export function parseTuiConfigDocumentWithDiagnostics(document: string | null): {
+  config: TuiConfig;
+  errors: string[];
+  warnings: string[];
+  /** E2：应用官方默认值后的有效配置（单一 normalize schema 产出）。 */
+  effective: EffectiveTuiConfig;
+} {
+  if (!document || !document.trim()) {
+    return { config: {}, errors: [], warnings: [], effective: normalizeTuiConfig({}) };
+  }
+  let raw: unknown;
+  try {
+    raw = parse(document);
+  } catch (error) {
+    return {
+      config: {},
+      errors: [error instanceof Error ? error.message : String(error)],
+      warnings: [],
+      effective: normalizeTuiConfig({}),
+    };
+  }
+  if (!isRecord(raw)) return { config: {}, errors: ["tui.toml root must be a table"], warnings: [], effective: normalizeTuiConfig({}) };
+  const warnings: string[] = [];
+  const config = parseTuiConfigRaw(raw, warnings);
+  return { config, errors: [], warnings, effective: normalizeTuiConfig(config) };
 }
 
 /** 容错解析原始 TOML 文档为顶层记录；解析失败返回 null。空文档返回空记录。 */
@@ -97,13 +124,19 @@ function parseTuiDocumentRaw(document: string | null): Record<string, unknown> |
   }
 }
 
-function parseTuiConfigRaw(raw: Record<string, unknown>): TuiConfig {
+function parseTuiConfigRaw(raw: Record<string, unknown>, warnings: string[] = []): TuiConfig {
   const result: TuiConfig = {};
   if (typeof raw.theme === "string" && raw.theme.trim() !== "") {
     result.theme = raw.theme;
   }
   if (typeof raw.disable_paste_burst === "boolean") {
     result.disable_paste_burst = raw.disable_paste_burst;
+  }
+  if (typeof raw.render_latex === "boolean") {
+    result.renderLatex = raw.render_latex;
+  }
+  if (typeof raw.cache_expiry_hint === "boolean") {
+    result.cacheExpiryHint = raw.cache_expiry_hint;
   }
   const editor = isRecord(raw.editor) ? raw.editor : {};
   if (typeof editor.command === "string" && editor.command !== "") {
@@ -118,15 +151,36 @@ function parseTuiConfigRaw(raw: Record<string, unknown>): TuiConfig {
     (TUI_NOTIFICATION_CONDITIONS as readonly string[]).includes(notifications.notification_condition)
   ) {
     result.notificationCondition = notifications.notification_condition as TuiNotificationCondition;
+  } else if (notifications.notification_condition !== undefined) {
+    warnings.push(`Unknown notification_condition: ${String(notifications.notification_condition)}`);
   }
   const upgrade = isRecord(raw.upgrade) ? raw.upgrade : {};
   if (typeof upgrade.auto_install === "boolean") {
     result.upgradeAutoInstall = upgrade.auto_install;
   }
+  const statusLine = isRecord(raw.status_line) ? raw.status_line : {};
+  const rawStatusItems = Array.isArray(statusLine.items)
+    ? statusLine.items.filter((item): item is string => typeof item === "string")
+    : undefined;
+  const statusItems = rawStatusItems === undefined ? undefined : normalizeStatusItems(rawStatusItems);
+  for (const item of rawStatusItems ?? []) {
+    if (!(TUI_STATUS_LINE_ITEMS as readonly string[]).includes(item)) {
+      warnings.push(`Unknown status_line item skipped: ${item}`);
+    }
+  }
+  const statusCommand = typeof statusLine.command === "string" ? statusLine.command : undefined;
+  if (statusItems !== undefined || statusCommand !== undefined) {
+    result.statusLine = {
+      ...(statusItems !== undefined ? { items: statusItems } : {}),
+      ...(statusCommand !== undefined ? { command: statusCommand } : {}),
+    };
+  }
   return result;
 }
 
-/**
+function normalizeStatusItems(items: readonly string[]): string[] {
+  return items.filter((item) => (TUI_STATUS_LINE_ITEMS as readonly string[]).includes(item));
+}/**
  * 把激活 profile 的 tui 目标（tui_theme -> theme、tui_editor_command -> editorCommand）
  * 渲染为 TuiConfig。两条均未设时返回空对象（此时不应写 tui.toml）。
  */
@@ -146,7 +200,7 @@ export function TuiConfigFromProfile(profile: Profile | undefined): TuiConfig {
 
 /** TuiConfig 是否有任何 GUI 管理的字段。 */
 export function hasTuiConfigValues(tui: TuiConfig): boolean {
-  return tui.theme !== undefined || tui.editorCommand !== undefined;
+  return Object.values(tui).some((value) => value !== undefined);
 }
 
 /**
@@ -181,9 +235,82 @@ export function mergeTuiConfigDocument(existing: string | null, tui: TuiConfig):
     }
   }
 
+  if (tui.disable_paste_burst !== undefined) next.disable_paste_burst = tui.disable_paste_burst;
+  if (tui.renderLatex !== undefined) next.render_latex = tui.renderLatex;
+  if (tui.cacheExpiryHint !== undefined) next.cache_expiry_hint = tui.cacheExpiryHint;
+
+  if (tui.notificationsEnabled !== undefined || tui.notificationCondition !== undefined) {
+    const notifications = isRecord(raw.notifications) ? raw.notifications : {};
+    next.notifications = {
+      ...notifications,
+      ...(tui.notificationsEnabled !== undefined ? { enabled: tui.notificationsEnabled } : {}),
+      ...(tui.notificationCondition !== undefined
+        ? { notification_condition: tui.notificationCondition }
+        : {}),
+    };
+  }
+  if (tui.upgradeAutoInstall !== undefined) {
+    const upgrade = isRecord(raw.upgrade) ? raw.upgrade : {};
+    next.upgrade = { ...upgrade, auto_install: tui.upgradeAutoInstall };
+  }
+  if (tui.statusLine !== undefined) {
+    const statusLine = isRecord(raw.status_line) ? raw.status_line : {};
+    next.status_line = {
+      ...statusLine,
+      ...(tui.statusLine.items !== undefined ? { items: normalizeStatusItems(tui.statusLine.items) } : {}),
+      ...(tui.statusLine.command !== undefined ? { command: tui.statusLine.command } : {}),
+    };
+  }
+
   const merged = stringify(next);
   if (merged === stringify(raw)) {
     return existing ?? merged;
   }
   return merged;
+}
+
+// ── E2：Explicit / Effective 单一 schema ────────────────────────────────────
+// 对齐上游 apps/kimi-code/src/tui/config.ts 的 normalizeTuiConfig 与默认值：
+// `ExplicitTuiConfig` 是文件里的显式值（未填即缺失）；`EffectiveTuiConfig`
+// 是应用官方默认值后的有效配置，serializer 仍只写显式字段。
+
+export const EFFECTIVE_TUI_DEFAULTS = {
+  theme: "auto",
+  disablePasteBurst: false,
+  renderLatex: true,
+  cacheExpiryHint: true,
+  editorCommand: null as string | null,
+  notificationsEnabled: true,
+  notificationCondition: "unfocused" as "unfocused" | "always",
+  upgradeAutoInstall: true,
+  statusLineItems: [] as string[],
+  statusLineCommand: null as string | null,
+} satisfies EffectiveTuiConfig;
+
+/** 从显式 TuiConfig 归一化为有效配置（单一 normalize schema，含 diagnostics 语义）。 */
+export function normalizeTuiConfig(explicit: TuiConfig): EffectiveTuiConfig {
+  const trimmedEditor = explicit.editorCommand?.trim();
+  const trimmedStatusCommand = explicit.statusLine?.command?.trim();
+  return {
+    theme: explicit.theme && explicit.theme.trim() !== ""
+      ? explicit.theme
+      : EFFECTIVE_TUI_DEFAULTS.theme,
+    disablePasteBurst: explicit.disable_paste_burst ?? EFFECTIVE_TUI_DEFAULTS.disablePasteBurst,
+    renderLatex: explicit.renderLatex ?? EFFECTIVE_TUI_DEFAULTS.renderLatex,
+    cacheExpiryHint: explicit.cacheExpiryHint ?? EFFECTIVE_TUI_DEFAULTS.cacheExpiryHint,
+    editorCommand: trimmedEditor && trimmedEditor.length > 0
+      ? trimmedEditor
+      : EFFECTIVE_TUI_DEFAULTS.editorCommand,
+    notificationsEnabled: explicit.notificationsEnabled
+      ?? EFFECTIVE_TUI_DEFAULTS.notificationsEnabled,
+    notificationCondition: explicit.notificationCondition
+      ?? EFFECTIVE_TUI_DEFAULTS.notificationCondition,
+    upgradeAutoInstall: explicit.upgradeAutoInstall ?? EFFECTIVE_TUI_DEFAULTS.upgradeAutoInstall,
+    statusLineItems: explicit.statusLine?.items
+      ? normalizeStatusItems(explicit.statusLine.items)
+      : EFFECTIVE_TUI_DEFAULTS.statusLineItems,
+    statusLineCommand: trimmedStatusCommand && trimmedStatusCommand.length > 0
+      ? trimmedStatusCommand
+      : EFFECTIVE_TUI_DEFAULTS.statusLineCommand,
+  };
 }

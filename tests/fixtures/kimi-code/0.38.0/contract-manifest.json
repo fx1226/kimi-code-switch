@@ -1,0 +1,104 @@
+{
+  "product": {
+    "package": "@moonshot-ai/kimi-code",
+    "version": "0.38.0",
+    "release_tag": "@moonshot-ai/kimi-code@0.38.0",
+    "release_commit": "0999454bdcb5ddd98f39bffee434dcf0a810f394",
+    "release_date": "2026-08-20"
+  },
+  "contract": {
+    "data_home_env": "KIMI_CODE_HOME",
+    "default_data_home": "~/.kimi-code",
+    "user_files": [
+      "config.toml",
+      "tui.toml",
+      "AGENTS.md",
+      "mcp.json",
+      "skills/",
+      "plugins/",
+      "session_index.jsonl",
+      "credentials/",
+      "sessions/",
+      "bin/",
+      "logs/",
+      "updates/",
+      "user-history/"
+    ],
+    "defaults": {
+      "default_permission_mode": "manual",
+      "default_plan_mode": false,
+      "merge_all_available_skills": true,
+      "builtin_product_skills": true,
+      "telemetry": true,
+      "thinking_enabled": true,
+      "thinking_keep": "all",
+      "token_counting_strategy": "measured+estimated",
+      "subagent_timeout_ms_interactive": 7200000,
+      "subagent_timeout_ms_print": 0,
+      "mcp_startup_timeout_ms": 30000,
+      "mcp_tool_timeout_ms": 60000
+    }
+  },
+  "sources": [
+    {
+      "id": "release",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/releases/tag/%40moonshot-ai%2Fkimi-code%400.38.0",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/commit/0999454bdcb5ddd98f39bffee434dcf0a810f394"
+    },
+    {
+      "id": "data-locations",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/data-locations.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/docs/en/configuration/data-locations.md"
+    },
+    {
+      "id": "config",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/config-files.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/docs/en/configuration/config-files.md"
+    },
+    {
+      "id": "config-schema",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/kosongConfig/configSection.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/packages/agent-core-v2/src/app/kosongConfig/configSection.ts"
+    },
+    {
+      "id": "mcp",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/mcp.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/docs/en/customization/mcp.md"
+    },
+    {
+      "id": "skills",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/skills.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/docs/en/customization/skills.md"
+    },
+    {
+      "id": "tui",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/apps/kimi-code/src/tui/config.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/apps/kimi-code/src/tui/config.ts"
+    },
+    {
+      "id": "command",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-command.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/docs/en/reference/kimi-command.md"
+    },
+    {
+      "id": "plugin-store",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/plugin/store.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/packages/agent-core-v2/src/app/plugin/store.ts"
+    },
+    {
+      "id": "plugin-datasource",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/plugins/official/kimi-datasource/kimi.plugin.json",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/0999454bdcb5ddd98f39bffee434dcf0a810f394/plugins/official/kimi-datasource/kimi.plugin.json"
+    }
+  ],
+  "fixtures": {
+    "config.toml": { "sources": ["config", "config-schema"] },
+    "mcp.json": { "sources": ["mcp"] },
+    "tui.toml": { "sources": ["tui", "config"] },
+    "skills/review-pr/SKILL.md": { "sources": ["skills"] },
+    "skills/release-notes.md": { "sources": ["skills"] },
+    "plugins/installed.json": { "sources": ["plugin-store"] },
+    "plugins/managed/kimi-datasource/kimi.plugin.json": { "sources": ["plugin-datasource"] },
+    "provider-registry/catalog.json": { "sources": ["command"] }
+  }
+}

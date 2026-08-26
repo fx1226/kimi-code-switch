@@ -36,12 +36,19 @@ export function parseMcpConfig(document: string | null, options?: { sourcePath?:
 
 export function parseMcpConfigStrict(document: string): McpConfig {
   const parsed = JSON.parse(document) as unknown;
-  if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) {
+  if (!isRecord(parsed)) {
+    throw new Error("Invalid MCP config: expected a JSON object.");
+  }
+  const rawServers = parsed.mcpServers ?? {};
+  if (!isRecord(rawServers)) {
     throw new Error("Invalid MCP config: expected an object with mcpServers.");
   }
 
   const mcpServers = Object.fromEntries(
-    Object.entries(parsed.mcpServers).map(([name, raw]) => [name, parseMcpServer(raw)]),
+    Object.entries(rawServers).map(([name, raw]) => {
+      validateMcpServer(name, raw);
+      return [name, parseMcpServer(raw)];
+    }),
   );
 
   return { mcpServers };
@@ -58,7 +65,7 @@ export function buildMcpConfigDocument(config: McpConfig): string {
 }
 
 function parseMcpServer(raw: unknown): McpServerConfig {
-  const data = isRecord(raw) ? raw : {};
+  const data = raw as Record<string, unknown>;
   const headers = asStringRecord(data.headers);
   const env = asStringRecord(data.env);
   const args = Array.isArray(data.args)
@@ -180,12 +187,90 @@ function normalizeMcpTransport(transport: unknown, url: unknown, command: unknow
     return "streamable-http";
   }
   if (typeof url === "string" && url.trim()) {
-    return /\/sse([/?#]|$)/.test(url) ? "sse" : "streamable-http";
+    return "streamable-http";
   }
   if (typeof command === "string" && command.trim()) {
     return "stdio";
   }
   return "streamable-http";
+}
+
+function validateMcpServer(name: string, raw: unknown): void {
+  if (!isRecord(raw)) throw new Error(`MCP server "${name}" must be an object.`);
+  const transportValue = raw.transport ?? raw.type;
+  const transport = transportValue === undefined
+    ? typeof raw.command === "string"
+      ? "stdio"
+      : typeof raw.url === "string"
+        ? "http"
+        : "invalid"
+    : transportValue === "streamable-http"
+      ? "http"
+      : transportValue;
+  if (transport !== "stdio" && transport !== "http" && transport !== "sse") {
+    throw new Error(`MCP server "${name}" has an invalid transport.`);
+  }
+  if (raw.enabled !== undefined && typeof raw.enabled !== "boolean") {
+    throw new Error(`MCP server "${name}" enabled must be boolean.`);
+  }
+  for (const key of ["startupTimeoutMs", "toolTimeoutMs"] as const) {
+    const value = raw[key];
+    if (value !== undefined && (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 2_147_483_647)) {
+      throw new Error(`MCP server "${name}" ${key} must be an integer from 1 to 2147483647.`);
+    }
+  }
+  for (const key of ["enabledTools", "disabledTools"] as const) {
+    const value = raw[key];
+    if (value !== undefined && (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))) {
+      throw new Error(`MCP server "${name}" ${key} must be a string array.`);
+    }
+  }
+  if (transport === "stdio") {
+    if (typeof raw.command !== "string" || !raw.command.length) {
+      throw new Error(`MCP server "${name}" stdio command must be non-empty.`);
+    }
+    if (raw.args !== undefined && (!Array.isArray(raw.args) || raw.args.some((entry) => typeof entry !== "string"))) {
+      throw new Error(`MCP server "${name}" args must be a string array.`);
+    }
+    if (raw.env !== undefined && !isStringRecord(raw.env)) {
+      throw new Error(`MCP server "${name}" env must contain only string values.`);
+    }
+    if (raw.cwd !== undefined && typeof raw.cwd !== "string") {
+      throw new Error(`MCP server "${name}" cwd must be a string.`);
+    }
+    if (raw.executor !== undefined && raw.executor !== "local" && raw.executor !== "kaos") {
+      throw new Error(`MCP server "${name}" executor must be local or kaos.`);
+    }
+    if (raw.runtime_id !== undefined && (typeof raw.runtime_id !== "string" || raw.runtime_id.length === 0)) {
+      throw new Error(`MCP server "${name}" runtime_id must be a non-empty string.`);
+    }
+    return;
+  }
+  if (typeof raw.url !== "string" || !isValidUrl(raw.url)) {
+    throw new Error(`MCP server "${name}" URL must be valid.`);
+  }
+  if (raw.headers !== undefined && !isStringRecord(raw.headers)) {
+    throw new Error(`MCP server "${name}" headers must contain only string values.`);
+  }
+  if (raw.auth !== undefined && raw.auth !== "oauth") {
+    throw new Error(`MCP server "${name}" auth must be oauth.`);
+  }
+  if (raw.bearerTokenEnvVar !== undefined && (typeof raw.bearerTokenEnvVar !== "string" || !raw.bearerTokenEnvVar.length)) {
+    throw new Error(`MCP server "${name}" bearerTokenEnvVar must be non-empty.`);
+  }
+}
+
+function isStringRecord(value: unknown): boolean {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isValidUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function asStringRecord(value: unknown): Record<string, string> {

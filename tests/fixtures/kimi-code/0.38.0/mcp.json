@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": { "NODE_NO_WARNINGS": "1" },
+      "cwd": "/tmp",
+      "enabled": true,
+      "startupTimeoutMs": 30000,
+      "toolTimeoutMs": 60000
+    },
+    "linear": {
+      "url": "https://mcp.linear.app/mcp",
+      "bearerTokenEnvVar": "LINEAR_TOKEN",
+      "enabledTools": ["get_issue", "list_issues"],
+      "disabledTools": ["delete_issue"]
+    },
+    "legacy-events": {
+      "transport": "sse",
+      "url": "https://mcp.example.com/sse",
+      "enabled": false
+    }
+  }
+}

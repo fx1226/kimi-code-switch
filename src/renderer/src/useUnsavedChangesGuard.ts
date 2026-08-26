@@ -11,7 +11,7 @@ interface UnsavedChangesGuardContext {
   savedState: AppState | null;
   locale: Locale;
   requestConfirm: RequestConfirm;
-  persistState: (nextState: AppState) => Promise<void>;
+  persistState: (nextState: AppState) => Promise<boolean>;
   restoreSavedState: (nextSavedState: AppState) => void;
 }
 
@@ -59,7 +59,8 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
         kind: "unsaved",
       });
       if (decision === "save") {
-        await persistState(currentState);
+        const saved = await persistState(currentState);
+        if (!saved) return "cancel";
       } else if (decision === "discard") {
         restoreSavedState(savedState);
       }
