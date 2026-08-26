@@ -1,3 +1,4 @@
+/* Application geometry. Loaded last; this is the sole shell/layout authority. */
 .boot-screen {
   display: grid;
   place-items: center;
@@ -8,48 +9,55 @@
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: clamp(264px, 19vw, 288px) minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
   overflow: hidden;
-  /* 折叠/展开时让 grid 列宽平滑过渡（WebKit 支持 grid-template-columns 动画） */
-  transition: grid-template-columns 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: grid-template-columns var(--motion-popover) var(--ease-emphasis);
 }
 
 .shell.sidebar-collapsed {
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.sidebar,
+.shell.sidebar-collapsed .sidebar {
+  width: auto;
+}
+
+.shell.sidebar-collapsed .sidebar {
+  padding-inline: 10px;
 }
 
 .main {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: calc(var(--titlebar-height) + 12px) 16px 16px 12px;
-  height: 100vh;
-  overflow: hidden;
+  gap: var(--space-3);
   min-width: 0;
   min-height: 0;
+  height: 100vh;
+  padding: calc(var(--titlebar-height) + var(--space-3)) var(--space-4) var(--space-4);
+  overflow: hidden;
   contain: layout style;
 }
 
-.content-scroll {
+.content-scroll,
+.tab-panel-shell {
   display: flex;
-  gap: 14px;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  padding-right: 2px;
+}
+
+.content-scroll {
+  gap: var(--space-4);
   align-items: stretch;
+  overflow: hidden;
   border-radius: var(--radius-lg);
 }
 
 .tab-panel-shell {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  animation: content-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: content-enter var(--motion-standard) var(--ease-emphasis) both;
 }
 
 .tab-panel-shell > .overview-grid,
@@ -62,14 +70,12 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  border-radius: var(--radius-lg);
   overflow-y: auto;
   overflow-x: hidden;
+  border-radius: var(--radius-lg);
 }
 
-.tab-panel-shell > .settings-grid {
-  background: transparent;
-}
+.tab-panel-shell > .settings-grid { background: transparent; }
 
 .tab-panel-shell-split {
   display: flex;
@@ -83,52 +89,18 @@
   overflow: hidden;
 }
 
-/* Overview dashboard */
-.overview-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  align-content: start;
-  padding: 14px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  box-shadow: var(--shadow);
-}
-
-:root[data-theme="light"] .overview-grid {
-  background: var(--panel);
-}
-
-.overview-card {
-  cursor: default;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-  border-radius: var(--radius-lg);
-  padding: 14px;
-}
-
-.overview-card-wide {
-  grid-column: 1 / -1;
-}
-
-.overview-right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-
 .split-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 336px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  gap: 18px;
+  gap: var(--space-4);
   min-width: 0;
   flex: 1 1 auto;
   align-items: stretch;
 }
 
 .split-layout-reverse {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 336px);
 }
 
 .list-panel {
@@ -140,7 +112,7 @@
   align-self: stretch;
 }
 
-.split-layout> :nth-child(2) {
+.split-layout > :nth-child(2) {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -150,159 +122,68 @@
   overflow-x: hidden;
 }
 
-.split-layout-reverse>.list-panel {
-  order: 2;
-}
+.split-layout-reverse > .list-panel { order: 2; }
+.split-layout-reverse > :nth-child(2) { order: 1; }
+.split-layout-no-list { grid-template-columns: minmax(0, 1fr); }
 
-.split-layout-reverse> :nth-child(2) {
-  order: 1;
-}
-
-/* 隐藏列表列（profiles tab 用左侧 ProfileCentricView 充当列表，仅保留编辑表单） */
-.split-layout-no-list {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/* profiles tab：ProfileCentricView 作为左栏，编辑表单占右侧 */
 .content-scroll > .profile-centric-view {
-  flex: 0 0 clamp(272px, 30%, 360px);
+  flex: 0 0 clamp(300px, 28%, 372px);
   box-sizing: border-box;
   min-width: 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--shadow);
 }
 
-
-/* ============ Responsive: 1024px (desktop) ============ */
-@media (max-width: 1024px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
-
-  .shell.sidebar-collapsed {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    width: auto;
-  }
-
-  .shell.sidebar-collapsed .brand {
-    flex-direction: row;
-    gap: 14px;
-    justify-content: flex-start;
-  }
-
-  .shell.sidebar-collapsed .brand-copy {
-    display: block;
-  }
-
-  .shell.sidebar-collapsed .sidebar-collapse-button {
-    position: static;
-    display: inline-flex;
-    width: 34px;
-    height: 34px;
-    margin-left: auto;
-    border-radius: var(--radius-md);
-    box-shadow: none;
-  }
-
-  .shell.sidebar-collapsed .brand-mark {
-    width: 54px;
-    height: 54px;
-  }
-
-  .shell.sidebar-collapsed .nav {
-    justify-items: stretch;
-  }
-
-  .shell.sidebar-collapsed .nav-item {
-    justify-content: flex-start;
-    width: 100%;
-    height: auto;
-    padding: 13px 14px;
-  }
-
-  .shell.sidebar-collapsed .nav-item > span,
-  .shell.sidebar-collapsed .nav-shortcut {
-    display: inline-flex;
-  }
-
-  .main {
-    height: auto;
-    min-height: 0;
-    padding: 0 16px 16px;
-    overflow: visible;
-  }
-
-  .content-scroll {
-    display: block;
-    overflow: visible;
-  }
-
-  .tab-panel-shell {
-    display: block;
-  }
-
-  .tab-panel-shell > .overview-grid,
-  .tab-panel-shell > .split-layout,
-  .tab-panel-shell > .settings-grid,
-  .tab-panel-shell > .about-page {
-    height: auto;
-    overflow: visible;
-  }
-
-  .summary-grid,
-  .overview-grid,
-  .overview-footer,
-  .overview-paths-compact,
-  .diagnostics-inline,
-  .diagnostics-grid,
-  .split-layout,
-  .split-layout-reverse {
-    grid-template-columns: 1fr;
-  }
-
-  .overview-hero-body {
-    grid-template-columns: 1fr;
-  }
-
-  .overview-hero-paths-grid {
-    grid-template-columns: 1fr;
-  }
+/* Independent rows prevent short cards from stretching into large empty columns. */
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-content: start;
+  padding: var(--space-4);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
-/* ============ Responsive: 1280px (wide desktop) ============ */
-@media (min-width: 1181px) and (max-width: 1280px) {
-  .shell {
-    grid-template-columns: 232px minmax(0, 1fr);
-  }
+.overview-card-wide { grid-column: 1 / -1; }
+.overview-card { border-radius: var(--radius-lg); }
 
-  .overview-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
-  }
+.overview-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
 
-  .split-layout {
-    grid-template-columns: minmax(264px, 296px) minmax(0, 1fr);
-  }
+.overview-context-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.8fr);
+  gap: var(--space-5);
+}
 
-  .split-layout-reverse {
-    grid-template-columns: minmax(0, 1fr) minmax(264px, 296px);
-  }
+@media (max-width: 1240px) {
+  .shell { grid-template-columns: 240px minmax(0, 1fr); }
+  .shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+  .split-layout { grid-template-columns: minmax(280px, 310px) minmax(0, 1fr); }
+  .overview-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-resource-grid > :first-child { grid-column: 1 / -1; }
+}
 
-  .overview-grid,
-  .overview-footer {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 1140px) {
+  .shell { grid-template-columns: 224px minmax(0, 1fr); }
+  .shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+  .main { padding-inline: var(--space-3); }
+  .split-layout { grid-template-columns: minmax(260px, 286px) minmax(0, 1fr); gap: var(--space-3); }
+  .overview-context-card { grid-template-columns: minmax(0, 1fr); }
+}
 
-  .split-layout,
-  .split-layout-reverse {
-    grid-template-columns: minmax(248px, 284px) minmax(0, 1fr);
-  }
+@media (pointer: coarse) {
+  .shell.sidebar-collapsed { grid-template-columns: 80px minmax(0, 1fr); }
 }

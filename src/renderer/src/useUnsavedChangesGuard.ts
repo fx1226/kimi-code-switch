@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 
 import { buildManagedDocuments } from "@shared/configSafety";
 import type { AppState, Locale } from "@shared/types";
-import type { ConfirmDialogState } from "./dialogs";
+import type { RequestConfirm, UnsavedDecision } from "./dialogs";
 import { collectDirtyKeys, isEqualValue } from "./appHelpers";
 import { t } from "./i18n";
 
@@ -10,7 +10,7 @@ interface UnsavedChangesGuardContext {
   state: AppState;
   savedState: AppState | null;
   locale: Locale;
-  requestConfirm: (options: ConfirmDialogState) => Promise<boolean>;
+  requestConfirm: RequestConfirm;
   persistState: (nextState: AppState) => Promise<void>;
   restoreSavedState: (nextSavedState: AppState) => void;
 }
@@ -39,26 +39,31 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
     ? collectDirtyKeys(state.mcpConfig.mcpServers, savedState.mcpConfig.mcpServers)
     : new Set<string>();
 
-  const resolveUnsavedChanges = useCallback(async (): Promise<void> => {
+  const resolveUnsavedChanges = useCallback(async (): Promise<UnsavedDecision | "unchanged"> => {
     const currentState = state;
-    if (!currentState || !hasUnsavedChanges || !savedState || unsavedResolutionRef.current) {
-      return;
+    if (!currentState || !hasUnsavedChanges || !savedState) {
+      return "unchanged";
+    }
+    if (unsavedResolutionRef.current) {
+      return "cancel";
     }
     unsavedResolutionRef.current = true;
     try {
-      const shouldSave = await requestConfirm({
+      const decision = await requestConfirm({
         title: t(locale, "unsavedChangesTitle"),
         description: t(locale, "unsavedChangesDescription"),
         confirmLabel: t(locale, "save"),
-        cancelLabel: t(locale, "discardChanges"),
+        discardLabel: t(locale, "discardChanges"),
+        cancelLabel: t(locale, "cancel"),
         tone: "primary",
-        kind: "save",
+        kind: "unsaved",
       });
-      if (shouldSave) {
+      if (decision === "save") {
         await persistState(currentState);
-      } else {
+      } else if (decision === "discard") {
         restoreSavedState(savedState);
       }
+      return decision;
     } finally {
       unsavedResolutionRef.current = false;
     }
@@ -74,21 +79,13 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
 
   const runAfterUnsavedHandled = useCallback((action: () => void | Promise<void>): void => {
     void (async () => {
-      await resolveUnsavedChanges();
+      const decision = await resolveUnsavedChanges();
+      if (decision === "cancel") {
+        return;
+      }
       await action();
     })();
   }, [resolveUnsavedChanges]);
-
-  useEffect(() => {
-    if (!hasUnsavedChanges) {
-      return;
-    }
-    const handleBlur = (): void => {
-      void resolveUnsavedChanges();
-    };
-    window.addEventListener("blur", handleBlur);
-    return () => window.removeEventListener("blur", handleBlur);
-  }, [hasUnsavedChanges, resolveUnsavedChanges]);
 
   return {
     unsavedResolutionRef,

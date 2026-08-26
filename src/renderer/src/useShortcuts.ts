@@ -16,7 +16,10 @@ const TAB_ACTIONS: Partial<Record<ShortcutAction, TabId>> = {
   "tab.settings": "settings",
 };
 
-const ALLOW_IN_EDITABLE: Set<ShortcutAction> = new Set(["app.globalSearch"]);
+const ALLOW_IN_EDITABLE: Set<ShortcutAction> = new Set([
+  "app.globalSearch",
+  "app.quickProfileSwitch",
+]);
 
 export function useShortcuts(options: {
   shortcuts: Record<ShortcutAction, ShortcutBinding>;
@@ -25,6 +28,7 @@ export function useShortcuts(options: {
   onRefresh: () => void;
   onNavigate: (tab: TabId) => void;
   onGlobalSearch: () => void;
+  onQuickProfileSwitch: () => void;
 }): void {
   useEffect(() => {
     const bindings = new Map<string, ShortcutAction>();
@@ -96,6 +100,7 @@ function executeShortcutAction(
     onRefresh: () => void;
     onNavigate: (tab: TabId) => void;
     onGlobalSearch: () => void;
+    onQuickProfileSwitch: () => void;
   },
 ): void {
   if (action === "app.save") {
@@ -108,6 +113,10 @@ function executeShortcutAction(
   }
   if (action === "app.globalSearch") {
     options.onGlobalSearch();
+    return;
+  }
+  if (action === "app.quickProfileSwitch") {
+    options.onQuickProfileSwitch();
     return;
   }
   if (action === "app.refresh") {

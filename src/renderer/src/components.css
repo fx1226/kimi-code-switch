@@ -69,20 +69,6 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
-.shell {
-  position: relative;
-  display: grid;
-  grid-template-columns: clamp(272px, 22vw, 310px) minmax(0, 1fr);
-  min-width: 0;
-  height: 100vh;
-  overflow: hidden;
-  /* No transition on grid - layout changes are instant */
-}
-
-.shell.sidebar-collapsed {
-  grid-template-columns: 118px 1fr;
-}
-
 .window-titlebar {
   position: fixed;
   top: 0;
@@ -653,7 +639,7 @@ textarea:focus-visible {
 .action-button-primary {
   background: var(--primary);
   border-color: transparent;
-  color: #ffffff;
+  color: var(--on-primary);
 }
 
 .action-button-primary:hover {
@@ -681,68 +667,6 @@ textarea:focus-visible {
 :root[data-theme="light"] .action-button.danger {
   color: var(--danger);
   border-color: rgba(var(--danger-rgb), 0.3);
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: calc(var(--titlebar-height) + 12px) 16px 16px 12px;
-  height: 100vh;
-  overflow: hidden;
-  min-width: 0;
-  min-height: 0;
-  contain: layout style;
-}
-
-.content-scroll {
-  display: flex;
-  gap: 14px;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  padding-right: 2px;
-  align-items: stretch;
-}
-
-.tab-panel-shell {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  animation: content-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.tab-panel-shell > .overview-grid,
-.tab-panel-shell > .split-layout,
-.tab-panel-shell > .settings-grid,
-.tab-panel-shell > .about-page,
-.tab-panel-shell > .insights-dashboard,
-.tab-panel-shell > .insights-dashboard-empty {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  border-radius: var(--radius-lg);
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-.tab-panel-shell > .settings-grid {
-  background: transparent;
-}
-
-.tab-panel-shell-split {
-  display: flex;
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-}
-
-.tab-panel-shell-split > .split-layout {
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
 }
 
 .confirm-dialog-backdrop,
@@ -2456,39 +2380,6 @@ textarea:focus-visible {
   line-height: 1.7;
 }
 
-/* Overview dashboard */
-.overview-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  align-content: start;
-  padding: 14px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  box-shadow: var(--shadow);
-}
-
-:root[data-theme="light"] .overview-grid {
-  background: var(--panel);
-}
-
-.overview-card {
-  cursor: default;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-  border-radius: var(--radius-lg);
-  padding: 14px;
-}
-
-.overview-card-wide {
-  grid-column: 1 / -1;
-}
-
-.overview-right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 /* Hero card — system overview */
 .overview-hero {
   background: var(--panel);
@@ -3414,47 +3305,6 @@ textarea:focus-visible {
   color: var(--text);
 }
 
-.split-layout {
-  display: grid;
-  grid-template-columns: minmax(256px, 284px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  gap: 14px;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: stretch;
-}
-
-.split-layout-reverse {
-  grid-template-columns: minmax(0, 1fr) minmax(256px, 284px);
-}
-
-.list-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  align-self: stretch;
-}
-
-.split-layout> :nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-  align-self: stretch;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-.split-layout-reverse>.list-panel {
-  order: 2;
-}
-
-.split-layout-reverse> :nth-child(2) {
-  order: 1;
-}
-
 .list-header {
   display: flex;
   justify-content: space-between;
@@ -4120,8 +3970,8 @@ textarea:focus-visible {
 .list-activate-button {
   min-width: 46px;
   background:
-    linear-gradient(135deg, rgba(87, 177, 255, 0.14), rgba(132, 247, 211, 0.14)),
-    rgba(255, 255, 255, 0.03);
+    linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--primary-2-rgb), 0.14)),
+    var(--surface-quiet);
   color: var(--primary);
 }
 
@@ -4217,7 +4067,7 @@ textarea:focus-visible {
 .list-delete-button:hover,
 .list-delete-button:focus-visible {
   border-color: var(--line);
-  background: rgba(87, 177, 255, 0.1);
+  background: var(--surface-hover);
   color: var(--text);
   outline: none;
   transform: translateY(-1px);
@@ -8845,7 +8695,7 @@ textarea:focus-visible {
 .action-button.primary {
   background: var(--primary);
   border-color: transparent;
-  color: #ffffff;
+  color: var(--on-primary);
 }
 
 .action-button.primary:hover {

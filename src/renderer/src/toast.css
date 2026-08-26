@@ -91,13 +91,14 @@
   color: var(--text);
 }
 
-.toast-close {
+.toast-close,
+.toast-copy {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--icon-target-size);
+  height: var(--icon-target-size);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -106,12 +107,14 @@
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.toast-close:hover {
+.toast-close:hover,
+.toast-copy:hover {
   background: rgba(var(--primary-rgb), 0.1);
   color: var(--text);
 }
 
-.toast-close:active {
+.toast-close:active,
+.toast-copy:active {
   transform: scale(0.95);
 }
 

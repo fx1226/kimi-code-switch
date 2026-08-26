@@ -9,7 +9,8 @@ import { CodePanel } from "./codePanel";
 import { t } from "./i18n";
 
 export type ConfirmDialogTone = "primary" | "danger";
-export type ConfirmDialogKind = "save" | "delete";
+export type ConfirmDialogKind = "save" | "delete" | "unsaved";
+export type UnsavedDecision = "save" | "discard" | "cancel";
 
 export interface ConfirmDialogState {
   title: string;
@@ -18,6 +19,18 @@ export interface ConfirmDialogState {
   cancelLabel: string;
   tone: ConfirmDialogTone;
   kind: ConfirmDialogKind;
+  discardLabel?: string;
+  onDiscard?: () => void;
+}
+
+export type UnsavedConfirmDialogState = ConfirmDialogState & {
+  kind: "unsaved";
+  discardLabel: string;
+};
+
+export interface RequestConfirm {
+  (options: UnsavedConfirmDialogState): Promise<UnsavedDecision>;
+  (options: ConfirmDialogState): Promise<boolean>;
 }
 
 export interface DocumentViewerState {
@@ -57,6 +70,9 @@ export function DialogShell(props: {
   dialogRef?: RefObject<HTMLElement | null>;
   children: React.ReactNode;
 }): JSX.Element {
+  const internalDialogRef = useRef<HTMLElement>(null);
+  useFocusTrap(internalDialogRef);
+
   return createPortal(
     <div
       className={props.backdropClassName}
@@ -67,7 +83,17 @@ export function DialogShell(props: {
         }
       }}
     >
-      <section ref={props.dialogRef} className={props.dialogClassName} role="dialog" aria-modal="true">
+      <section
+        ref={(element) => {
+          internalDialogRef.current = element;
+          if (props.dialogRef) {
+            props.dialogRef.current = element;
+          }
+        }}
+        className={props.dialogClassName}
+        role="dialog"
+        aria-modal="true"
+      >
         {props.children}
       </section>
     </div>,
@@ -76,7 +102,7 @@ export function DialogShell(props: {
 }
 
 const FOCUSABLE_SELECTOR =
-  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
   const handleKeyDown = useCallback(
@@ -95,6 +121,12 @@ export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
 
+      if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+
       if (event.shiftKey) {
         if (document.activeElement === first) {
           event.preventDefault();
@@ -111,8 +143,49 @@ export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
   );
 
   useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const inertedSiblings: HTMLElement[] = [];
+    let branch: HTMLElement | null = dialog;
+    while (branch?.parentElement) {
+      const parent = branch.parentElement;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("inert")) {
+          sibling.setAttribute("inert", "");
+          sibling.setAttribute("aria-hidden", "true");
+          inertedSiblings.push(sibling);
+        }
+      }
+      branch = parent;
+      if (parent === document.body) break;
+    }
+    const initialFocus = dialog.querySelector<HTMLElement>(
+      `[data-dialog-initial-focus], ${FOCUSABLE_SELECTOR}`,
+    );
+    if (initialFocus) {
+      initialFocus.focus();
+    } else {
+      dialog.tabIndex = -1;
+      dialog.focus();
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      for (const sibling of inertedSiblings) {
+        sibling.removeAttribute("inert");
+        sibling.removeAttribute("aria-hidden");
+      }
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus();
+      }
+    };
   }, [handleKeyDown]);
 }
 
@@ -174,20 +247,25 @@ export function ConfirmDialog(
         }
       }}
     >
-      <section ref={dialogRef} className="confirm-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <section ref={dialogRef} className="confirm-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby={props.description ? "confirm-dialog-description" : undefined}>
         <div className="confirm-dialog-header">
           <div className={props.tone === "danger" ? "confirm-dialog-icon danger" : "confirm-dialog-icon"}>
             <Icon size={20} />
           </div>
           <div className="confirm-dialog-copy">
             <h3 id="confirm-dialog-title">{props.title}</h3>
-            {props.description ? <p>{props.description}</p> : null}
+            {props.description ? <p id="confirm-dialog-description">{props.description}</p> : null}
           </div>
         </div>
         <div className="confirm-dialog-actions">
-          <button className="action-button" type="button" onClick={props.onCancel}>
+          <button className="action-button" type="button" data-dialog-initial-focus={props.tone === "danger" || props.kind === "unsaved" ? "true" : undefined} onClick={props.onCancel}>
             {props.cancelLabel}
           </button>
+          {props.kind === "unsaved" && props.discardLabel && props.onDiscard ? (
+            <button className="action-button danger" type="button" onClick={props.onDiscard}>
+              {props.discardLabel}
+            </button>
+          ) : null}
           <button
             className={
               props.tone === "danger"

@@ -21,7 +21,7 @@ import { resolveModelPricing } from "@shared/pricing";
 import { getApi } from "./appHelpers";
 import {
   labelForLocale, MODEL_CAPABILITY_OPTIONS, PERMISSION_MODE_OPTIONS,
-  PROVIDER_TYPE_OPTIONS, THINKING_EFFORT_OPTIONS, UI_FONT_SIZE_OPTIONS,
+  PROVIDER_TYPE_OPTIONS, THINKING_EFFORT_OPTIONS,
 } from "./appOptions";
 import { useDialogEscape, useFocusTrap } from "./dialogs";
 import { parseEndpointUrl } from "./endpointUtils";
@@ -987,12 +987,14 @@ export function ModelForm(props: {
         value={props.value}
         onChange={props.onChange}
       />
-      <ModelPricingEditor
-        locale={props.locale}
-        model={props.value.model}
-        pricing={props.value.pricing}
-        onChange={handlePricingChange}
-      />
+      <AdvancedCollapse label={t(props.locale, "costEstimate")}>
+        <ModelPricingEditor
+          locale={props.locale}
+          model={props.value.model}
+          pricing={props.value.pricing}
+          onChange={handlePricingChange}
+        />
+      </AdvancedCollapse>
       <ActionFooter
         onSave={props.onSave}
         onDelete={props.onDelete}
@@ -1347,7 +1349,9 @@ export function McpServerForm(props: {
           />
         </>
       )}
-      <McpToolWorkbench key={props.name} locale={props.locale} serverName={props.name} server={props.value} />
+      <AdvancedCollapse label={t(props.locale, "mcpToolWorkbenchTitle")}>
+        <McpToolWorkbench key={props.name} locale={props.locale} serverName={props.name} server={props.value} />
+      </AdvancedCollapse>
       <ActionFooter
         onSave={props.onSave}
         onDelete={props.onDelete}
@@ -1536,16 +1540,18 @@ export function ProfileForm(props: {
         options={PERMISSION_MODE_OPTIONS.map((option) => ({ value: option.value, label: labelForLocale(option.label, props.locale) }))}
       />
       <Toggle label={t(props.locale, "formThinking")} checked={value.thinking_enabled !== false} onChange={(checked) => props.onChange(props.name, { ...value, thinking_enabled: checked })} />
-      <SelectField
-        label={t(props.locale, "formEffort")}
-        value={value.thinking_effort || ""}
-        onChange={(next) => props.onChange(props.name, { ...value, thinking_effort: next || undefined })}
-        options={[{ value: "", label: t(props.locale, "formEffortDefault") }, ...THINKING_EFFORT_OPTIONS.map((option) => ({ value: option.value, label: labelForLocale(option.label, props.locale) }))]}
-      />
-      <Toggle label={t(props.locale, "formPlanMode")} checked={value.default_plan_mode} onChange={(checked) => props.onChange(props.name, { ...value, default_plan_mode: checked })} />
-      <Toggle label={t(props.locale, "formMergeSkills")} checked={value.merge_all_available_skills} onChange={(checked) => props.onChange(props.name, { ...value, merge_all_available_skills: checked })} />
-      <Field label={t(props.locale, "formTuiTheme")} value={value.tui_theme || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_theme: next || undefined })} />
-      <Field label={t(props.locale, "formTuiEditor")} value={value.tui_editor_command || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_editor_command: next || undefined })} />
+      <AdvancedCollapse label={t(props.locale, "profileAdvanced")}>
+        <SelectField
+          label={t(props.locale, "formEffort")}
+          value={value.thinking_effort || ""}
+          onChange={(next) => props.onChange(props.name, { ...value, thinking_effort: next || undefined })}
+          options={[{ value: "", label: t(props.locale, "formEffortDefault") }, ...THINKING_EFFORT_OPTIONS.map((option) => ({ value: option.value, label: labelForLocale(option.label, props.locale) }))]}
+        />
+        <Toggle label={t(props.locale, "formPlanMode")} checked={value.default_plan_mode} onChange={(checked) => props.onChange(props.name, { ...value, default_plan_mode: checked })} />
+        <Toggle label={t(props.locale, "formMergeSkills")} checked={value.merge_all_available_skills} onChange={(checked) => props.onChange(props.name, { ...value, merge_all_available_skills: checked })} />
+        <Field label={t(props.locale, "formTuiTheme")} value={value.tui_theme || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_theme: next || undefined })} />
+        <Field label={t(props.locale, "formTuiEditor")} value={value.tui_editor_command || ""} onChange={(next) => props.onChange(props.name, { ...value, tui_editor_command: next || undefined })} />
+      </AdvancedCollapse>
       <ActionFooter
         onSave={props.onSave}
         onDelete={props.onDelete}
@@ -1918,9 +1924,7 @@ export function applyUiFontSize(size: UiFontSize): void {
   if (typeof document === "undefined") {
     return;
   }
-  const fontSize =
-    UI_FONT_SIZE_OPTIONS.find((option) => option.value === size)?.fontSize ?? "16px";
-  document.documentElement.style.fontSize = fontSize;
+  document.documentElement.style.removeProperty("font-size");
   document.documentElement.dataset.uiFontSize = size;
 }
 

@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
-import { Activity, AlertCircle, BarChart3, CheckCircle2, Clock, Cpu, Database, HardDrive, LineChart, PieChart as PieIcon, Power, Table as TableIcon, Terminal, TrendingUp, User, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, AlertCircle, BarChart3, CheckCircle2, Clock, Cpu, Database, HardDrive, LineChart, LoaderCircle, PieChart as PieIcon, Power, Table as TableIcon, Terminal, TrendingUp, User, Zap } from "lucide-react";
 import type { DisplayCurrency, Locale } from "@shared/types";
 import type { InsightsSettings } from "@shared/usageTypes";
 import { formatCostWithCurrency, DEFAULT_CURRENCY_RATES, SUPPORTED_CURRENCIES } from "@shared/currency";
 import { estimateMonthlyCost } from "@shared/costEstimate";
+import { shouldShowFirstRunDialog } from "@shared/usageStore";
+import { useDialogEscape, useFocusTrap } from "./dialogs";
 import { t } from "./i18n";
 import { CompactSelect, SettingsGroup, SelectField } from "./formControls";
 import { ToastContainer } from "./Toast";
@@ -69,9 +71,12 @@ interface FirstRunDialogProps {
 }
 
 export function FirstRunDialog({ locale, onConfirm, onCancel }: FirstRunDialogProps): JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogEscape(onCancel);
+  useFocusTrap(dialogRef);
   return (
     <div className="insights-first-run-backdrop">
-      <div className="glass-panel insights-first-run-dialog" role="dialog" aria-modal="true" aria-labelledby="insights-first-run-title">
+      <div ref={dialogRef} className="glass-panel insights-first-run-dialog" role="dialog" aria-modal="true" aria-labelledby="insights-first-run-title">
         <div className="insights-first-run-header">
           <div className="insights-first-run-icon">
             <TrendingUp size={24} />
@@ -122,6 +127,7 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
   const [loading, setLoading] = useState(false);
   const [storageInfo, setStorageInfo] = useState<{ totalBytes: number; exceedsWarn: boolean } | null>(null);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [showFirstRunDialog, setShowFirstRunDialog] = useState(false);
   const { toasts, showToast, removeToast } = useToast();
 
   const loadStatus = async (): Promise<void> => {
@@ -152,7 +158,7 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
     void loadStorage();
   }, []);
 
-  const handleEnable = async (): Promise<void> => {
+  const enableInsights = async (): Promise<void> => {
     setLoading(true);
     try {
       const result = await window.kimiSwitch.usageEnable();
@@ -168,6 +174,14 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEnable = async (): Promise<void> => {
+    if (settings && shouldShowFirstRunDialog(settings)) {
+      setShowFirstRunDialog(true);
+      return;
+    }
+    await enableInsights();
   };
 
   const handleDisable = async (): Promise<void> => {
@@ -235,7 +249,20 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
 
   return (
     <>
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer locale={locale} toasts={toasts} onRemove={removeToast} />
+      {showFirstRunDialog ? (
+        <FirstRunDialog
+          locale={locale}
+          onCancel={() => setShowFirstRunDialog(false)}
+          onConfirm={() => {
+            void (async () => {
+              setShowFirstRunDialog(false);
+              await window.kimiSwitch.usageSetConfig({ insights_onboarding_shown_at: new Date().toISOString() });
+              await enableInsights();
+            })();
+          }}
+        />
+      ) : null}
       <div className="settings-tab-panel">
         {/* 状态概览 */}
         <SettingsGroup title={t(locale, "insightsStatus")}>
@@ -523,6 +550,8 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
   const initialPrefs = loadUiPrefs();
   const [activeTab, setActiveTab] = useState<InsightsTab>(initialPrefs.activeTab);
   const [settings, setSettings] = useState<InsightsSettings | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState("");
   const [overview, setOverview] = useState<{
     totalCalls: number; totalTokens: number; cacheHitRate: number;
     reasoningTokens: number; avgLatencyMs: number; errorRate: number;
@@ -563,11 +592,19 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
   };
 
   const loadStatus = async (): Promise<void> => {
+    setStatusLoading(true);
+    setStatusError("");
     try {
       const result = await window.kimiSwitch.usageGetStatus();
-      if (result.ok) setSettings(result.settings);
+      if (result.ok) {
+        setSettings(result.settings);
+      } else {
+        setStatusError(t(locale, "insightsToastLoadError"));
+      }
     } catch (err) {
-      console.error("Failed to load insights status:", err);
+      setStatusError(`${t(locale, "insightsToastLoadError")}: ${String(err)}`);
+    } finally {
+      setStatusLoading(false);
     }
   };
 
@@ -614,6 +651,11 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
         setCostByDay(costRes.value.byDay);
         setCostByModel(costRes.value.byModel);
       }
+      const partialFailures = [overviewRes, trendRes, breakdownModelRes, breakdownProfileRes, sessionsRes, costRes]
+        .filter((result) => result.status === "rejected" || !result.value.ok).length;
+      if (partialFailures > 0) {
+        showToast(`${t(locale, "insightsToastLoadError")} (${partialFailures}/6)`, "error");
+      }
     } catch (err) {
       showToast(`${t(locale, "insightsToastLoadError")}: ${String(err)}`, "error");
     } finally {
@@ -630,6 +672,12 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
   }, [timeRangeKey, timeRangeMode, customFrom, customTo]);
 
   const isEnabled = settings?.insights_status === "enabled";
+  if (statusLoading) {
+    return <div className="insights-dashboard-empty" role="status"><LoaderCircle size={32} className="button-spinner" /><h2 className="insights-empty-title">{t(locale, "loading")}</h2></div>;
+  }
+  if (statusError) {
+    return <div className="insights-dashboard-empty" role="alert"><AlertCircle size={40} /><h2 className="insights-empty-title">{t(locale, "insightsToastLoadError")}</h2><p className="insights-empty-description">{statusError}</p><button type="button" className="insights-button-primary" onClick={() => void loadStatus()}>{t(locale, "reload")}</button></div>;
+  }
   if (!isEnabled) {
     return (
       <div className="insights-dashboard-empty">
@@ -901,7 +949,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
           </div>
         )}
       </div>
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer locale={locale} toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

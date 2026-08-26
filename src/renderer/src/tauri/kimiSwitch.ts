@@ -995,7 +995,9 @@ export function installKimiSwitchTauri(): void {
 
   // 监听窗口关闭事件：根据 close_behavior 决定是隐藏到托盘还是退出
   const mainWindow = getCurrentWindow();
+  let allowConfirmedClose = false;
   void mainWindow.onCloseRequested(async (event) => {
+    if (allowConfirmedClose) return;
     // 读取当前设置
     const closeBehavior = currentAppState?.panelSettings.close_behavior ?? "quit";
     const trayEnabled = currentAppState?.panelSettings.tray_icon ?? false;
@@ -1009,8 +1011,33 @@ export function installKimiSwitchTauri(): void {
       await invoke("set_dock_icon_visibility", { visible: false }).catch((err) => {
         console.error("Failed to hide dock icon:", err);
       });
+      return;
     }
-    // 否则允许默认行为（退出应用）
+
+    // 真正退出前交给 renderer 的未保存守卫处理；取消时保持窗口打开。
+    event.preventDefault();
+    const shouldClose = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let handled = false;
+      const finish = (allow: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(allow);
+      };
+      window.dispatchEvent(new CustomEvent("kimi-before-close", {
+        detail: {
+          acknowledge: () => { handled = true; },
+          resolve: finish,
+        },
+      }));
+      window.setTimeout(() => {
+        if (!handled) finish(true);
+      }, 0);
+    });
+    if (shouldClose) {
+      allowConfirmedClose = true;
+      await mainWindow.close();
+    }
   });
 
   // 监听窗口显示事件：恢复 Dock 图标

@@ -779,15 +779,12 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             diagnostics={diagnostics}
             skillsReport={skillsReport}
             mcpEntries={mcpEntries}
-            onActivateProfile={(name) =>
-              updateState((draft) => {
-                applyProfile(draft, name);
-              }, {
-                persist: true,
-                historySummary: formatMessage(t(locale, "historyActivateProfile"), { name }),
-              })
-            }
-            onNavigate={(tab) => runAfterUnsavedHandled(() => setActiveTab(tab))}
+            onNavigate={(tab, item) => runAfterUnsavedHandled(() => {
+              setActiveTab(tab);
+              if (tab === "profiles" && item) setSelectedProfile(item);
+              if (tab === "providers" && item) setSelectedProvider(item);
+              if (tab === "models" && item) setSelectedModel(item);
+            })}
           />
         ) : null}
 
@@ -820,6 +817,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             }
             listTitle={t(locale, "providers")}
             listItems={providerEntries.map(([name]) => name)}
+            searchPlaceholder={t(locale, "searchResources")}
+            renderItemLabel={(name) => {
+              const provider = state.mainConfig.providers[name];
+              return <span className="list-label-stack"><strong>{name}</strong><small>{provider?.type || "-"}</small></span>;
+            }}
             dirtyItems={dirtyProviders}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedProviderName}
@@ -868,9 +870,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               })
             }
             addLabel={t(locale, "newProvider")}
-            addButtonClassName="action-button compact icon-only"
+            addButtonClassName="action-button compact"
             addButtonTitle={t(locale, "newProvider")}
-            addButtonContent={<Plus size={15} />}
+            addButtonContent={<><Plus size={15} /><span>{t(locale, "newProvider")}</span></>}
             onAdd={() =>
               updateState((draft) => {
                 const name = createUniqueName("provider", Object.keys(draft.mainConfig.providers));
@@ -929,7 +931,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 }}
               />
             ) : (
-              <EmptyState locale={locale} />
+              <EmptyState locale={locale} hasItems={providerEntries.length > 0} />
             )}
           </SplitLayout>
         ) : null}
@@ -938,6 +940,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           <SplitLayout
             listTitle={t(locale, "models")}
             listItems={modelEntries.map(([name]) => name)}
+            searchPlaceholder={t(locale, "searchResources")}
+            renderItemLabel={(name) => {
+              const model = state.mainConfig.models[name];
+              return <span className="list-label-stack"><strong>{model?.model || name}</strong><small>{model?.provider || "-"}</small></span>;
+            }}
             dirtyItems={dirtyModels}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedModelName}
@@ -1002,9 +1009,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               })
             }
             addLabel={t(locale, "newModel")}
-            addButtonClassName="action-button compact icon-only"
+            addButtonClassName="action-button compact"
             addButtonTitle={!hasProviders ? t(locale, "tooltipAddProviderFirst") : t(locale, "newModel")}
-            addButtonContent={<Plus size={15} />}
+            addButtonContent={<><Plus size={15} /><span>{t(locale, "newModel")}</span></>}
             addButtonDisabled={!hasProviders}
             onAdd={() =>
               updateState((draft) => {
@@ -1079,7 +1086,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 }}
               />
             ) : (
-              <EmptyState locale={locale} />
+              <EmptyState locale={locale} hasItems={modelEntries.length > 0} />
             )}
           </SplitLayout>
         ) : null}
@@ -1205,11 +1212,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                         title={t(locale, "activate")}
                         onClick={(event) => {
                           event.stopPropagation();
-                          updateState((draft) => {
+                          runAfterUnsavedHandled(() => updateState((draft) => {
                             applyProfile(draft, name);
                           }, {
                             historySummary: formatMessage(t(locale, "historyActivateProfile"), { name }),
-                          });
+                          }));
                         }}
                       >
                         {t(locale, "activate")}
@@ -1276,11 +1283,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   }
                 }}
                 onActivate={() =>
-                  updateState((draft) => {
+                  runAfterUnsavedHandled(() => updateState((draft) => {
                     applyProfile(draft, selectedProfileName);
                   }, {
                     historySummary: formatMessage(t(locale, "historyActivateProfile"), { name: selectedProfileName }),
-                  })
+                  }))
                 }
                 onClone={() =>
                   updateState((draft) => {
@@ -1306,7 +1313,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 }}
               />
             ) : (
-              <EmptyState locale={locale} />
+              <EmptyState locale={locale} hasItems={profileEntries.length > 0} />
             )}
           </SplitLayout>
         ) : null}
@@ -1315,6 +1322,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           <SplitLayout
             listTitle={t(locale, "mcpServers")}
             listItems={mcpEntries.map(([name]) => name)}
+            searchPlaceholder={t(locale, "searchResources")}
+            renderItemLabel={(name) => {
+              const server = state.mcpConfig.mcpServers[name];
+              return <span className="list-label-stack"><strong>{name}</strong><small>{server?.transport || "stdio"}</small></span>;
+            }}
             dirtyItems={dirtyMcpServers}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedMcpServerName}
@@ -1358,9 +1370,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 </button>
               </>
             }
-            addButtonClassName="action-button compact icon-only"
+            addButtonClassName="action-button compact"
             addButtonTitle={t(locale, "newMcpServer")}
-            addButtonContent={<Plus size={15} />}
+            addButtonContent={<><Plus size={15} /><span>{t(locale, "newMcpServer")}</span></>}
             itemClassName={(name) =>
               state.mcpConfig.mcpServers[name]?.enabled === false ? "disabled" : null
             }
@@ -1486,7 +1498,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   }}
                 />
               ) : (
-                <EmptyState locale={locale} />
+                <EmptyState locale={locale} hasItems={mcpEntries.length > 0} />
               )}
               {isMcpJsonViewerOpen ? (
                 <McpJsonViewerDialog
@@ -1503,6 +1515,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           <SplitLayout
             listTitle={t(locale, "skillsDirectory")}
             listItems={sortedSkillPathEntries.map((path) => path.id)}
+            searchPlaceholder={t(locale, "searchResources")}
             itemLabel={(item) => {
               const path = sortedSkillPathEntries.find((entry) => entry.id === item);
               return path ? formatSkillPathLabel(path, locale) : item;
@@ -1596,6 +1609,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
           <section className="glass-panel form-panel settings-grid settings-detail-panel">
             <div className="section-title">
               {settingsSubTabs.find((tab) => tab.id === activeSettingsSubTab)?.label ?? t(locale, "settings")}
+              <span className="autosave-status">{t(locale, "changesAutoSaved")}</span>
             </div>
             {activeSettingsSubTab === "kimi-code" ? (
               <div className="settings-tab-panel">
@@ -2525,11 +2539,14 @@ function FullBackupImportDialog(props: {
   onCancel: () => void;
 }): JSX.Element {
   const { locale, envCount, hasRedactedSecrets, isImporting, onConfirm, onCancel } = props;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogEscape(onCancel);
+  useFocusTrap(dialogRef);
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div className="dialog import-preview-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="dialog-overlay" role="presentation">
+      <div className="dialog import-preview-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="full-backup-import-title">
         <div className="dialog-header">
-          <h3>{t(locale, "fullBackupImportTitle")}</h3>
+          <h3 id="full-backup-import-title">{t(locale, "fullBackupImportTitle")}</h3>
           <button className="icon-button" type="button" onClick={onCancel} aria-label={t(locale, "close")}>
             <X size={16} />
           </button>
@@ -2574,11 +2591,14 @@ function CreateKimiCodeEnvironmentDialog(props: {
       label: environment.name || environment.id,
     })),
   ];
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogEscape(onCancel);
+  useFocusTrap(dialogRef);
   return createPortal(
     <div className="dialog-overlay" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onCancel();
     }}>
-      <div className="dialog create-environment-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="dialog create-environment-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dialog-header">
           <h3 id={titleId}>{t(locale, "kimiCodeEnvironmentCreateTitle")}</h3>
           <button className="icon-button" type="button" aria-label={t(locale, "close")} title={t(locale, "close")} onClick={onCancel}>

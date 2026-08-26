@@ -27,10 +27,10 @@ export function CascadeDeleteDialog(props: CascadeDeleteDialogProps): JSX.Elemen
   const totalAffected = impact.affectedModels.length + impact.affectedProfiles.length;
 
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
-      <div className="dialog cascade-delete-dialog" ref={dialogRef} onClick={(e) => e.stopPropagation()}>
+    <div className="dialog-overlay" role="presentation">
+      <div className="dialog cascade-delete-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="cascade-delete-title">
         <div className="dialog-header">
-          <h3>
+          <h3 id="cascade-delete-title">
             <AlertTriangle size={18} />
             {formatMessage(t(locale, "cascadeWarningTitle"), { type: targetType, name: targetName })}
           </h3>

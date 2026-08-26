@@ -16,7 +16,7 @@ export interface DiagnosticsState {
   lastError: string;
 }
 
-type OverviewTabId = "profiles" | "providers" | "models";
+type OverviewTabId = "profiles" | "providers" | "models" | "mcp" | "skills";
 type CliVersionState = {
   version: string;
   installed: boolean;
@@ -48,20 +48,15 @@ export function OverviewDashboard(props: {
   diagnostics: DiagnosticsState;
   skillsReport: AppState["skillsReport"];
   mcpEntries: [string, McpServerConfig][];
-  onActivateProfile: (name: string) => void;
-  onNavigate: (tab: OverviewTabId) => void;
+  onNavigate: (tab: OverviewTabId, item?: string) => void;
 }): JSX.Element {
-  const { state, locale, diagnostics, skillsReport, mcpEntries, onActivateProfile, onNavigate } = props;
+  const { state, locale, diagnostics, skillsReport, mcpEntries, onNavigate } = props;
   const activeProfile = state.profiles[state.activeProfile];
   const providerEntries = Object.entries(state.mainConfig.providers);
   const modelEntries = Object.entries(state.mainConfig.models);
   const profileEntries = Object.entries(state.profiles);
 
   const activeProfileDisplayName = activeProfile?.label?.trim() || state.activeProfile || "-";
-  const visibleProviders = providerEntries.slice(0, 3);
-  const visibleModels = modelEntries.slice(0, 3);
-  const visibleProfiles = profileEntries.slice(0, 4);
-
   const [cliVersion, setCliVersion] = useState<CliVersionState>(() => cliVersionFromDetection(state.kimiTargetDetection));
   const [isCliVersionChecking, setIsCliVersionChecking] = useState(false);
   const [isCliUpdating, setIsCliUpdating] = useState(false);
@@ -122,6 +117,19 @@ export function OverviewDashboard(props: {
   const resolveProfileModelName = (profile: AppState["profiles"][string]): string =>
     profile.default_model || state.mainConfig.default_model || "";
   const activeProfileModelName = activeProfile ? resolveProfileModelName(activeProfile) : state.mainConfig.default_model;
+  const activeModel = activeProfileModelName ? state.mainConfig.models[activeProfileModelName] : undefined;
+  const activeProviderName = activeModel?.provider ?? "";
+  const prioritizeEntry = <T,>(entries: Array<[string, T]>, activeName: string, limit: number): Array<[string, T]> =>
+    [...entries]
+      .sort(([left], [right]) => {
+        if (left === activeName) return -1;
+        if (right === activeName) return 1;
+        return left.localeCompare(right);
+      })
+      .slice(0, limit);
+  const visibleProfiles = prioritizeEntry(profileEntries, state.activeProfile, 4);
+  const visibleProviders = prioritizeEntry(providerEntries, activeProviderName, 3);
+  const visibleModels = prioritizeEntry(modelEntries, activeProfileModelName, 3);
   const formatProfileModes = (profile: AppState["profiles"][string]): string => [
     `${t(locale, "overviewThinking")}: ${
       profile.thinking_enabled === undefined ? "—" : boolLabel(profile.thinking_enabled)
@@ -135,6 +143,17 @@ export function OverviewDashboard(props: {
     return option ? labelForLocale(option.label, locale) : theme || "aurora";
   }
 
+  function permissionModeLabel(mode: string | undefined): string {
+    switch (mode || "manual") {
+      case "auto":
+        return t(locale, "permissionModeAuto");
+      case "yolo":
+        return t(locale, "permissionModeYolo");
+      default:
+        return t(locale, "permissionModeManual");
+    }
+  }
+
   function BoolPill({ value }: { value: boolean }): JSX.Element {
     return (
       <span className={value ? "status-pill on" : "status-pill off"}>
@@ -146,156 +165,75 @@ export function OverviewDashboard(props: {
 
   const hasDiagnosticIssue = diagnostics.preload !== "ok" || diagnostics.loadState !== "ok" || diagnostics.previewState !== "ok";
 
+  const resourceStats: Array<{ tab?: OverviewTabId; label: string; value: string | number }> = [
+    { tab: "profiles", label: t(locale, "summaryProfiles"), value: profileEntries.length },
+    { tab: "providers", label: t(locale, "summaryProviders"), value: providerEntries.length },
+    { tab: "models", label: t(locale, "summaryModels"), value: modelEntries.length },
+    { tab: "mcp", label: t(locale, "summaryMcp"), value: mcpEntries.length },
+    { tab: "skills", label: t(locale, "summarySkills"), value: skillsReport ? skillsReport.summary.total : "-" },
+  ];
+
   return (
-    <section className="overview-grid">
-      <section className="glass-panel overview-card overview-card-wide overview-hero">
-        <div className="overview-hero-header">
-          <Zap size={14} />
-          <span>{t(locale, "overviewActiveProfile")}</span>
-        </div>
-        <div className="overview-app-title">
-          <span className="overview-app-name">{activeProfileDisplayName}</span>
-          <span className="overview-app-ver">v{ABOUT_INFO.version}</span>
-        </div>
-        <div className="overview-stats-strip">
-          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryProfiles")}</span><strong className="overview-stat-value">{profileEntries.length}</strong></div>
-          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryProviders")}</span><strong className="overview-stat-value">{providerEntries.length}</strong></div>
-          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryModels")}</span><strong className="overview-stat-value">{modelEntries.length}</strong></div>
-          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summaryMcp")}</span><strong className="overview-stat-value">{mcpEntries.length}</strong></div>
-          <div className="overview-stat"><span className="overview-stat-label">{t(locale, "summarySkills")}</span><strong className="overview-stat-value">{skillsReport ? skillsReport.summary.total : "-"}</strong></div>
-        </div>
-        <div className="overview-hero-body">
-          <div className="overview-hero-col">
-            <div className="overview-hero-col-title">{t(locale, "overviewAppVersion")}</div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{versionLabel}</span><span className={cliVersion.installed || cliVersion.checking ? "overview-hero-kv-value overview-cli-version-value" : "overview-hero-kv-value overview-cli-version-value text-warn"}><span>{cliVersionText}</span><button className="overview-cli-check-button" type="button" title={checkVersionLabel} aria-label={checkVersionLabel} disabled={isCliVersionChecking || isCliUpdating} onClick={() => void checkCliVersion(true)}>{isCliVersionChecking ? <LoaderCircle size={13} className="button-spinner" /> : <RefreshCw size={13} />}</button>{!cliVersion.checking && (cliVersion.hasUpdate || !cliVersion.installed) ? <button className="overview-cli-check-button" type="button" title={cliVersion.installed ? updateVersionLabel : `${updateVersionLabel}: ${cliVersion.installCommand ?? ""}`} aria-label={updateVersionLabel} disabled={isCliUpdating || isCliVersionChecking} onClick={() => void upgradeCli()}>{isCliUpdating ? <LoaderCircle size={13} className="button-spinner" /> : <Download size={13} />}</button> : null}</span></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewKimiCodeInstallSource")}</span><span className="overview-hero-kv-value">{installSourceLabel(cliVersion.installSource)}</span></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewDefaultModel")}</span><span className="overview-hero-kv-value">{activeProfileModelName || "-"}</span></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewTheme")}</span><span className="overview-hero-kv-value">{themeLabel(state.panelSettings.appearance_theme)}</span></div>
-          </div>
-          <div className="overview-hero-col">
-            <div className="overview-hero-col-title">{t(locale, "overviewActiveConfig")}</div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewThinking")}</span><BoolPill value={activeProfile?.thinking_enabled !== false} /></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewYolo")}</span><span className="overview-hero-kv-value">{activeProfile?.default_permission_mode || "manual"}</span></div>
-            <div className="overview-hero-kv"><span className="overview-hero-kv-label">{t(locale, "overviewPlanMode")}</span><BoolPill value={!!activeProfile?.default_plan_mode} /></div>
+    <section className="overview-grid overview-dashboard-v2">
+      <section className="glass-panel overview-card overview-card-wide overview-hero overview-context-card">
+        <div className="overview-context-main">
+          <div className="overview-hero-header"><Zap size={16} /><span>{t(locale, "overviewActiveProfile")}</span></div>
+          <div className="overview-app-title"><span className="overview-app-name">{activeProfileDisplayName}</span></div>
+          <div className="overview-context-model">{activeProfileModelName || t(locale, "overviewProfileModelUnset")}</div>
+          <div className="overview-context-modes">
+            <span><span>{t(locale, "overviewThinking")}</span><BoolPill value={activeProfile?.thinking_enabled !== false} /></span>
+            <span><span>{t(locale, "overviewPermissionMode")}</span><strong>{permissionModeLabel(activeProfile?.default_permission_mode)}</strong></span>
+            <span><span>{t(locale, "overviewPlanMode")}</span><BoolPill value={!!activeProfile?.default_plan_mode} /></span>
           </div>
         </div>
-        <div className="overview-hero-paths">
-          <div className="overview-hero-paths-title">{t(locale, "overviewConfigPaths")}</div>
-          <div className="overview-hero-paths-grid">
-            <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewConfigTitle")}</span><span className="overview-hero-path-value">{state.configPath}</span></div>
-            <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewMcpTitle")}</span><span className="overview-hero-path-value">{state.mcpConfigPath}</span></div>
+        <div className="overview-health-card">
+          <div className="overview-hero-col-title">{t(locale, "diagnosticsTitle")}</div>
+          <strong className={hasDiagnosticIssue ? "text-warn" : "text-ok"}>
+            {hasDiagnosticIssue ? t(locale, "doctorStatusNeedsAttention") : t(locale, "doctorStatusOk")}
+          </strong>
+          <div className="overview-cli-summary">
+            <span>{versionLabel}</span>
+            <span className={cliVersion.installed || cliVersion.checking ? "overview-cli-version-value" : "overview-cli-version-value text-warn"}>
+              <strong>{cliVersionText}</strong>
+              <button className="overview-cli-check-button" type="button" title={checkVersionLabel} aria-label={checkVersionLabel} disabled={isCliVersionChecking || isCliUpdating} onClick={() => void checkCliVersion(true)}>{isCliVersionChecking ? <LoaderCircle size={14} className="button-spinner" /> : <RefreshCw size={14} />}</button>
+              {!cliVersion.checking && (cliVersion.hasUpdate || !cliVersion.installed) ? <button className="overview-cli-check-button" type="button" title={updateVersionLabel} aria-label={updateVersionLabel} disabled={isCliUpdating || isCliVersionChecking} onClick={() => void upgradeCli()}>{isCliUpdating ? <LoaderCircle size={14} className="button-spinner" /> : <Download size={14} />}</button> : null}
+            </span>
           </div>
         </div>
       </section>
 
-      <section className="glass-panel overview-card">
-        <div className="section-title">
-          <Layers3 size={16} />
-          <span>{t(locale, "overviewProfileList")}</span>
-          <span className="overview-badge">{profileEntries.length}</span>
-          {profileEntries.length > 4 ? (
-            <button
-              className="overview-more-link"
-              type="button"
-              aria-label={`${t(locale, "overviewShowMore")} ${t(locale, "overviewProfileList")}`}
-              title={`${t(locale, "overviewShowMore")} ${t(locale, "overviewProfileList")}`}
-              onClick={() => onNavigate("profiles")}
-            >
-              {t(locale, "overviewShowMore")}
-            </button>
-          ) : null}
-        </div>
-        <div className="overview-profile-grid">
-          {visibleProfiles.map(([name, profile]) => {
-            const isActive = name === state.activeProfile;
-            const profileModelName = resolveProfileModelName(profile);
-            return (
-              <div key={name} className={isActive ? "overview-profile-chip active" : "overview-profile-chip"}>
-                <div className="overview-profile-info">
-                  <strong title={profile.label || name}>{profile.label || name}</strong>
-                  <div className={profileModelName ? "overview-profile-model" : "overview-profile-model is-empty"}>
-                    {profileModelName || t(locale, "overviewProfileModelUnset")}
-                  </div>
-                  <div className="overview-profile-modes" title={formatProfileModes(profile)}>
-                    {formatProfileModes(profile)}
-                  </div>
-                </div>
-                {isActive ? (
-                  <span className="overview-profile-active"><Check size={14} /></span>
-                ) : (
-                  <button
-                    className="overview-profile-activate"
-                    type="button"
-                    aria-label={`${t(locale, "overviewQuickActivate")} ${profile.label || name}`}
-                    title={`${t(locale, "overviewQuickActivate")} ${profile.label || name}`}
-                    onClick={() => onActivateProfile(name)}
-                  >
-                    {t(locale, "overviewQuickActivate")}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <div className="overview-right-col">
-        <section className="glass-panel overview-card">
-          <div className="section-title">
-            <Globe size={16} />
-            <span>{t(locale, "overviewProviderList")}</span>
-            <span className="overview-badge">{providerEntries.length}</span>
-            {providerEntries.length > 3 ? (
-              <button
-                className="overview-more-link"
-                type="button"
-                aria-label={`${t(locale, "overviewShowMore")} ${t(locale, "overviewProviderList")}`}
-                title={`${t(locale, "overviewShowMore")} ${t(locale, "overviewProviderList")}`}
-                onClick={() => onNavigate("providers")}
-              >
-                {t(locale, "overviewShowMore")}
-              </button>
-            ) : null}
-          </div>
-          <div className="overview-list">
-            {visibleProviders.map(([name, provider]) => (
-              <div key={name} className="overview-list-item">
-                <span className="overview-list-name">{name}</span>
-                <span className="overview-list-meta">{provider.type}</span>
-              </div>
-            ))}
-            {providerEntries.length === 0 && <p className="overview-empty">-</p>}
-          </div>
-        </section>
-
-        <section className="glass-panel overview-card">
-          <div className="section-title">
-            <Boxes size={16} />
-            <span>{t(locale, "overviewModelList")}</span>
-            <span className="overview-badge">{modelEntries.length}</span>
-            {modelEntries.length > 3 ? (
-              <button
-                className="overview-more-link"
-                type="button"
-                aria-label={`${t(locale, "overviewShowMore")} ${t(locale, "overviewModelList")}`}
-                title={`${t(locale, "overviewShowMore")} ${t(locale, "overviewModelList")}`}
-                onClick={() => onNavigate("models")}
-              >
-                {t(locale, "overviewShowMore")}
-              </button>
-            ) : null}
-          </div>
-          <div className="overview-list">
-            {visibleModels.map(([name, model]) => (
-              <div key={name} className="overview-list-item">
-                <span className="overview-list-name">{name}</span>
-                <span className="overview-list-meta">{model.capabilities.join(", ") || "-"}</span>
-              </div>
-            ))}
-            {modelEntries.length === 0 && <p className="overview-empty">-</p>}
-          </div>
-        </section>
+      <div className="overview-stats-strip overview-card-wide">
+        {resourceStats.map((stat) => stat.tab ? (
+          <button key={stat.label} className="overview-stat" type="button" onClick={() => onNavigate(stat.tab!)}>
+            <span className="overview-stat-label">{stat.label}</span><strong className="overview-stat-value">{stat.value}</strong>
+          </button>
+        ) : (
+          <div key={stat.label} className="overview-stat"><span className="overview-stat-label">{stat.label}</span><strong className="overview-stat-value">{stat.value}</strong></div>
+        ))}
       </div>
+
+      <div className="overview-resource-grid overview-card-wide">
+        <ResourceCard icon={Layers3} title={t(locale, "overviewProfileList")} count={profileEntries.length} tab="profiles" locale={locale} onNavigate={onNavigate} testId="overview-profiles-list">
+          {visibleProfiles.map(([name, profile]) => <button key={name} className={name === state.activeProfile ? "overview-list-item active" : "overview-list-item"} type="button" onClick={() => onNavigate("profiles", name)}><span className="overview-list-name">{profile.label || name}</span><span className="overview-list-meta">{resolveProfileModelName(profile) || "-"}</span></button>)}
+        </ResourceCard>
+        <ResourceCard icon={Globe} title={t(locale, "overviewProviderList")} count={providerEntries.length} tab="providers" locale={locale} onNavigate={onNavigate} testId="overview-providers-list">
+          {visibleProviders.map(([name, provider]) => <button key={name} className={name === activeProviderName ? "overview-list-item active" : "overview-list-item"} type="button" onClick={() => onNavigate("providers", name)}><span className="overview-list-name">{name}</span><span className="overview-list-meta">{provider.type}</span></button>)}
+        </ResourceCard>
+        <ResourceCard icon={Boxes} title={t(locale, "overviewModelList")} count={modelEntries.length} tab="models" locale={locale} onNavigate={onNavigate} testId="overview-models-list">
+          {visibleModels.map(([name, model]) => <button key={name} className={name === activeProfileModelName ? "overview-list-item active" : "overview-list-item"} type="button" onClick={() => onNavigate("models", name)}><span className="overview-list-name">{name}</span><span className="overview-list-meta">{model.provider}</span></button>)}
+        </ResourceCard>
+      </div>
+
+      <details className="glass-panel overview-card overview-card-wide overview-technical-details" data-testid="overview-technical-details">
+        <summary>{t(locale, "overviewTechnicalDetails")}</summary>
+        <div className="overview-hero-paths-grid">
+          <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewAppVersion")}</span><span className="overview-hero-path-value">v{ABOUT_INFO.version}</span></div>
+          <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewKimiCodeInstallSource")}</span><span className="overview-hero-path-value">{installSourceLabel(cliVersion.installSource)}</span></div>
+          <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewTheme")}</span><span className="overview-hero-path-value">{themeLabel(state.panelSettings.appearance_theme)}</span></div>
+          <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewConfigTitle")}</span><span className="overview-hero-path-value">{state.configPath}</span></div>
+          <div className="overview-hero-path"><span className="overview-hero-path-label">{t(locale, "overviewMcpTitle")}</span><span className="overview-hero-path-value">{state.mcpConfigPath}</span></div>
+        </div>
+      </details>
 
       {hasDiagnosticIssue ? (
         <section className="glass-panel overview-card overview-card-wide overview-footer-merged">
@@ -317,6 +255,28 @@ export function OverviewDashboard(props: {
           ) : null}
         </section>
       ) : null}
+    </section>
+  );
+}
+
+function ResourceCard(props: {
+  icon: typeof Layers3;
+  title: string;
+  count: number;
+  tab: OverviewTabId;
+  locale: Locale;
+  onNavigate: (tab: OverviewTabId, item?: string) => void;
+  testId: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  const Icon = props.icon;
+  return (
+    <section className="glass-panel overview-card overview-resource-card">
+      <div className="section-title">
+        <Icon size={18} /><span>{props.title}</span><span className="overview-badge">{props.count}</span>
+        <button className="overview-more-link" type="button" aria-label={`${t(props.locale, "overviewShowMore")} ${props.title}`} onClick={() => props.onNavigate(props.tab)}>{t(props.locale, "overviewShowMore")}</button>
+      </div>
+      <div className="overview-list" data-testid={props.testId}>{props.children}</div>
     </section>
   );
 }

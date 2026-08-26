@@ -17,6 +17,8 @@ describe("shortcutStore", () => {
     expect(shortcuts["window.toggle"].enabled).toBe(true);
     expect(shortcuts["window.toggle"].scope).toBe("global");
     expect(shortcuts["app.save"].accelerator).toBe("CommandOrControl+S");
+    expect(shortcuts["app.quickProfileSwitch"].accelerator).toBe("CommandOrControl+Shift+P");
+    expect(shortcuts["app.quickProfileSwitch"].scope).toBe("window");
     expect(shortcuts["tab.settings"].accelerator).toBe("CommandOrControl+8");
   });
 

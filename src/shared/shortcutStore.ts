@@ -100,6 +100,20 @@ export const SHORTCUT_ACTIONS: ShortcutActionDefinition[] = [
     },
   },
   {
+    action: "app.quickProfileSwitch",
+    scope: "window",
+    defaultAccelerator: "CommandOrControl+Shift+P",
+    defaultEnabled: true,
+    label: {
+      "zh-CN": "快速切换配置方案",
+      "zh-TW": "快速切換設定方案",
+      "en-US": "Quick Switch Profile",
+      "ja-JP": "Profile をすばやく切り替え",
+      "de-DE": "Profil schnell wechseln",
+      "es-ES": "Cambio rápido de perfil",
+    },
+  },
+  {
     action: "app.refresh",
     scope: "window",
     defaultAccelerator: "CommandOrControl+Shift+R",

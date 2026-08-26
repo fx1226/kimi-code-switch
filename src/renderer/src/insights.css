@@ -47,7 +47,7 @@
   place-items: center;
   flex: 0 0 auto;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .insights-first-run-icon {
@@ -225,7 +225,7 @@
 
 .insights-storage-icon.purple {
   background: rgba(167, 139, 250, 0.12);
-  color: #a78bfa;
+  color: var(--primary-2);
 }
 
 .insights-storage-label {
@@ -261,7 +261,7 @@
 }
 
 .insights-progress-fill.purple {
-  background: #a78bfa;
+  background: var(--primary-2);
 }
 
 .insights-progress-fill.warning {
@@ -341,7 +341,7 @@
 }
 
 .insights-config-number.purple {
-  color: #a78bfa;
+  color: var(--primary-2);
 }
 
 :root[data-theme="light"] .insights-config-number.blue {
@@ -349,7 +349,7 @@
 }
 
 :root[data-theme="light"] .insights-config-number.purple {
-  color: #a78bfa;
+  color: var(--primary-2);
 }
 
 .insights-config-unit {
@@ -422,7 +422,7 @@
   font-weight: var(--fw-strong);
   font-size: var(--text-sm);
   background: var(--primary);
-  color: white;
+  color: var(--on-primary);
   border: 1px solid transparent;
   cursor: pointer;
   box-shadow: none;
@@ -689,7 +689,7 @@
 }
 
 .insights-metric-overview-card.color-purple::before {
-  background: #a78bfa;
+  background: var(--primary-2);
 }
 
 .insights-metric-overview-card.color-green::before {
@@ -732,7 +732,7 @@
 
 .color-purple .insights-metric-overview-icon {
   background: rgba(167, 139, 250, 0.1);
-  color: #a78bfa;
+  color: var(--primary-2);
 }
 
 .color-green .insights-metric-overview-icon {

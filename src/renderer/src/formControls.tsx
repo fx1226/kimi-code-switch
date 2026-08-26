@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { HTMLAttributes, ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { HTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
 import { Check, ChevronDown, Globe, Plus, Save, Trash2, X } from "lucide-react";
 
 import type { Locale, LocalizedText, UiFontSize } from "@shared/types";
@@ -7,6 +7,49 @@ import type { Locale, LocalizedText, UiFontSize } from "@shared/types";
 import { labelForLocale } from "./appOptions";
 import { t } from "./i18n";
 import { eventToAccelerator } from "./useShortcuts";
+
+function handleListboxKeys(
+  event: ReactKeyboardEvent<HTMLElement>,
+  options: {
+    isOpen: boolean;
+    setIsOpen: (open: boolean) => void;
+    rootRef: RefObject<HTMLDivElement | null>;
+    triggerRef: RefObject<HTMLButtonElement | null>;
+  },
+): void {
+  if (event.key === "Escape" && options.isOpen) {
+    event.preventDefault();
+    options.setIsOpen(false);
+    options.triggerRef.current?.focus();
+    return;
+  }
+  const navigationKeys = ["ArrowDown", "ArrowUp", "Home", "End"];
+  if (!navigationKeys.includes(event.key) && !(options.isOpen && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey)) return;
+  event.preventDefault();
+  const focusOption = (): void => {
+    const items = Array.from(options.rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    let next = Math.max(0, items.findIndex((item) => item.getAttribute("aria-selected") === "true"));
+    if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = items.length - 1;
+    else if (event.key === "ArrowDown") next = current < 0 ? next : (current + 1) % items.length;
+    else if (event.key === "ArrowUp") next = current < 0 ? next : (current - 1 + items.length) % items.length;
+    else {
+      const query = event.key.toLocaleLowerCase();
+      const match = items.find((item, index) => index > current && item.textContent?.trim().toLocaleLowerCase().startsWith(query))
+        ?? items.find((item) => item.textContent?.trim().toLocaleLowerCase().startsWith(query));
+      if (match) { match.focus(); return; }
+    }
+    items[next]?.focus();
+  };
+  if (!options.isOpen) {
+    options.setIsOpen(true);
+    window.requestAnimationFrame(focusOption);
+  } else {
+    focusOption();
+  }
+}
 
 export function SettingsGroup(props: { title?: string; children: ReactNode; className?: string }): JSX.Element {
   const classes = ["settings-group"];
@@ -42,7 +85,6 @@ export function Field(props: {
         inputMode={props.inputMode}
         value={props.value}
         readOnly={props.readOnly}
-        disabled={props.readOnly}
         className={props.readOnly ? "field-input-disabled" : undefined}
         onChange={(event) => {
           if (!props.readOnly) {
@@ -219,7 +261,7 @@ export function ReadOnlyField(props: { label: string; value: string }): JSX.Elem
   return (
     <label className="field">
       <span>{props.label}</span>
-      <input value={props.value} readOnly disabled className="field-input-disabled" />
+      <input value={props.value} readOnly className="field-input-disabled" />
     </label>
   );
 }
@@ -232,8 +274,11 @@ export function SelectField(props: {
   selectedIcon?: typeof Globe;
   popoverClassName?: string;
 }): JSX.Element {
+  const controlId = useId();
+  const hasRichOptions = Boolean(props.selectedIcon || props.options.some((option) => option.icon || option.badge));
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedOption = props.options.find((option) => option.value === props.value) ?? props.options[0];
   const SelectedIcon = props.selectedIcon ?? selectedOption?.icon;
 
@@ -258,15 +303,29 @@ export function SelectField(props: {
     };
   }, []);
 
+  if (!hasRichOptions) {
+    return (
+      <label className="field" htmlFor={controlId}>
+        <span>{props.label}</span>
+        <select id={controlId} value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+          {props.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+    );
+  }
+
   return (
-    <div className="field" ref={rootRef}>
-      <span>{props.label}</span>
+    <div className="field" ref={rootRef} onKeyDown={(event) => handleListboxKeys(event, { isOpen, setIsOpen, rootRef, triggerRef })}>
+      <span id={`${controlId}-label`}>{props.label}</span>
       <div className={isOpen ? "field-select-shell is-open" : "field-select-shell"}>
         <button
+          ref={triggerRef}
           className="field-select-trigger"
           type="button"
           aria-haspopup="listbox"
           aria-expanded={isOpen}
+          aria-labelledby={`${controlId}-label ${controlId}-value`}
+          aria-controls={`${controlId}-listbox`}
           onClick={() => setIsOpen((current) => !current)}
         >
           {SelectedIcon ? (
@@ -278,15 +337,17 @@ export function SelectField(props: {
               {selectedOption.badge}
             </span>
           ) : null}
-          <span className="field-select-value">{selectedOption?.label ?? props.value}</span>
+          <span id={`${controlId}-value`} className="field-select-value">{selectedOption?.label ?? props.value}</span>
           <span className="field-select-icon" aria-hidden="true">
             <ChevronDown size={16} />
           </span>
         </button>
         <div
           className={["field-select-popover", props.popoverClassName].filter(Boolean).join(" ")}
+          id={`${controlId}-listbox`}
           role="listbox"
           aria-label={props.label}
+          hidden={!isOpen}
         >
           {props.options.map((option) => (
             <button
@@ -330,6 +391,7 @@ export function CompactSelect(props: {
 }): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedOption = props.options.find((option) => option.value === props.value) ?? props.options[0];
   const SelectedIcon = selectedOption?.icon;
 
@@ -364,8 +426,10 @@ export function CompactSelect(props: {
         props.className,
       ].filter(Boolean).join(" ")}
       ref={rootRef}
+      onKeyDown={(event) => handleListboxKeys(event, { isOpen, setIsOpen, rootRef, triggerRef })}
     >
       <button
+        ref={triggerRef}
         className="field-select-trigger"
         type="button"
         aria-label={props.ariaLabel}
@@ -396,6 +460,7 @@ export function CompactSelect(props: {
         className={["field-select-popover", props.popoverClassName].filter(Boolean).join(" ")}
         role="listbox"
         aria-label={props.ariaLabel}
+        hidden={!isOpen}
       >
         {props.options.map((option) => (
           <button
@@ -491,8 +556,10 @@ export function MultiSelectField(props: {
   emptyLabel: string;
   popoverClassName?: string;
 }): JSX.Element {
+  const controlId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedValues = props.options.filter((option) => props.value.includes(option.value));
   const summary = selectedValues.length
     ? selectedValues.map((option) => option.label).join(", ")
@@ -520,17 +587,20 @@ export function MultiSelectField(props: {
   }, []);
 
   return (
-    <div className="field" ref={rootRef}>
-      <span>{props.label}</span>
+    <div className="field" ref={rootRef} onKeyDown={(event) => handleListboxKeys(event, { isOpen, setIsOpen, rootRef, triggerRef })}>
+      <span id={`${controlId}-label`}>{props.label}</span>
       <div className={isOpen ? "field-select-shell is-open" : "field-select-shell"}>
         <button
+          ref={triggerRef}
           className="field-select-trigger"
           type="button"
           aria-haspopup="listbox"
           aria-expanded={isOpen}
+          aria-labelledby={`${controlId}-label ${controlId}-value`}
+          aria-controls={`${controlId}-listbox`}
           onClick={() => setIsOpen((current) => !current)}
         >
-          <span className={selectedValues.length ? "field-select-value" : "field-select-value field-select-placeholder"}>
+          <span id={`${controlId}-value`} className={selectedValues.length ? "field-select-value" : "field-select-value field-select-placeholder"}>
             {summary}
           </span>
           <span className="field-select-icon" aria-hidden="true">
@@ -539,9 +609,11 @@ export function MultiSelectField(props: {
         </button>
         <div
           className={["field-select-popover", props.popoverClassName].filter(Boolean).join(" ")}
+          id={`${controlId}-listbox`}
           role="listbox"
           aria-label={props.label}
           aria-multiselectable="true"
+          hidden={!isOpen}
         >
           {props.options.map((option) => {
             const isSelected = props.value.includes(option.value);

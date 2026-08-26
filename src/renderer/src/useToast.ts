@@ -18,7 +18,12 @@ export function useToast(): UseToastReturn {
 
   const showToast = useCallback((message: string, type: ToastType) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => {
+      if (prev.some((toast) => toast.message === message && toast.type === type)) {
+        return prev;
+      }
+      return [...prev, { id, message, type }].slice(-4);
+    });
   }, []);
 
   const removeToast = useCallback((id: string) => {

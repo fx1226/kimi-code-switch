@@ -16,7 +16,7 @@ interface WizardProps {
   locale: Locale;
   state: AppState;
   onComplete: (updater: (draft: AppState) => void, profileName: string) => void;
-  onCancel: () => void;
+  onCancel: (dirty?: boolean) => void;
 }
 
 type WizardStep = 1 | 2 | 3;
@@ -26,14 +26,15 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
   const [step, setStep] = useState<WizardStep>(1);
   const [source, setSource] = useState<SourcePreset | null>(null);
   const [formData, setFormData] = useState<ConnectionFormData>({ apiKey: "", endpoint: "", modelId: "", profileName: "" });
+  const isDirty = source !== null || Object.values(formData).some((value) => value.trim().length > 0);
   const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onCancel);
+  useDialogEscape(() => onCancel(isDirty));
   useFocusTrap(dialogRef);
 
   return (
     // 多步表单：不允许点遮罩关闭（防半填误触丢失），仅 Esc / 右上角 ✕ 关闭
     <div className="wizard-overlay">
-      <div className="wizard-modal glass-panel" ref={dialogRef}>
+      <div className="wizard-modal glass-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(locale, "newProfile")}>
         <div className="wizard-topbar">
           <div className="wizard-progress">
             {([1, 2, 3] as const).map((s) => (
@@ -41,7 +42,7 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
             ))}
           </div>
           <span className="wizard-step-label">{step}/3</span>
-          <button type="button" className="wizard-close" aria-label={t(locale, "close")} onClick={onCancel}>
+          <button type="button" className="wizard-close" aria-label={t(locale, "close")} onClick={() => onCancel(isDirty)}>
             <X size={16} />
           </button>
         </div>

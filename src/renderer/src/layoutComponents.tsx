@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Copy, Star } from "lucide-react";
 
 import type { Locale } from "@shared/types";
@@ -27,10 +28,20 @@ export function SplitLayout(props: {
   renderItemAction?: (item: string) => JSX.Element | null;
   headerActions?: JSX.Element | null;
   listBanner?: JSX.Element | null;
+  searchPlaceholder?: string;
   hideList?: boolean;
   reverse?: boolean;
   children: JSX.Element;
 }): JSX.Element {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleItems = normalizedQuery
+    ? props.listItems.filter((item) => {
+        const label = props.itemLabel?.(item) ?? item;
+        const title = props.itemTitle?.(item) ?? "";
+        return `${label} ${title}`.toLocaleLowerCase().includes(normalizedQuery);
+      })
+    : props.listItems;
   return (
     <section
       className={[
@@ -59,8 +70,14 @@ export function SplitLayout(props: {
           </div>
         </div>
         {props.listBanner}
+        {props.searchPlaceholder && props.listItems.length > 4 ? (
+          <label className="resource-list-search">
+            <span className="sr-only">{props.searchPlaceholder}</span>
+            <input type="search" value={query} placeholder={props.searchPlaceholder} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+        ) : null}
         <div className="list-scroll">
-          {props.listItems.map((item) => (
+          {visibleItems.map((item) => (
             <div
               key={item}
               className={[
@@ -111,11 +128,11 @@ export function SplitLayout(props: {
   );
 }
 
-export function EmptyState(props: { locale: Locale }): JSX.Element {
+export function EmptyState(props: { locale: Locale; hasItems?: boolean }): JSX.Element {
   return (
     <section className="glass-panel form-panel empty-state">
-      <div className="section-title">{t(props.locale, "emptyState")}</div>
-      <p>{t(props.locale, "addHint")}</p>
+      <div className="section-title">{t(props.locale, props.hasItems ? "emptyState" : "emptyCollection")}</div>
+      <p>{t(props.locale, props.hasItems ? "selectItemHint" : "createFirstHint")}</p>
     </section>
   );
 }

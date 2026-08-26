@@ -23,7 +23,7 @@ export type PreviewFileId = "config" | "panel" | "mcp";
 
 export const TAB_ITEMS: Array<{ id: TabId; icon: typeof Layers3; labelKey: string }> = [
   { id: "overview", icon: Sparkles, labelKey: "overview" },
-  { id: "profiles", icon: Layers3, labelKey: "assistants" },
+  { id: "profiles", icon: Layers3, labelKey: "profiles" },
   { id: "mcp", icon: Zap, labelKey: "mcp" },
   { id: "skills", icon: FileText, labelKey: "skillsNav" },
   { id: "insights", icon: TrendingUp, labelKey: "insights" },

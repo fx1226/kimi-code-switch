@@ -24,6 +24,7 @@ export type ShortcutAction =
   | "app.reloadConfig"
   | "app.save"
   | "app.globalSearch"
+  | "app.quickProfileSwitch"
   | "app.refresh"
   | "tab.overview"
   | "tab.profiles"

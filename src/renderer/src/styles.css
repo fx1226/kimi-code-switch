@@ -1,4 +1,6 @@
-@import './fonts.css';
-@import './tokens.css';
-@import './components.css';
-@import './layout.css';
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./components.css";
+@import "./foundation.css";
+/* Shell/overview/split geometry is intentionally last and has one final authority. */
+@import "./layout.css";

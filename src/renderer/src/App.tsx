@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
-import { AlertTriangle, ChevronDown, ChevronsLeft, ChevronsRight, RefreshCw, Terminal, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronsLeft, ChevronsRight, RefreshCw, Search, Terminal, X } from "lucide-react";
 
 import type { KimiCodeEnvironment, ShortcutAction, ShortcutBinding } from "@shared/types";
 import { applyProfile, normalizeKimiCodeEnvironments } from "@shared/configStore";
@@ -79,7 +78,7 @@ export function App(): JSX.Element {
     selectedProfileData, selectedMcpServerData,
     isProviderNameEditable, isProfileNameEditable, isMcpServerNameEditable,
     updateState, updateImmediateState,
-    runAfterUnsavedHandled, onSave, persistState,
+    resolveUnsavedChanges, runAfterUnsavedHandled, onSave, persistState,
     confirmDeleteResource, requestConfirm,
     closeMcpImportDialog, requestCloseMcpImportDialog,
     refreshSkills, openDocumentViewer,
@@ -90,6 +89,9 @@ export function App(): JSX.Element {
   const shortcuts = normalizeShortcuts(state.panelSettings.shortcuts);
   const shortcutPlatform = getBrowserShortcutPlatform();
   const tabShortcutLabels = createTabShortcutLabels(shortcuts, shortcutPlatform);
+  const globalSearchShortcutLabel = shortcuts["app.globalSearch"].enabled
+    ? formatAcceleratorForPlatform(shortcuts["app.globalSearch"].accelerator, shortcutPlatform)
+    : "";
   const isSidebarCollapsed = state.panelSettings.sidebar_collapsed;
   const kimiCodeEnvironments = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments);
   const activeKimiCodeEnvironmentId = state.panelSettings.active_kimi_code_environment_id
@@ -154,12 +156,13 @@ export function App(): JSX.Element {
   useShortcuts({
     shortcuts,
     onSave: () => void onSave(),
-    onReload: () => void loadState(),
+    onReload: () => runAfterUnsavedHandled(() => void loadState()),
     onRefresh: () => {
       window.dispatchEvent(new CustomEvent("kimi-refresh"));
     },
     onNavigate: (tab) => runAfterUnsavedHandled(() => setActiveTab(tab)),
     onGlobalSearch: () => setCommandPaletteOpen((v) => !v),
+    onQuickProfileSwitch: () => setQuickSwitcherOpen((v) => !v),
   });
 
   // 将 error 和 notice 转换为 Toast
@@ -178,24 +181,29 @@ export function App(): JSX.Element {
   }, [notice, showToast, setNotice]);
 
   useEffect(() => {
-    function handleGlobalKeyDown(event: globalThis.KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === "p") {
-        event.preventDefault();
-        setQuickSwitcherOpen((v) => !v);
-      }
-    }
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
+    const handleBeforeClose = (event: Event): void => {
+      const detail = (event as CustomEvent<{ acknowledge: () => void; resolve: (allow: boolean) => void }>).detail;
+      detail.acknowledge();
+      void resolveUnsavedChanges()
+        .then((decision) => detail.resolve(decision !== "cancel"))
+        .catch(() => detail.resolve(false));
+    };
+    window.addEventListener("kimi-before-close", handleBeforeClose);
+    return () => window.removeEventListener("kimi-before-close", handleBeforeClose);
+  }, [resolveUnsavedChanges]);
 
   // 托盘动作（切换语言/主题/Profile）已写盘，重新加载状态以实时刷新 UI
   useEffect(() => {
     function handleTrayReload(): void {
-      void loadState();
+      runAfterUnsavedHandled(() => void loadState());
     }
     window.addEventListener("kimi-tray-reload", handleTrayReload);
     return () => window.removeEventListener("kimi-tray-reload", handleTrayReload);
-  }, [loadState]);
+  }, [loadState, runAfterUnsavedHandled]);
 
   // 托盘「用量洞察」入口：显示窗口后切到 Insights 子页
   useEffect(() => {
@@ -230,81 +238,25 @@ export function App(): JSX.Element {
 
   const handleQuickSwitchActivate = useCallback((profileName: string): void => {
     setQuickSwitcherOpen(false);
-    updateState((draft) => {
-      applyProfile(draft, profileName);
-    }, {
-      historySummary: formatMessage(t(locale, "historyActivateProfile"), { name: profileName }),
-    });
-  }, [locale, updateState]);
+    runAfterUnsavedHandled(() => updateState((draft) => {
+        applyProfile(draft, profileName);
+      }, {
+        historySummary: formatMessage(t(locale, "historyActivateProfile"), { name: profileName }),
+      }));
+  }, [locale, runAfterUnsavedHandled, updateState]);
 
-  const [isAssistantGroupOpen, setIsAssistantGroupOpen] = useState(true);
-
-  // 通过快捷键或命令面板导航到子菜单时自动展开分组
-  useEffect(() => {
-    if (ASSISTANT_SUB_ITEMS.some((item) => item.id === activeTab)) {
-      setIsAssistantGroupOpen(true);
-    }
-  }, [activeTab]);
-
-  const tabListRef = useRef<HTMLDivElement>(null);
   const visibleTabItems = TAB_ITEMS.filter((item) => item.id !== "about");
   const bottomTabItems = TAB_ITEMS.filter((item) => item.id === "about");
-  const profilesIdx = TAB_ITEMS.findIndex((i) => i.id === "profiles");
-  const mainTabIds = [
-    ...visibleTabItems.slice(0, profilesIdx + 1).map((i) => i.id),
-    ...ASSISTANT_SUB_ITEMS.map((i) => i.id),
-    ...visibleTabItems.slice(profilesIdx + 1).map((i) => i.id),
-    ...bottomTabItems.map((i) => i.id),
+  const configTabItems = [
+    TAB_ITEMS.find((item) => item.id === "profiles")!,
+    ...ASSISTANT_SUB_ITEMS,
   ];
-
-  const focusTab = useCallback((tabId: string): void => {
-    const button = document.getElementById(`tab-${tabId}`);
-    if (button instanceof HTMLElement) {
-      button.focus();
-    }
-  }, []);
+  const primaryTabItems = visibleTabItems.filter((item) => !["profiles", "providers", "models"].includes(item.id));
 
   const activeProfileDisplayName = state.profiles[state.activeProfile]?.label?.trim() || state.activeProfile || "-";
-
-  const handleMainTabKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>): void => {
-      const currentIndex = mainTabIds.indexOf(activeTab);
-      if (currentIndex === -1) {
-        return;
-      }
-
-      let nextIndex: number | null = null;
-
-      switch (event.key) {
-        case "ArrowRight":
-        case "ArrowDown":
-          nextIndex = (currentIndex + 1) % mainTabIds.length;
-          break;
-        case "ArrowLeft":
-        case "ArrowUp":
-          nextIndex = (currentIndex - 1 + mainTabIds.length) % mainTabIds.length;
-          break;
-        case "Home":
-          nextIndex = 0;
-          break;
-        case "End":
-          nextIndex = mainTabIds.length - 1;
-          break;
-        default:
-          return;
-      }
-
-      event.preventDefault();
-      const nextTab = mainTabIds[nextIndex];
-      if (nextTab) {
-        runAfterUnsavedHandled(() => {
-          setActiveTab(nextTab);
-          focusTab(nextTab);
-        });
-      }
-    },
-    [activeTab, mainTabIds, runAfterUnsavedHandled, setActiveTab, focusTab],
-  );
+  const activePageItem = [...TAB_ITEMS, ...ASSISTANT_SUB_ITEMS].find((item) => item.id === activeTab);
+  const activePageTitle = activePageItem ? t(locale, activePageItem.labelKey) : t(locale, "overview");
+  const activePageDescription = t(locale, `${activeTab}PageDescription`);
 
   return (
     <div className={isSidebarCollapsed ? "shell sidebar-collapsed" : "shell"}>
@@ -322,8 +274,10 @@ export function App(): JSX.Element {
               type="button"
               className="app-tip-action"
               onClick={() => {
-                setExternalChange(null);
-                void loadState();
+                runAfterUnsavedHandled(() => {
+                  setExternalChange(null);
+                  void loadState();
+                });
               }}
             >
               <RefreshCw size={13} />
@@ -348,7 +302,7 @@ export function App(): JSX.Element {
             <img className="brand-logo brand-logo-dark" src={logoDark} alt="Kimi Code Switch" />
           </div>
           <div className="brand-copy" data-tauri-drag-region>
-            <h1 title={title}>{title}</h1>
+            <h1 title={title}>{t(locale, "appNameShort")}</h1>
             <p>{t(locale, "appSubtitle")}</p>
           </div>
           <button
@@ -361,125 +315,45 @@ export function App(): JSX.Element {
             {isSidebarCollapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
           </button>
         </div>
-        <nav className="nav" role="tablist" ref={tabListRef} onKeyDown={handleMainTabKeyDown}>
-          {visibleTabItems.map(({ id, icon: Icon, labelKey }) => {
-            if (id === "profiles") {
-              const isGroupActive = ["profiles", "providers", "models"].includes(activeTab);
-              return (
-                <div key={id} className="nav-group">
-                  <div className="nav-group-header">
-                    <button
-                      id={`tab-${id}`}
-                      role="tab"
-                      aria-selected={isGroupActive}
-                      className={isGroupActive ? "nav-item active" : "nav-item"}
-                      title={t(locale, labelKey)}
-                      aria-label={t(locale, labelKey)}
-                      tabIndex={isGroupActive ? 0 : -1}
-                      onClick={() => {
-                        setIsAssistantGroupOpen(true);
-                        if (activeTab !== "profiles") {
-                          runAfterUnsavedHandled(() => setActiveTab("profiles"));
-                        }
-                      }}
-                    >
-                      <Icon size={18} />
-                      <span>{t(locale, labelKey)}</span>
-                      {tabShortcutLabels[id] ? <kbd className="nav-shortcut">{tabShortcutLabels[id]}</kbd> : null}
-                    </button>
-                    {!isSidebarCollapsed && (
-                      <button
-                        type="button"
-                        className={isAssistantGroupOpen ? "nav-group-toggle is-open" : "nav-group-toggle"}
-                        aria-label={isAssistantGroupOpen ? t(locale, "collapseSidebar") : t(locale, "expandSidebar")}
-                        onClick={() => setIsAssistantGroupOpen((v) => !v)}
-                      >
-                        <ChevronDown size={13} />
-                      </button>
-                    )}
-                  </div>
-                  {!isSidebarCollapsed && (
-                    <div className={isAssistantGroupOpen ? "nav-subitems-wrapper" : "nav-subitems-wrapper is-collapsed"}>
-                      <div className="nav-subitems">
-                        {ASSISTANT_SUB_ITEMS.map(({ id: subId, icon: SubIcon, labelKey: subLabelKey }) => (
-                          <button
-                            key={subId}
-                            id={`tab-${subId}`}
-                            role="tab"
-                            aria-selected={activeTab === subId}
-                            className={activeTab === subId ? "nav-item nav-subitem active" : "nav-item nav-subitem"}
-                            title={t(locale, subLabelKey)}
-                            aria-label={t(locale, subLabelKey)}
-                            tabIndex={activeTab === subId ? 0 : -1}
-                            onClick={() => {
-                              if (subId === activeTab) return;
-                              runAfterUnsavedHandled(() => setActiveTab(subId));
-                            }}
-                          >
-                            <SubIcon size={16} />
-                            <span>{t(locale, subLabelKey)}</span>
-                            {tabShortcutLabels[subId] ? <kbd className="nav-shortcut">{tabShortcutLabels[subId]}</kbd> : null}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            return (
-              <button
-                key={id}
-                id={`tab-${id}`}
-                role="tab"
-                aria-selected={activeTab === id}
-                className={id === activeTab ? "nav-item active" : "nav-item"}
-                title={t(locale, labelKey)}
-                aria-label={t(locale, labelKey)}
-                tabIndex={id === activeTab ? 0 : -1}
-                onClick={() => {
-                  if (id === activeTab) return;
-                  runAfterUnsavedHandled(() => setActiveTab(id));
-                }}
-              >
-                <Icon size={18} />
-                <span>{t(locale, labelKey)}</span>
-                {tabShortcutLabels[id] ? <kbd className="nav-shortcut">{tabShortcutLabels[id]}</kbd> : null}
-              </button>
-            );
-          })}
+        <nav className="nav" aria-label={t(locale, "primaryNavigation")}>
+          {primaryTabItems.slice(0, 1).map(({ id, icon: Icon, labelKey }) => (
+            <NavigationButton key={id} id={id} icon={Icon} label={t(locale, labelKey)} activeTab={activeTab} shortcut={tabShortcutLabels[id]} onSelect={(tab) => runAfterUnsavedHandled(() => setActiveTab(tab))} />
+          ))}
+          <div className="nav-section">
+            <div className="nav-section-label">{t(locale, "configManagement")}</div>
+            {configTabItems.map(({ id, icon: Icon, labelKey }) => (
+              <NavigationButton key={id} id={id} icon={Icon} label={t(locale, labelKey)} activeTab={activeTab} shortcut={tabShortcutLabels[id]} secondary onSelect={(tab) => runAfterUnsavedHandled(() => setActiveTab(tab))} />
+            ))}
+          </div>
+          {primaryTabItems.slice(1).map(({ id, icon: Icon, labelKey }) => (
+            <NavigationButton key={id} id={id} icon={Icon} label={t(locale, labelKey)} activeTab={activeTab} shortcut={tabShortcutLabels[id]} onSelect={(tab) => runAfterUnsavedHandled(() => setActiveTab(tab))} />
+          ))}
         </nav>
-        <nav className="nav nav-bottom" role="tablist" aria-label={t(locale, "about")}>
+        <nav className="nav nav-bottom" aria-label={t(locale, "about")}>
           {bottomTabItems.map(({ id, icon: Icon, labelKey }) => (
-            <button
-              key={id}
-              id={`tab-${id}`}
-              role="tab"
-              aria-selected={activeTab === id}
-              className={id === activeTab ? "nav-item active" : "nav-item"}
-              title={t(locale, labelKey)}
-              aria-label={t(locale, labelKey)}
-              tabIndex={id === activeTab ? 0 : -1}
-              onClick={() => {
-                if (id === activeTab) return;
-                runAfterUnsavedHandled(() => setActiveTab(id));
-              }}
-            >
-              <Icon size={18} />
-              <span>{t(locale, labelKey)}</span>
-              {tabShortcutLabels[id] ? <kbd className="nav-shortcut">{tabShortcutLabels[id]}</kbd> : null}
-            </button>
+            <NavigationButton key={id} id={id} icon={Icon} label={t(locale, labelKey)} activeTab={activeTab} shortcut={tabShortcutLabels[id]} onSelect={(tab) => runAfterUnsavedHandled(() => setActiveTab(tab))} />
           ))}
         </nav>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <div className="toolbar toolbar-active">
-            <div className="active-profile-chip" title={state.activeProfile || undefined}>
-              <span className="active-profile-label">{t(locale, "summaryActive")}</span>
-              <strong className="active-profile-name">{activeProfileDisplayName}</strong>
+          <div className="page-heading">
+            <h2>{activePageTitle}</h2>
+            <p>{activePageDescription}</p>
+          </div>
+          <div className="toolbar">
+            <button className="topbar-search-button" type="button" aria-label={t(locale, "globalSearch")} onClick={() => setCommandPaletteOpen(true)}>
+              <Search size={17} />
+              <span>{t(locale, "globalSearch")}</span>
+              {globalSearchShortcutLabel ? <kbd>{globalSearchShortcutLabel}</kbd> : null}
+            </button>
+            <div className="toolbar-profile-context">
+              <button className="active-profile-chip" type="button" title={state.activeProfile || undefined} onClick={() => setQuickSwitcherOpen(true)}>
+                <span className="active-profile-label">{t(locale, "summaryActive")}</span>
+                <strong className="active-profile-name">{activeProfileDisplayName}</strong>
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
               <button
                 className="active-profile-terminal no-drag"
                 type="button"
@@ -488,11 +362,9 @@ export function App(): JSX.Element {
                 disabled={!state.activeProfile}
                 onClick={() => void openKimiInTerminal(state.activeProfile)}
               >
-                <Terminal size={14} />
+                <Terminal size={15} />
               </button>
             </div>
-          </div>
-          <div className="toolbar">
             <TopbarControls
               locale={locale}
               theme={state.panelSettings.theme}
@@ -515,7 +387,7 @@ export function App(): JSX.Element {
           </div>
         </header>
 
-        <div className="content-scroll" role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+        <div className="content-scroll" id={`panel-${activeTab}`} aria-label={activePageTitle}>
           {activeTab === "profiles" ? (
             <ProfileCentricView
               state={state}
@@ -524,11 +396,11 @@ export function App(): JSX.Element {
               dirtyProfiles={dirtyProfiles}
               onSelect={(name) => runAfterUnsavedHandled(() => setSelectedProfile(name))}
               onSwitch={(profileName) =>
-                updateState((draft) => {
+                runAfterUnsavedHandled(() => updateState((draft) => {
                   applyProfile(draft, profileName);
                 }, {
                   historySummary: formatMessage(t(locale, "historyActivateProfile"), { name: profileName }),
-                })
+                }))
               }
               onAddNew={() => setShowWizard(true)}
               onOpenTerminal={(profileName) => void openKimiInTerminal(profileName)}
@@ -707,7 +579,22 @@ export function App(): JSX.Element {
             });
             setShowWizard(false);
           }}
-          onCancel={() => setShowWizard(false)}
+          onCancel={(dirty) => {
+            if (!dirty) {
+              setShowWizard(false);
+              return;
+            }
+            void requestConfirm({
+              title: t(locale, "wizardDiscardTitle"),
+              description: t(locale, "wizardDiscardDescription"),
+              confirmLabel: t(locale, "discardChanges"),
+              cancelLabel: t(locale, "cancel"),
+              tone: "danger",
+              kind: "delete",
+            }).then((confirmed) => {
+              if (confirmed) setShowWizard(false);
+            });
+          }}
         />
       ) : null}
       {cascadeTarget ? (
@@ -753,8 +640,41 @@ export function App(): JSX.Element {
           onCancel={() => setCascadeTarget(null)}
         />
       ) : null}
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer locale={locale} toasts={toasts} onRemove={removeToast} />
     </div>
+  );
+}
+
+function NavigationButton(props: {
+  id: TabId;
+  icon: typeof Search;
+  label: string;
+  activeTab: TabId;
+  shortcut?: string;
+  secondary?: boolean;
+  onSelect: (tab: TabId) => void;
+}): JSX.Element {
+  const Icon = props.icon;
+  const isActive = props.id === props.activeTab;
+  return (
+    <button
+      id={`nav-${props.id}`}
+      type="button"
+      aria-current={isActive ? "page" : undefined}
+      className={[
+        "nav-item",
+        props.secondary ? "nav-subitem" : "",
+        isActive ? "active" : "",
+      ].filter(Boolean).join(" ")}
+      title={props.label}
+      onClick={() => {
+        if (!isActive) props.onSelect(props.id);
+      }}
+    >
+      <Icon size={props.secondary ? 17 : 19} />
+      <span>{props.label}</span>
+      {props.shortcut ? <kbd className="nav-shortcut">{props.shortcut}</kbd> : null}
+    </button>
   );
 }
 
