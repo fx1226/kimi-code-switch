@@ -14,6 +14,7 @@ const RE_MODEL = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) \| INFO\s+\| .+:cr
 const RE_CODE_LLM_CONFIG = /^(\d{4}-\d{2}-\d{2}T[^ ]+) INFO\s+llm config\s+(.+)$/;
 const RE_CODE_LLM_REQUEST = /^(\d{4}-\d{2}-\d{2}T[^ ]+) INFO\s+llm request\s+(.+)$/;
 const RE_CODE_LLM_FAILED = /^(\d{4}-\d{2}-\d{2}T[^ ]+) WARN\s+llm request failed\s+(.+)$/;
+const MAX_REQUEST_LATENCY_MS = 60 * 60 * 1000;
 
 interface FileStat {
   size: number;
@@ -44,8 +45,10 @@ export class UsageLogWatcher {
   private currentModel = "";
   private currentModelAlias = "";
   private pendingRequests = new Map<string, { ts: number; provider: string; model: string; modelAlias: string }>();
+  private pendingWireUsage = new Map<string, string[]>();
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private ingestTask: Promise<void> | null = null;
   private eventsIngested = 0;
 
   constructor(private options: UsageLogWatcherOptions) {}
@@ -72,8 +75,7 @@ export class UsageLogWatcher {
     await this.ingestHistoricalLogs();
     await this.readNewLines(this.logPath());
     this.pollTimer = setInterval(() => {
-      void this.readNewLines(this.logPath());
-      void this.readSessionLogs();
+      void this.ingestNow();
     }, 5000);
   }
 
@@ -95,8 +97,17 @@ export class UsageLogWatcher {
    */
   async ingestNow(): Promise<void> {
     if (!this.running) return;
-    await this.readNewLines(this.logPath());
-    await this.readSessionLogs();
+    if (this.ingestTask) return this.ingestTask;
+    const task = (async () => {
+      await this.readNewLines(this.logPath());
+      await this.readSessionLogs();
+    })();
+    this.ingestTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.ingestTask === task) this.ingestTask = null;
+    }
   }
 
   getStats(): { sessionsTracked: number; eventsIngested: number } {
@@ -190,7 +201,11 @@ export class UsageLogWatcher {
   }
 
   private inodeSignature(stat: FileStat): string {
-    return `${stat.ino}:${stat.mtime_ms}`;
+    // mtime changes on every append and therefore cannot be part of the file
+    // identity. A smaller size still handles truncation; inode changes handle
+    // rotation on Unix. On platforms without inode support, keep one stable
+    // sentinel and rely on the truncation check.
+    return stat.ino > 0 ? `ino:${stat.ino}` : "ino:unavailable";
   }
 
   private byteLength(text: string): number {
@@ -273,7 +288,31 @@ export class UsageLogWatcher {
   }
 
   private numberField(value: unknown): number {
-    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+    return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+
+  private sourceIdentity(sourcePath: string): string {
+    const session = this.sessionHintFromPath(sourcePath) ?? "global";
+    const parts = sourcePath.split("/");
+    const agentsIndex = parts.lastIndexOf("agents");
+    const agent = agentsIndex >= 0 ? parts[agentsIndex + 1] || "main" : "session-log";
+    return `${this.options.getActiveEnvironmentId?.() ?? "default"}:${session}:${agent}`;
+  }
+
+  private pendingKey(sourcePath: string, turnStep: string): string {
+    return `${this.sourceIdentity(sourcePath)}:${turnStep}`;
+  }
+
+  private wireUsageKey(sourcePath: string, agentId: unknown, usage: Record<string, unknown>): string {
+    return [
+      this.sourceIdentity(sourcePath),
+      typeof agentId === "string" ? agentId : "main",
+      this.numberField(usage.inputOther),
+      this.numberField(usage.output),
+      this.numberField(usage.inputCacheRead),
+      this.numberField(usage.inputCacheCreation),
+      this.numberField(usage.reasoningTokens),
+    ].join(":");
   }
 
   private withRuntimeContext(event: UsageEvent): UsageEvent {
@@ -291,13 +330,38 @@ export class UsageLogWatcher {
     } catch {
       return false;
     }
-    if (!this.isRecord(payload) || payload.type !== "usage.record") return false;
+    if (!this.isRecord(payload)) return false;
+
+    if (payload.type === "context.append_loop_event" && this.isRecord(payload.event)) {
+      const event = payload.event;
+      if (event.type !== "step.end" || !this.isRecord(event.usage)) return false;
+      const key = this.wireUsageKey(sourcePath, payload.agentId, event.usage);
+      const pending = this.pendingWireUsage.get(key) ?? [];
+      const requestId = pending[0];
+      if (!requestId) return true;
+      const firstTokenMs = this.numberField(event.llmFirstTokenLatencyMs);
+      const streamMs = this.numberField(event.llmStreamDurationMs);
+      const tsEnd = this.numberField(payload.time) || Date.now();
+      await db.updateEventTiming(requestId, firstTokenMs + streamMs, tsEnd);
+      const remaining = pending.slice(1);
+      if (remaining.length > 0) this.pendingWireUsage.set(key, remaining);
+      else this.pendingWireUsage.delete(key);
+      return true;
+    }
+
+    if (payload.type !== "usage.record") return false;
+    if (payload.usageScope === "session") return true;
     const usage = this.isRecord(payload.usage) ? payload.usage : {};
     const ts = this.numberField(payload.time) || Date.now();
     const model = typeof payload.model === "string" ? payload.model : this.currentModelAlias || this.currentModel;
     const provider = model.includes("/") ? model.split("/")[0] : this.currentProvider || "kimi";
     const event: UsageEvent = this.withRuntimeContext({
-      request_id: this.stableRequestId(sourcePath, ts, "usage", model),
+      request_id: this.stableRequestId(
+        this.sourceIdentity(sourcePath),
+        ts,
+        "usage",
+        [payload.agentId, payload.usageScope, model, usage.inputOther, usage.output, usage.inputCacheRead, usage.inputCacheCreation].join(":"),
+      ),
       ts,
       ts_end: ts,
       provider,
@@ -316,9 +380,18 @@ export class UsageLogWatcher {
       session_hint: this.sessionHintFromPath(sourcePath),
       cost_estimate: null,
       pricing_version: null,
-      metadata_json: JSON.stringify({ source: "kimi-code-wire", usageScope: payload.usageScope ?? null }),
+      metadata_json: JSON.stringify({
+        source: "kimi-code-wire",
+        usageScope: payload.usageScope ?? null,
+        agentId: typeof payload.agentId === "string" ? payload.agentId : null,
+      }),
     });
-    if (await db.insertEvent(event)) this.eventsIngested += 1;
+    const inserted = await db.insertEvent(event);
+    if (inserted) {
+      this.eventsIngested += 1;
+      const usageKey = this.wireUsageKey(sourcePath, payload.agentId, usage);
+      this.pendingWireUsage.set(usageKey, [...(this.pendingWireUsage.get(usageKey) ?? []), event.request_id]);
+    }
     this.options.onEvent?.(event);
     return true;
   }
@@ -367,7 +440,7 @@ export class UsageLogWatcher {
       const turnStep = fields.turnStep || "unknown";
       const ts = new Date(timestamp).getTime();
       if (!Number.isNaN(ts)) {
-        this.pendingRequests.set(turnStep, {
+        this.pendingRequests.set(this.pendingKey(sourcePath, turnStep), {
           ts,
           provider: this.currentProvider,
           model: this.currentModelAlias || this.currentModel,
@@ -383,12 +456,14 @@ export class UsageLogWatcher {
       const fields = this.parseFields(rawFields);
       const turnStep = fields.turnStep || "unknown";
       const ts = new Date(timestamp).getTime();
-      if (!Number.isNaN(ts) && !this.pendingRequests.has(turnStep)) {
-        this.pendingRequests.set(turnStep, {
+      const pendingKey = this.pendingKey(sourcePath, turnStep);
+      if (!Number.isNaN(ts)) {
+        const existing = this.pendingRequests.get(pendingKey);
+        this.pendingRequests.set(pendingKey, {
           ts,
-          provider: this.currentProvider,
-          model: this.currentModelAlias || this.currentModel,
-          modelAlias: this.currentModelAlias,
+          provider: existing?.provider || this.currentProvider,
+          model: existing?.model || this.currentModelAlias || this.currentModel,
+          modelAlias: existing?.modelAlias || this.currentModelAlias,
         });
       }
       return;
@@ -401,11 +476,14 @@ export class UsageLogWatcher {
       const ts = new Date(timestamp).getTime();
       if (Number.isNaN(ts)) return;
       const turnStep = fields.turnStep || "unknown";
-      const pending = this.pendingRequests.get(turnStep);
+      const pendingKey = this.pendingKey(sourcePath, turnStep);
+      const candidate = this.pendingRequests.get(pendingKey);
+      const pendingAge = candidate ? ts - candidate.ts : 0;
+      const pending = candidate && pendingAge >= 0 && pendingAge <= MAX_REQUEST_LATENCY_MS ? candidate : undefined;
       const status = Number.parseInt(fields.statusCode ?? "0", 10);
       const model = fields.model || pending?.model || this.currentModelAlias || this.currentModel;
       const event: UsageEvent = this.withRuntimeContext({
-        request_id: this.stableRequestId(sourcePath, ts, "failed", turnStep),
+        request_id: this.stableRequestId(this.sourceIdentity(sourcePath), ts, "failed", `${turnStep}:${model}:${fields.errorName ?? status}`),
         ts: pending?.ts ?? ts,
         ts_end: ts,
         provider: pending?.provider || this.currentProvider || "kimi",
@@ -428,7 +506,7 @@ export class UsageLogWatcher {
       });
       if (await db.insertEvent(event)) this.eventsIngested += 1;
       this.options.onEvent?.(event);
-      this.pendingRequests.delete(turnStep);
+      this.pendingRequests.delete(pendingKey);
       return;
     }
 
@@ -440,7 +518,7 @@ export class UsageLogWatcher {
       if (Number.isNaN(ts)) return;
 
       const event: UsageEvent = this.withRuntimeContext({
-        request_id: this.stableRequestId(sourcePath, ts, "step", sessionId),
+        request_id: this.stableRequestId(this.sourceIdentity(sourcePath), ts, "step", `${sessionId}:${inputStr}:${outputStr}`),
         ts,
         ts_end: null,
         provider: ctx.provider,

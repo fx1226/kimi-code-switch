@@ -3,6 +3,7 @@ import type { HTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, Re
 import { Check, ChevronDown, Globe, Plus, Save, Trash2, X } from "lucide-react";
 
 import type { Locale, LocalizedText, UiFontSize } from "@shared/types";
+import { createDefaultShortcuts, formatAcceleratorForPlatform } from "@shared/shortcutStore";
 
 import { labelForLocale } from "./appOptions";
 import { t } from "./i18n";
@@ -664,9 +665,19 @@ export interface ActionFooterProps {
 }
 
 export function ActionFooter(props: ActionFooterProps): JSX.Element {
+  // app.save 快捷键提示：基于默认加速键格式化为平台标签。改键在快捷键设置面板完成；
+  // 此组件无法感知用户自定义绑定，因此仅用于 title 提示（不展示 kbd 以免误导）。
+  const appSaveDefaultAccelerator = createDefaultShortcuts()["app.save"].accelerator;
+  const appSaveShortcutLabel = formatAcceleratorForPlatform(appSaveDefaultAccelerator);
   return (
     <div className="button-row">
-      <button className="action-button action-button-primary" type="button" disabled={props.isSaveDisabled} onClick={props.onSave}>
+      <button
+        className="action-button action-button-primary"
+        type="button"
+        disabled={props.isSaveDisabled}
+        onClick={props.onSave}
+        title={`${props.saveLabel} (${appSaveShortcutLabel})`}
+      >
         <Save size={16} />
         <span>{props.saveLabel}</span>
       </button>

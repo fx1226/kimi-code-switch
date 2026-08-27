@@ -41,7 +41,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     const api = getApi();
     if (!api) {
       setNotice("");
-      setError(t(locale, "backupPreloadUnavailable"));
+      setError(t(locale, "runtimeUnavailable"));
       return;
     }
     if (typeof api.runBackup !== "function") {
@@ -70,7 +70,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     const api = getApi();
     if (!api) {
       setNotice("");
-      setError(t(locale, "backupTestPreloadUnavailable"));
+      setError(t(locale, "runtimeUnavailable"));
       return;
     }
     if (typeof api.testBackupWebdav !== "function") {
@@ -102,7 +102,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     const api = getApi();
     if (!api) {
       setNotice("");
-      setError(t(locale, "backupRecordsPreloadUnavailable"));
+      setError(t(locale, "runtimeUnavailable"));
       return;
     }
     if (typeof api.listBackups !== "function") {
@@ -147,7 +147,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     const api = getApi();
     if (!api) {
       setNotice("");
-      setError(t(locale, "backupDeletePreloadUnavailable"));
+      setError(t(locale, "runtimeUnavailable"));
       return;
     }
     if (typeof api.deleteBackup !== "function") {
@@ -196,7 +196,7 @@ export function useBackupActions(ctx: BackupActionsContext) {
     const api = getApi();
     if (!api) {
       setNotice("");
-      setError(t(locale, "backupRestorePreloadUnavailable"));
+      setError(t(locale, "runtimeUnavailable"));
       return;
     }
     if (typeof api.restoreBackup !== "function") {

@@ -19,8 +19,13 @@ import {
   queryHeaviestSessions,
   queryModelTokenSums,
   queryOverview,
+  queryTokenTotals,
   queryTrend,
+  queryTrendTokens,
+  resolveTrendGranularity,
+  fillTrendTokenBuckets,
   setIngestState,
+  updateEventTiming,
 } from "./usageDb";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -75,6 +80,7 @@ describe("open", () => {
       .mockResolvedValueOnce(0 as unknown as never) // CREATE environment index
       .mockResolvedValueOnce(0 as unknown as never) // DROP TRIGGER trg_events_aggregate
       .mockResolvedValueOnce(0 as unknown as never) // DROP TABLE daily_aggregate
+      .mockResolvedValueOnce(undefined as unknown as never) // usage_exec_script canonical view
       .mockResolvedValueOnce([{ version: null }] as unknown as never) // SELECT MAX(version)
       .mockResolvedValueOnce(1 as unknown as never); // usage_exec INSERT
     await open("/tmp/usage.db");
@@ -82,7 +88,13 @@ describe("open", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("usage_open", { dbPath: "/tmp/usage.db", schemaSql: SCHEMA_SQL });
     const insert = lastQuery("usage_exec");
     expect(insert.sql).toMatch(/INSERT OR IGNORE INTO schema_versions/);
-    expect(insert.params).toMatchObject({ v: 1, d: "initial schema" });
+    expect(insert.params).toMatchObject({ v: 2, d: "create canonical usage view" });
+    expect(mockedInvoke).toHaveBeenCalledWith("usage_exec_script", expect.objectContaining({
+      sql: expect.stringContaining("ROW_NUMBER() OVER"),
+    }));
+    expect(mockedInvoke).toHaveBeenCalledWith("usage_exec_script", expect.objectContaining({
+      sql: expect.stringContaining("CREATE VIEW usage_events"),
+    }));
   });
 
   it("skips schema version insert when already current", async () => {
@@ -92,7 +104,8 @@ describe("open", () => {
       .mockResolvedValueOnce(0 as unknown as never)
       .mockResolvedValueOnce(0 as unknown as never) // DROP TRIGGER trg_events_aggregate
       .mockResolvedValueOnce(0 as unknown as never) // DROP TABLE daily_aggregate
-      .mockResolvedValueOnce([{ version: 1 }] as unknown as never);
+      .mockResolvedValueOnce(undefined as unknown as never) // usage_exec_script canonical view
+      .mockResolvedValueOnce([{ version: 2 }] as unknown as never);
     await open("/tmp/usage.db");
     const schemaVersionInserts = mockedInvoke.mock.calls.filter((call) =>
       call[0] === "usage_exec"
@@ -136,6 +149,16 @@ describe("insertEvent / insertEventsBatch", () => {
   });
 });
 
+describe("updateEventTiming", () => {
+  it("updates only a plausible measured latency for the matching event", async () => {
+    mockedInvoke.mockResolvedValue(1 as unknown as never);
+    await updateEventTiming("req-1", 1250, 1700000001250);
+    const call = lastQuery("usage_exec");
+    expect(call.sql).toContain("UPDATE events SET latency_ms = @latency_ms, ts_end = @ts_end");
+    expect(call.params).toMatchObject({ request_id: "req-1", latency_ms: 1250, ts_end: 1700000001250 });
+  });
+});
+
 describe("getEventCount", () => {
   it("maps the COUNT(*) result", async () => {
     mockedInvoke.mockResolvedValue([{ cnt: 42 }] as unknown as never);
@@ -149,30 +172,33 @@ describe("queryOverview", () => {
       calls: 4,
       tokens: 1000,
       cache_read: 200,
-      cache_input: 400,
+      cache_input: 600,
       reasoning: 50,
       latency_sum: 800,
+      latency_samples: 2,
       errors: 1,
     }] as unknown as never);
 
     const slice = await queryOverview("7d");
     expect(slice.totalCalls).toBe(4);
     expect(slice.totalTokens).toBe(1000);
-    expect(slice.cacheHitRate).toBeCloseTo(0.5);
-    expect(slice.avgLatencyMs).toBe(200);
+    expect(slice.cacheHitRate).toBeCloseTo(1 / 3);
+    expect(slice.avgLatencyMs).toBe(400);
+    expect(slice.latencySamples).toBe(2);
     expect(slice.errorRate).toBe(0.25);
 
     const call = lastQuery("usage_query");
-    expect(call.sql).toMatch(/FROM events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
     expect(call.params).toHaveProperty("from_ms");
     expect(call.params).toHaveProperty("to_ms");
   });
 
   it("avoids divide-by-zero when there are no calls", async () => {
-    mockedInvoke.mockResolvedValue([{ calls: 0, cache_input: 0 }] as unknown as never);
+    mockedInvoke.mockResolvedValue([{ calls: 0, cache_input: 0, latency_samples: 0 }] as unknown as never);
     const slice = await queryOverview("today");
     expect(slice.cacheHitRate).toBe(0);
     expect(slice.avgLatencyMs).toBe(0);
+    expect(slice.latencySamples).toBe(0);
     expect(slice.errorRate).toBe(0);
   });
 
@@ -202,7 +228,7 @@ describe("queryTrend", () => {
     const points = await queryTrend("today", "hour", "profile");
     expect(points).toEqual([{ bucket: 3600000, group: "default", tokens: 5, calls: 1 }]);
     const call = lastQuery("usage_query");
-    expect(call.sql).toMatch(/FROM events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
     expect(call.sql).toContain("profile AS grp");
   });
 
@@ -211,7 +237,7 @@ describe("queryTrend", () => {
     const points = await queryTrend("7d", "day", null);
     expect(points[0].bucket).toBe(new Date(2026, 0, 2).getTime());
     const call = lastQuery("usage_query");
-    expect(call.sql).toMatch(/FROM events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
     expect(call.sql).toContain("localtime");
   });
 
@@ -229,8 +255,9 @@ describe("queryBreakdown", () => {
     mockedInvoke.mockResolvedValue([{ name: "m", calls: 3, tokens: 9, errors: 0, avg_latency_ms: 100, cache_hit_rate: 0.3 }] as unknown as never);
     await queryBreakdown("model", "30d", 999, "errors");
     const call = lastQuery("usage_query");
-    expect(call.sql).toMatch(/FROM events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
     expect(call.sql).toContain("ORDER BY errors DESC");
+    expect(call.sql).toContain("prompt_tokens+cache_read_tokens+cache_creation_tokens");
     expect(call.params).toMatchObject({ limit: 50 });
   });
 
@@ -244,10 +271,10 @@ describe("queryBreakdown", () => {
 });
 
 describe("queryModelTokenSums", () => {
-  it("sums token dimensions from events within the exact range", async () => {
+  it("sums token dimensions from events within the exact range for hour buckets", async () => {
     mockedInvoke.mockResolvedValue([{
       model: "k2",
-      day: "2026-01-02",
+      bucket: 1700000000000,
       prompt_tokens: 10,
       completion_tokens: 20,
       cache_read_tokens: 3,
@@ -255,10 +282,10 @@ describe("queryModelTokenSums", () => {
       reasoning_tokens: 5,
     }] as unknown as never);
 
-    const rows = await queryModelTokenSums("7d", true);
+    const rows = await queryModelTokenSums("today", "hour");
     expect(rows).toEqual([{
       model: "k2",
-      day: "2026-01-02",
+      bucketMs: 1700000000000,
       prompt_tokens: 10,
       completion_tokens: 20,
       cache_read_tokens: 3,
@@ -266,16 +293,179 @@ describe("queryModelTokenSums", () => {
       reasoning_tokens: 5,
     }]);
     const call = lastQuery("usage_query");
-    expect(call.sql).toMatch(/FROM events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
+    expect(call.sql).toContain("(ts/3600000)*3600000");
+    expect(call.sql).toContain("GROUP BY model, bucket");
+  });
+
+  it("converts day bucket strings to local midnight ms like queryTrend", async () => {
+    mockedInvoke.mockResolvedValue([{
+      model: "k2",
+      bucket: "2026-01-02",
+      prompt_tokens: 10,
+      completion_tokens: 20,
+      cache_read_tokens: 3,
+      cache_creation_tokens: 4,
+      reasoning_tokens: 5,
+    }] as unknown as never);
+
+    const rows = await queryModelTokenSums("7d", "day");
+    expect(rows[0].bucketMs).toBe(new Date(2026, 0, 2).getTime());
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime')");
     expect(call.sql).toContain("localtime");
+  });
+
+  it("returns a zero bucket and no bucket grouping for the none granularity", async () => {
+    mockedInvoke.mockResolvedValue([{
+      model: "k2",
+      bucket: 0,
+      prompt_tokens: 1,
+      completion_tokens: 2,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      reasoning_tokens: 0,
+    }] as unknown as never);
+
+    const rows = await queryModelTokenSums("7d", "none");
+    expect(rows[0].bucketMs).toBe(0);
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("GROUP BY model");
+    expect(call.sql).not.toContain("GROUP BY model, bucket");
   });
 
   it("applies the environment filter to cost token sums", async () => {
     mockedInvoke.mockResolvedValue([] as unknown as never);
-    await queryModelTokenSums("7d", false, "env-2");
+    await queryModelTokenSums("7d", "none", "env-2");
     const call = lastQuery("usage_query");
     expect(call.sql).toContain("kimi_code_environment_id = @environment_id");
     expect(call.params).toMatchObject({ environment_id: "env-2" });
+  });
+});
+
+describe("queryTokenTotals", () => {
+  it("maps the four summed token columns, defaulting missing buckets to 0", async () => {
+    mockedInvoke.mockResolvedValue([{
+      prompt_tokens: 100,
+      completion_tokens: 200,
+      cache_read_tokens: 30,
+      cache_creation_tokens: 40,
+    }] as unknown as never);
+    await expect(queryTokenTotals("7d")).resolves.toEqual({
+      promptTokens: 100,
+      completionTokens: 200,
+      cacheCreationTokens: 40,
+      cacheReadTokens: 30,
+    });
+    const call = lastQuery("usage_query");
+    expect(call.sql).toMatch(/COALESCE\(SUM\(prompt_tokens\),0\)/);
+    expect(call.sql).toMatch(/FROM usage_events WHERE ts >= @from_ms AND ts < @to_ms/);
+  });
+
+  it("returns all-zero totals when no rows match", async () => {
+    mockedInvoke.mockResolvedValue([{}] as unknown as never);
+    await expect(queryTokenTotals("30d")).resolves.toEqual({
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+  });
+
+  it("applies the environment filter to token totals", async () => {
+    mockedInvoke.mockResolvedValue([] as unknown as never);
+    await queryTokenTotals("7d", "env-2");
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("kimi_code_environment_id = @environment_id");
+    expect(call.params).toMatchObject({ environment_id: "env-2" });
+  });
+});
+
+describe("queryTrendTokens", () => {
+  it("aggregates hour buckets with raw ms timestamps", async () => {
+    mockedInvoke.mockResolvedValue([{
+      bucket: 3600000,
+      prompt_tokens: 10,
+      completion_tokens: 20,
+      cache_read_tokens: 3,
+      cache_creation_tokens: 4,
+    }] as unknown as never);
+    await expect(queryTrendTokens({ fromUtc: 3600000, toUtc: 7200000 }, "hour")).resolves.toEqual([{
+      bucket: 3600000,
+      prompt: 10,
+      completion: 20,
+      cacheCreation: 4,
+      cacheRead: 3,
+    }]);
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("(ts/3600000)*3600000");
+    expect(call.sql).toContain("GROUP BY bucket ORDER BY bucket");
+  });
+
+  it("converts day bucket strings to local midnight ms", async () => {
+    mockedInvoke.mockResolvedValue([{
+      bucket: "2026-01-02",
+      prompt_tokens: 1,
+      completion_tokens: 2,
+      cache_read_tokens: 3,
+      cache_creation_tokens: 4,
+    }] as unknown as never);
+    const dayStart = new Date(2026, 0, 2).getTime();
+    const points = await queryTrendTokens({ fromUtc: dayStart, toUtc: new Date(2026, 0, 3).getTime() }, "day");
+    expect(points[0].bucket).toBe(new Date(2026, 0, 2).getTime());
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime')");
+  });
+
+  it("applies the environment filter to trend token queries", async () => {
+    mockedInvoke.mockResolvedValue([] as unknown as never);
+    await queryTrendTokens("7d", "day", "env-2");
+    const call = lastQuery("usage_query");
+    expect(call.sql).toContain("kimi_code_environment_id = @environment_id");
+    expect(call.params).toMatchObject({ environment_id: "env-2" });
+  });
+});
+
+describe("resolveTrendGranularity", () => {
+  it("uses hour for today / 3d presets", () => {
+    expect(resolveTrendGranularity("today")).toBe("hour");
+    expect(resolveTrendGranularity("3d")).toBe("hour");
+  });
+
+  it("uses day for 7d / 14d / 30d / 90d / mtd presets", () => {
+    expect(resolveTrendGranularity("7d")).toBe("day");
+    expect(resolveTrendGranularity("14d")).toBe("day");
+    expect(resolveTrendGranularity("30d")).toBe("day");
+    expect(resolveTrendGranularity("90d")).toBe("day");
+    expect(resolveTrendGranularity("mtd")).toBe("day");
+  });
+
+  it("uses hour for custom ranges spanning at most 3 days", () => {
+    const now = Date.now();
+    expect(resolveTrendGranularity({ fromUtc: now - 3 * 86400000, toUtc: now })).toBe("hour");
+    expect(resolveTrendGranularity({ fromUtc: now - 86400000, toUtc: now })).toBe("hour");
+  });
+
+  it("uses day for custom ranges spanning more than 3 days", () => {
+    const now = Date.now();
+    expect(resolveTrendGranularity({ fromUtc: now - 4 * 86400000, toUtc: now })).toBe("day");
+  });
+});
+
+describe("fillTrendTokenBuckets", () => {
+  it("fills missing day buckets with zeros across the requested range", () => {
+    const from = new Date(2026, 0, 1).getTime();
+    const to = new Date(2026, 0, 4).getTime();
+    const points = fillTrendTokenBuckets([
+      { bucket: new Date(2026, 0, 2).getTime(), prompt: 10, completion: 2, cacheCreation: 0, cacheRead: 5 },
+    ], { fromUtc: from, toUtc: to }, "day");
+
+    expect(points.map((point) => point.bucket)).toEqual([
+      new Date(2026, 0, 1).getTime(),
+      new Date(2026, 0, 2).getTime(),
+      new Date(2026, 0, 3).getTime(),
+    ]);
+    expect(points.map((point) => point.prompt)).toEqual([0, 10, 0]);
   });
 });
 
@@ -285,8 +475,9 @@ describe("queryHeaviestSessions", () => {
     await queryHeaviestSessions("7d", 10, "env-2");
 
     const call = lastQuery("usage_query");
-    expect(call.sql).toContain("FROM events ue WHERE ts >= @from_ms AND ts < @to_ms AND kimi_code_environment_id = @environment_id");
-    expect(call.sql).toContain("e2.kimi_code_environment_id = @environment_id");
+    expect(call.sql).toContain("FROM usage_events ue WHERE ts >= @from_ms AND ts < @to_ms AND kimi_code_environment_id = @environment_id");
+    expect(call.sql).toContain("SUBSTR(MIN(printf('%020d', ts) || profile), 21) AS profile");
+    expect(call.sql).not.toContain("SELECT profile FROM usage_events e2");
     expect(call.params).toMatchObject({ environment_id: "env-2", limit: 10 });
   });
 });

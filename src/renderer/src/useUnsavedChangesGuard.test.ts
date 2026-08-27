@@ -38,6 +38,108 @@ function renderGuard(decision: "save" | "discard" | "cancel", saveResult = true)
 }
 
 describe("useUnsavedChangesGuard", () => {
+  it("ignores auto-saved UI view state differences", async () => {
+    const savedState = createFallbackState();
+    const state = structuredClone(savedState);
+    state.panelSettings.uiState = { activeTab: "insights" };
+    const requestConfirm = vi.fn();
+    const hook = renderHook(() => useUnsavedChangesGuard({
+      state,
+      savedState,
+      locale: "zh-CN",
+      requestConfirm,
+      persistState: vi.fn(),
+      restoreSavedState: vi.fn(),
+    }));
+
+    expect(hook.result.current.hasUnsavedChanges).toBe(false);
+    await expect(hook.result.current.resolveUnsavedChanges()).resolves.toBe("unchanged");
+    expect(requestConfirm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["profile", (state: AppState) => {
+      state.profiles.draft = {
+        name: "draft",
+        label: "Edited",
+        default_model: "",
+        default_plan_mode: false,
+        default_permission_mode: "manual",
+        merge_all_available_skills: false,
+      };
+    }],
+    ["tui", (state: AppState) => { state.tuiConfig = { theme: "dark" }; }],
+    ["model pricing", (state: AppState) => {
+      state.mainConfig.models["provider/model"] = {
+        provider: "provider",
+        model: "model",
+        max_context_size: 1024,
+        capabilities: [],
+        pricing: {
+          input_per_mtok: 1,
+          output_per_mtok: 2,
+          cache_read_per_mtok: 0.1,
+          cache_creation_per_mtok: 0.2,
+        },
+      };
+    }],
+    ["project dirs", (state: AppState) => {
+      state.projectLocalConfig = {
+        projectRoot: "/tmp/project",
+        workingDirectory: "/tmp/project",
+        path: "/tmp/project/.kimi/local.toml",
+        additionalDirs: ["/tmp/extra"],
+        document: "",
+        sha256: "baseline",
+      };
+    }],
+  ])("detects a real %s draft", (_label, mutate) => {
+    const savedState = createFallbackState();
+    const state = structuredClone(savedState);
+    mutate(state);
+    const hook = renderHook(() => useUnsavedChangesGuard({
+      state,
+      savedState,
+      locale: "zh-CN",
+      requestConfirm: vi.fn(),
+      persistState: vi.fn(),
+      restoreSavedState: vi.fn(),
+    }));
+
+    expect(hook.result.current.hasUnsavedChanges).toBe(true);
+  });
+
+  it("waits for an in-flight save and rechecks the latest state before prompting", async () => {
+    const { state, savedState } = createStates();
+    const stateRef = { current: state };
+    const savedStateRef = { current: savedState as AppState | null };
+    let releaseSave: (() => void) | undefined;
+    const waitForPendingSaves = vi.fn(() => new Promise<void>((resolve) => {
+      releaseSave = () => {
+        savedStateRef.current = structuredClone(stateRef.current);
+        resolve();
+      };
+    }));
+    const requestConfirm = vi.fn();
+    const hook = renderHook(() => useUnsavedChangesGuard({
+      state,
+      savedState,
+      stateRef,
+      savedStateRef,
+      waitForPendingSaves,
+      locale: "zh-CN",
+      requestConfirm,
+      persistState: vi.fn(),
+      restoreSavedState: vi.fn(),
+    }));
+
+    const resolution = hook.result.current.resolveUnsavedChanges();
+    expect(requestConfirm).not.toHaveBeenCalled();
+    releaseSave?.();
+    await expect(resolution).resolves.toBe("unchanged");
+    expect(requestConfirm).not.toHaveBeenCalled();
+  });
+
   it("saves and continues after an explicit save decision", async () => {
     const guard = renderGuard("save");
 

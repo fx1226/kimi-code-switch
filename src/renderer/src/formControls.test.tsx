@@ -2,9 +2,18 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { Globe } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ReadOnlyField, SelectField } from "./formControls";
+import { ActionFooter, ReadOnlyField, SelectField } from "./formControls";
 
 describe("form controls", () => {
+  it("ActionFooter renders without crashing and shows save title hint", () => {
+    const onSave = vi.fn();
+    const { getByText } = render(<ActionFooter onSave={onSave} saveLabel="Save" deleteLabel="Delete" onDelete={vi.fn()} />);
+    const saveButton = getByText("Save").closest("button");
+    expect(saveButton).not.toBeNull();
+    // 默认 app.save 加速键为 CommandOrControl+S，formatAcceleratorForPlatform 在 macOS 下渲染为 ⌘S
+    expect(saveButton?.getAttribute("title")).toContain("S");
+  });
+
   it("uses a native labeled select for simple enums", () => {
     const onChange = vi.fn();
     const { getByLabelText } = render(<SelectField label="Mode" value="manual" options={[{ value: "manual", label: "Manual" }, { value: "auto", label: "Auto" }]} onChange={onChange} />);

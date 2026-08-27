@@ -148,10 +148,10 @@ textarea {
 .action-button.icon-only { width: var(--icon-target-size); min-width: var(--icon-target-size); height: var(--icon-target-size); }
 .action-button-primary { color: var(--on-primary); }
 .form-panel > .button-row {
+  /* 跟随表单内容，不复用早期 components.css 的 margin-top:auto 推底 */
   position: static;
   margin-inline: 0;
   padding: var(--space-4) 0 0;
-  background: transparent;
   backdrop-filter: none;
 }
 

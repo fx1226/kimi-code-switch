@@ -181,6 +181,8 @@ describe("useAppPersistence", () => {
       doctor: { ok: true, generatedAt: "", issues: [], errorCount: 0, warningCount: 0, infoCount: 0 },
     });
     const previewState = vi.fn().mockResolvedValue({});
+    const refreshPreview = vi.fn();
+    const refreshSkills = vi.fn();
     vi.stubGlobal("kimiSwitch", {
       saveStateSafe,
       previewState,
@@ -201,8 +203,8 @@ describe("useAppPersistence", () => {
       setFileSnapshot: vi.fn(),
       setDoctorReport: vi.fn(),
       confirmExternalOverwrite: vi.fn(),
-      refreshPreview: vi.fn(),
-      refreshSkills: vi.fn(),
+      refreshPreview,
+      refreshSkills,
       currentSelections: { provider: "", model: "", profile: "", mcpServer: "" },
       setSelectedProvider: vi.fn(),
       setSelectedModel: vi.fn(),
@@ -219,6 +221,73 @@ describe("useAppPersistence", () => {
     expect(saveStateSafe).toHaveBeenCalledWith(expect.any(Object), {
       expectedSnapshot: latestSnapshot,
     });
+  });
+
+  it("does not overwrite a newer manual draft when an older save finishes", async () => {
+    const submittedState = createState();
+    submittedState.mainConfig.default_permission_mode = "manual";
+    const newerDraft = structuredClone(submittedState);
+    newerDraft.mainConfig.default_permission_mode = "yolo";
+    const stateRef = { current: submittedState };
+    let finishSave: (() => void) | undefined;
+    const saveStateSafe = vi.fn(() => new Promise<{
+      ok: true;
+      snapshot: FileSnapshotBundle;
+      doctor: { ok: true; generatedAt: string; issues: never[]; errorCount: 0; warningCount: 0; infoCount: 0 };
+    }>((resolve) => {
+      finishSave = () => resolve({
+        ok: true,
+        snapshot: createSnapshot("saved"),
+        doctor: { ok: true, generatedAt: "", issues: [], errorCount: 0, warningCount: 0, infoCount: 0 },
+      });
+    }));
+    vi.stubGlobal("kimiSwitch", {
+      saveStateSafe,
+      previewState: vi.fn().mockResolvedValue({}),
+    });
+    const setState = vi.fn();
+    const setSavedState = vi.fn();
+    const refreshPreviewForNewerDraft = vi.fn();
+    const refreshSkillsForNewerDraft = vi.fn();
+    const { result } = renderHook(() => useAppPersistence({
+      state: submittedState,
+      stateRef,
+      savedState: submittedState,
+      locale: "zh-CN",
+      setState,
+      setSavedState,
+      setPreview: vi.fn(),
+      setError: vi.fn(),
+      setNotice: vi.fn(),
+      setDiagnostics: vi.fn(),
+      fileSnapshot: createSnapshot("baseline"),
+      setFileSnapshot: vi.fn(),
+      setDoctorReport: vi.fn(),
+      confirmExternalOverwrite: vi.fn(),
+      refreshPreview: refreshPreviewForNewerDraft,
+      refreshSkills: refreshSkillsForNewerDraft,
+      currentSelections: { provider: "", model: "", profile: "", mcpServer: "" },
+      setSelectedProvider: vi.fn(),
+      setSelectedModel: vi.fn(),
+      setSelectedProfile: vi.fn(),
+      setSelectedMcpServer: vi.fn(),
+    }));
+
+    let savePromise: Promise<boolean> | undefined;
+    act(() => {
+      savePromise = result.current.persistState(submittedState);
+    });
+    await vi.waitFor(() => expect(saveStateSafe).toHaveBeenCalled());
+    stateRef.current = newerDraft;
+    finishSave?.();
+    await act(async () => { await savePromise; });
+
+    expect(setState).not.toHaveBeenCalled();
+    expect(setSavedState).toHaveBeenCalledWith(expect.objectContaining({
+      mainConfig: expect.objectContaining({ default_permission_mode: "manual" }),
+    }));
+    expect(refreshPreviewForNewerDraft).toHaveBeenCalledWith(newerDraft);
+    expect(refreshSkillsForNewerDraft).toHaveBeenCalledWith(newerDraft, { silent: true });
   });
 
   it("returns false and leaves saved state unchanged when persistence fails", async () => {

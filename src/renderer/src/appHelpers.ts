@@ -36,6 +36,30 @@ export function isEqualValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function stableSerialize(value: unknown): string {
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (typeof input !== "object" || input === null) return input;
+    return Object.fromEntries(
+      Object.keys(input as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, normalize((input as Record<string, unknown>)[key])]),
+    );
+  };
+  return JSON.stringify(normalize(value));
+}
+
+/** Only domains edited as manual drafts; auto-saved panel/UI preferences are excluded. */
+export function buildManualDraftProjection(state: AppState): Record<string, string> {
+  return {
+    mainConfig: stableSerialize(state.mainConfig),
+    profiles: stableSerialize({ activeProfile: state.activeProfile, profiles: state.profiles }),
+    mcp: stableSerialize(state.mcpConfig),
+    tui: stableSerialize(state.tuiConfig ?? {}),
+    projectAdditionalDirs: stableSerialize(state.projectLocalConfig?.additionalDirs ?? []),
+  };
+}
+
 export function collectDirtyKeys<T>(
   current: Record<string, T>,
   saved: Record<string, T>,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Star } from "lucide-react";
+import { Copy, Inbox, Star } from "lucide-react";
 
 import type { Locale } from "@shared/types";
 
@@ -52,7 +52,7 @@ export function SplitLayout(props: {
       {props.hideList ? null : (
       <div className="glass-panel list-panel">
         <div className="list-header">
-          <div className="section-title">{props.listTitle}</div>
+          {props.listTitle ? <div className="section-title">{props.listTitle}</div> : null}
           <div className="list-header-actions">
             {props.headerActions}
             {props.onAdd ? (
@@ -70,7 +70,7 @@ export function SplitLayout(props: {
           </div>
         </div>
         {props.listBanner}
-        {props.searchPlaceholder && props.listItems.length > 4 ? (
+        {props.searchPlaceholder ? (
           <label className="resource-list-search">
             <span className="sr-only">{props.searchPlaceholder}</span>
             <input type="search" value={query} placeholder={props.searchPlaceholder} onChange={(event) => setQuery(event.target.value)} />
@@ -131,6 +131,9 @@ export function SplitLayout(props: {
 export function EmptyState(props: { locale: Locale; hasItems?: boolean }): JSX.Element {
   return (
     <section className="glass-panel form-panel empty-state">
+      <div className="empty-state-icon" aria-hidden="true">
+        <Inbox size={40} />
+      </div>
       <div className="section-title">{t(props.locale, props.hasItems ? "emptyState" : "emptyCollection")}</div>
       <p>{t(props.locale, props.hasItems ? "selectItemHint" : "createFirstHint")}</p>
     </section>

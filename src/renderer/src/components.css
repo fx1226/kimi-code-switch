@@ -62,13 +62,6 @@ textarea:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
-.boot-screen {
-  display: grid;
-  place-items: center;
-  min-height: 100vh;
-  color: var(--muted);
-}
-
 .window-titlebar {
   position: fixed;
   top: 0;
@@ -1294,47 +1287,6 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
-/* ============ Responsive: 768px (tablet) ============ */
-@media (max-width: 768px) {
-  .update-dialog {
-    width: min(100vw - 32px, 560px);
-    padding: 14px;
-    border-radius: var(--radius-lg);
-  }
-
-  .update-dialog-topline {
-    padding: 4px 4px 14px;
-  }
-
-  .update-dialog-header {
-    padding: 22px;
-  }
-
-  .update-dialog-title-row h3 {
-    font-size: var(--text-lg);
-  }
-
-  .update-dialog-version-row {
-    grid-template-columns: 1fr;
-  }
-
-  .update-dialog-version-separator {
-    display: none;
-  }
-
-  .update-dialog-actions {
-    justify-content: stretch;
-  }
-
-  .update-dialog-actions .update-dialog-button {
-    width: 100%;
-  }
-
-  .confirm-dialog {
-    width: min(100vw - 32px, 440px);
-    padding: 22px;
-  }
-}
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -2341,15 +2293,6 @@ textarea:focus-visible {
   border-color: rgba(var(--success-rgb), 0.24);
 }
 
-
-@media (max-width: 768px) {
-  .app-tip-layer {
-    right: 18px;
-    bottom: 18px;
-    width: calc(100vw - 36px);
-  }
-}
-
 .feature-card,
 .hero-panel,
 .form-panel,
@@ -2375,6 +2318,28 @@ textarea:focus-visible {
 }
 
 .feature-card p,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary);
+}
+
 .empty-state p {
   color: var(--muted);
   line-height: 1.7;
@@ -5055,10 +5020,16 @@ textarea:focus-visible {
 }
 
 .form-panel>.button-row {
-  margin-top: auto;
   justify-content: flex-end;
   padding-top: 16px;
   border-top: 1px solid var(--line);
+}
+
+/* 编辑区表单内容列限宽，避免超大窗口下字段/标题/按钮行过度拉伸；不影响 .settings-grid/.settings-inline-fields 多栏 */
+.split-layout > :nth-child(2) > .form-panel,
+.split-layout > :nth-child(2) > .mcp-workspace > .form-panel {
+  width: 100%;
+  max-width: 720px;
 }
 
 .about-page {
@@ -5190,13 +5161,6 @@ textarea:focus-visible {
   min-height: 30px;
   padding-inline: 12px;
   border-radius: var(--radius-sm);
-}
-
-.about-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 18px;
 }
 
 .about-section {
@@ -6830,29 +6794,6 @@ textarea:focus-visible {
   background: var(--surface-quiet);
 }
 
-@media (max-width: 860px) {
-  .oauth-login-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .config-target-detection-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .config-target-detection-grid .config-target-metric,
-  .config-target-detection-grid .config-target-path {
-    grid-column: 1 / -1;
-  }
-
-  .kimi-environment-table-wrap {
-    overflow-x: auto;
-  }
-
-  .kimi-environment-table {
-    min-width: 900px;
-  }
-}
-
 .settings-action-row {
   padding-top: 4px;
 }
@@ -7240,51 +7181,6 @@ textarea:focus-visible {
   background: var(--surface-quiet);
 }
 
-
-/* ============ Responsive: 768px (tablet) - settings ============ */
-@media (max-width: 768px) {
-  .settings-tab-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-tab {
-    flex-basis: 100%;
-    min-height: 38px;
-  }
-
-  .shortcut-section-header {
-    display: grid;
-  }
-
-  .shortcut-section-tools {
-    justify-content: flex-start;
-  }
-}
-
-/* ============ Responsive: 1024px (desktop) ============ */
-@media (max-width: 1024px) {
-  .settings-inline-fields {
-    grid-template-columns: 1fr;
-  }
-
-  .skills-detail-summary-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .backup-records-table-head,
-  .backup-record-meta {
-    grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(200px, max-content);
-  }
-}
 
 /* ============ Responsive: 1180px ============ */
 @media (max-width: 1180px) {
@@ -7927,26 +7823,24 @@ textarea:focus-visible {
   .list-copy-button,
   .list-toggle-button,
   .list-terminal-button,
-  .list-delete-button {
-    display: inline-grid;
-    opacity: 0.82;
-    pointer-events: auto;
-  }
-
+  .list-delete-button,
   .profile-list-row .list-activate-button,
   .profile-list-row .list-copy-button,
   .profile-list-row .list-toggle-button,
-  .profile-list-row .list-terminal-button {
-    display: none;
-    opacity: 0;
-    pointer-events: none;
-  }
-
+  .profile-list-row .list-terminal-button,
   .provider-list-row .list-copy-button,
   .provider-list-row .list-toggle-button {
-    display: none;
-    opacity: 0;
-    pointer-events: none;
+    display: inline-grid;
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+
+  .list-activate-button:hover,
+  .list-copy-button:hover,
+  .list-toggle-button:hover,
+  .list-terminal-button:hover,
+  .list-delete-button:hover {
+    opacity: 1;
   }
 }
 @keyframes content-enter {
@@ -8189,25 +8083,6 @@ textarea:focus-visible {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   font-weight: var(--fw-bold);
-}
-
-@media (max-width: 640px) {
-  .command-palette-backdrop {
-    padding-top: 8vh;
-  }
-
-  .command-palette {
-    width: calc(100vw - 24px);
-  }
-
-  .command-palette-item {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .command-palette-item-subtitle {
-    grid-column: 2;
-    margin-left: 0;
-  }
 }
 
 .badge {
@@ -8673,11 +8548,6 @@ textarea:focus-visible {
 }
 :root[data-theme="light"] .pricing-input:hover {
   border-color: var(--line-strong);
-}
-@media (max-width: 560px) {
-  .model-pricing-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* 趋势图图例（legend）+ 点击提示。颜色全部走设计 token，亮/暗主题自动适配 */

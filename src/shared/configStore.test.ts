@@ -280,15 +280,16 @@ describe("configStore", () => {
 
   it("formats actionable missing model error", () => {
     const message = formatMissingModelError("kimi-k2.5", { "kimi_gateway/kimi-k2.5": {} }, {
-      context: "配置Profile default",
+      context: "Profile default",
     });
-    expect(message).toContain("这里需要填写 [models] 下的模型 key");
-    expect(message).toContain("可用模型 key：kimi_gateway/kimi-k2.5");
+    expect(message).toContain('references a missing default model: "kimi-k2.5"');
+    expect(message).toContain("Fill in the [models] key, not the model field value.");
+    expect(message).toContain("Available model keys: kimi_gateway/kimi-k2.5");
   });
 
   it("formats empty model hint when there are no models", () => {
-    const message = formatMissingModelError("", {}, { context: "配置Profile broken" });
-    expect(message).toContain("当前还没有任何模型");
+    const message = formatMissingModelError("", {}, { context: "Profile broken" });
+    expect(message).toContain("There are no models yet; create one on the Models page first.");
   });
 
   it("builds preview bundle with diff", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Activity, Braces, Bug, CircleCheckBig, Copy, Download, ExternalLink, FileInput, FolderOpen, History, LoaderCircle, LogIn, Plus, Power, RefreshCw, RotateCcw, Save, Star, Terminal, Trash2, Upload, X } from "lucide-react";
-import { applyProfile, assessFullBackupRisk, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, setModelEnabled, setProviderEnabled, toggleFavorite, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
+import { Activity, Braces, Bug, CircleCheckBig, Copy, Download, ExternalLink, FileInput, FolderOpen, History, LoaderCircle, LogIn, Plus, Power, RefreshCw, RotateCcw, Save, Terminal, Trash2, Upload, X } from "lucide-react";
+import { applyProfile, assessFullBackupRisk, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, setModelEnabled, setProviderEnabled, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
 import { buildMcpConfigDocument } from "@shared/mcpStore";
 import { buildModelName, ensureUniqueEntryName, normalizeEntryName } from "@shared/nameRules";
 import { getCascadePreview } from "@shared/configRelations";
@@ -60,7 +60,7 @@ import {
 import type { AppContext } from "./appContext";
 import {
   ProviderForm, ModelForm, ProfileForm, McpServerForm,
-  SecretField, PathField, createCopyName, createLocalizedCopyName, createDefaultMcpServer,
+  SecretField, PathField, createCopyName, createDefaultMcpServer,
   formatMessage, formatSkillPathLabel, renderSkillPathLabel, DoctorDriftList, McpJsonViewerDialog,
 } from "../tabComponents";
 
@@ -875,7 +875,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
     {
       id: "history",
       label: t(locale, "historyTitle"),
-      description: t(locale, "historyTitle"),
+      description: t(locale, "settingsHistoryDescription"),
     },
   ];
   const isSplitLayoutTab = activeTab === "providers"
@@ -942,7 +942,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 />
               ) : null
             }
-            listTitle={t(locale, "providers")}
             listItems={providerEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
             renderItemLabel={(name) => {
@@ -1065,7 +1064,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
 
         {activeTab === "models" ? (
           <SplitLayout
-            listTitle={t(locale, "models")}
             listItems={modelEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
             renderItemLabel={(name) => {
@@ -1221,7 +1219,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         {activeTab === "profiles" ? (
           <SplitLayout
             hideList
-            listTitle={t(locale, "profiles")}
             listItems={profileEntries.map(([name]) => name)}
             dirtyItems={dirtyProfiles}
             dirtyLabel={t(locale, "editedBadge")}
@@ -1272,47 +1269,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               (
                 <span className="list-row-action-set profile-actions">
                   <span className="list-hover-actions">
-                    <button
-                      className={state.panelSettings.favorites?.profiles?.includes(name) ? "list-toggle-button active" : "list-toggle-button"}
-                      type="button"
-                      aria-label={state.panelSettings.favorites?.profiles?.includes(name) ? t(locale, "favoriteRemove") : t(locale, "favoriteAdd")}
-                      title={state.panelSettings.favorites?.profiles?.includes(name) ? t(locale, "favoriteRemove") : t(locale, "favoriteAdd")}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        const isFavorite = state.panelSettings.favorites?.profiles?.includes(name) ?? false;
-                        updateImmediateState((draft) => { toggleFavorite(draft, "profile", name); }, {
-                          recordHistory: true,
-                          historySummary: formatMessage(
-                            t(locale, isFavorite ? "historyUnfavoriteProfile" : "historyFavoriteProfile"),
-                            { name },
-                          ),
-                        });
-                      }}
-                    >
-                      <Star size={14} fill={state.panelSettings.favorites?.profiles?.includes(name) ? "currentColor" : "none"} />
-                    </button>
-                    <button
-                      className="list-copy-button"
-                      type="button"
-                      aria-label={`${t(locale, "clone")} ${name}`}
-                      title={t(locale, "clone")}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        updateState((draft) => {
-                          const profile = draft.profiles[name];
-                          if (!profile) return;
-                          const copyName = createLocalizedCopyName(name, draft.profiles, t(locale, "copySuffix"));
-                          cloneProfile(draft, name, copyName, `${profile.label} ${t(locale, "copySuffix")}`);
-                          setSelectedProfile(copyName);
-                        }, {
-                          persist: false,
-                          recordHistory: true,
-                          historySummary: formatMessage(t(locale, "historyCloneProfile"), { name }),
-                        });
-                      }}
-                    >
-                      <Copy size={15} />
-                    </button>
                     <button
                       className="list-terminal-button"
                       type="button"
@@ -1447,7 +1403,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
 
         {activeTab === "mcp" ? (
           <SplitLayout
-            listTitle={t(locale, "mcpServers")}
             listItems={mcpEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
             renderItemLabel={(name) => {
@@ -1529,6 +1484,27 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                     }
                   >
                     <Power size={15} />
+                  </button>
+                  <button
+                    className="list-copy-button"
+                    type="button"
+                    aria-label={`${t(locale, "clone")} ${name}`}
+                    title={t(locale, "clone")}
+                    onClick={() =>
+                      updateState((draft) => {
+                        const target = draft.mcpConfig.mcpServers[name];
+                        if (!target) return;
+                        const copyName = createUniqueName("mcp", Object.keys(draft.mcpConfig.mcpServers));
+                        draft.mcpConfig.mcpServers[copyName] = { ...target };
+                        setSelectedMcpServer(copyName);
+                      }, {
+                        persist: false,
+                        recordHistory: true,
+                        historySummary: formatMessage(t(locale, "historyCloneMcpServer"), { name }),
+                      })
+                    }
+                  >
+                    <Copy size={15} />
                   </button>
                   <button
                     className="list-delete-button"
@@ -1764,7 +1740,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
 
         {activeTab === "settings" ? (
           <SplitLayout
-            listTitle={t(locale, "settings")}
             listItems={settingsSubTabs.map((tab) => tab.id)}
             selectedItem={activeSettingsSubTab}
             itemLabel={(item) => settingsSubTabs.find((tab) => tab.id === item)?.label ?? item}
@@ -2566,7 +2541,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       type="button"
                       onClick={async () => {
                         const api = getApi();
-                        if (!api) { setError(t(locale, "openInTerminalUnavailable")); return; }
+                        if (!api) { setError(t(locale, "runtimeUnavailable")); return; }
                         if (typeof api.exportFullBackup !== "function") { setError(t(locale, "backupRuntimeOutdated")); return; }
                         try {
                           const bundle = await api.exportFullBackup(state);
@@ -2587,7 +2562,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       type="button"
                       onClick={async () => {
                         const api = getApi();
-                        if (!api) { setError(t(locale, "openInTerminalUnavailable")); return; }
+                        if (!api) { setError(t(locale, "runtimeUnavailable")); return; }
                         if (typeof api.importFullBackup !== "function") { setError(t(locale, "backupRuntimeOutdated")); return; }
                         const fileResult = await api.pickFile({ filters: [{ name: "JSON", extensions: ["json"] }] });
                         if (fileResult.canceled || !fileResult.filePath) return;

@@ -69,9 +69,7 @@ export function ProfileCentricView(props: ProfileCentricViewProps): JSX.Element 
 
   return (
     <section className="profile-centric-view">
-      <div className="pcv-header">
-        <h2>{t(locale, "modelConfig")}</h2>
-        <div className="pcv-header-actions">
+      <div className="pcv-header-actions">
           <button
             className="action-button compact icon-only"
             type="button"
@@ -81,7 +79,6 @@ export function ProfileCentricView(props: ProfileCentricViewProps): JSX.Element 
           >
             <Plus size={16} />
           </button>
-        </div>
       </div>
 
       {activeEntry ? (

@@ -4,8 +4,8 @@ import type { MutableRefObject } from "react";
 
 import { cloneState, normalizeStatePaths } from "@shared/configStore";
 import type { AppState, ConfigDoctorReport, ConfigTarget, FileSnapshotBundle, Locale, PreviewBundle, SaveStateConflictResult } from "@shared/types";
-import { getApi } from "./appHelpers";
-import { translateError } from "./i18n";
+import { getApi, isEqualValue } from "./appHelpers";
+import { t, translateError } from "./i18n";
 import type { DiagnosticsState } from "./overviewDashboard";
 import { applyPrimarySelections, getDefaultPrimarySelections, getRetainedPrimarySelections } from "./primarySelections";
 import { applyAppearanceMode, applyAppearanceTheme, applyUiFontSize, createFallbackState } from "./tabComponents";
@@ -41,6 +41,7 @@ interface AppPersistenceContext {
   setNotice: Dispatch<SetStateAction<string>>;
   setDiagnostics: Dispatch<SetStateAction<DiagnosticsState>>;
   fileSnapshot: FileSnapshotBundle | null;
+  stateRef?: MutableRefObject<AppState>;
   fileSnapshotRef?: MutableRefObject<FileSnapshotBundle | null>;
   setFileSnapshot: Dispatch<SetStateAction<FileSnapshotBundle | null>>;
   setDoctorReport: Dispatch<SetStateAction<ConfigDoctorReport | null>>;
@@ -71,6 +72,7 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setNotice,
     setDiagnostics,
     fileSnapshot,
+    stateRef,
     fileSnapshotRef,
     setFileSnapshot,
     setDoctorReport,
@@ -303,10 +305,19 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
         await api.setTray(normalized.panelSettings.tray_icon);
       }
       const nextPreview = await api.previewState(normalized);
-      setState(normalized);
+      const latestVisibleState = stateRef?.current ?? state;
+      const hasNewerVisibleState = !isEqualValue(latestVisibleState, nextState);
+      if (!hasNewerVisibleState) {
+        setState(normalized);
+        setPreview(nextPreview);
+        void refreshSkills(normalized, { silent: true });
+      } else {
+        // 保存 D 进行中用户可能已继续编辑成 E。旧保存只能推进 saved baseline，
+        // 不能再用 D 覆盖 E 对应的预览/技能报告。
+        void refreshPreview(latestVisibleState);
+        void refreshSkills(latestVisibleState, { silent: true });
+      }
       setSavedState(normalized);
-      setPreview(nextPreview);
-      void refreshSkills(normalized, { silent: true });
       setError("");
       setNotice("");
       // 修改后备份：核心配置指纹变化时静默触发（指纹去重使纯 UI 操作成为 no-op）。
@@ -326,6 +337,8 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     locale,
     refreshSkills,
     savedState,
+    state,
+    stateRef,
     setDiagnostics,
     setDoctorReport,
     setError,
@@ -509,10 +522,12 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     persistState: enqueuedPersistState,
     onSave: async (): Promise<void> => {
       if (!state) return;
-      await enqueuedPersistState(state);
+      const success = await enqueuedPersistState(state);
+      if (success) setNotice(t(locale, "saveSuccess"));
     },
     persistConfigTarget,
     persistImmediateState: enqueuedPersistImmediate,
+    waitForPendingSaves: saveCoordinator.waitForExplicitFlush,
     restoreSavedState,
     saveCoordinator,
   };

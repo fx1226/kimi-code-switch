@@ -1277,8 +1277,7 @@ export function McpServerForm(props: {
     <section className="glass-panel form-panel mcp-wizard-panel">
       <div className="mcp-wizard-header">
         <div>
-          <div className="section-title">{t(props.locale, "mcpWizardTitle")}</div>
-          <p>{t(props.locale, "mcpWizardDescription")}</p>
+          <div className="section-title">{t(props.locale, "mcpEditor")}</div>
         </div>
       </div>
       <McpTransportRadioGroup

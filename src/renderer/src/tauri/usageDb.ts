@@ -1,4 +1,4 @@
-// 用量洞察 SQLite 前端适配：SQL 与时间/游标逻辑（移植自 main/modules/usageDb.ts）
+// 使用统计 SQLite 前端适配：SQL 与时间/游标逻辑（移植自 main/modules/usageDb.ts）
 // 全部在 renderer 跑，通过 Rust 的 usage_* 命令操作 SQLite 连接。
 import { invoke } from "@tauri-apps/api/core";
 
@@ -12,14 +12,35 @@ import type {
   SeriesPoint,
   SessionRow,
   TimeRange,
+  TokenUsageTotals,
+  TrendTokenPoint,
   UsageEvent,
 } from "@shared/usageTypes";
 
 type Params = Record<string, string | number | null>;
 type Row = Record<string, unknown>;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const DEFAULT_ENVIRONMENT_ID = "default";
+const MAX_RELIABLE_LATENCY_MS = 60 * 60 * 1000;
+
+const CREATE_USAGE_EVENTS_VIEW_SQL = `
+DROP VIEW IF EXISTS usage_events;
+CREATE VIEW usage_events AS
+SELECT * FROM (
+    SELECT events.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY
+          kimi_code_environment_id, ts, ts_end, profile, provider, model,
+          prompt_tokens, completion_tokens, cache_read_tokens, cache_creation_tokens,
+          reasoning_tokens, latency_ms, proxy_overhead_ms, error_code, error_message,
+          http_status, session_hint, cost_estimate, pricing_version, metadata_json
+        ORDER BY rowid
+      ) AS duplicate_rank
+    FROM events
+)
+WHERE duplicate_rank = 1;
+`;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_versions (
@@ -106,18 +127,23 @@ function makeBounds(fromMs: number, toMs: number): RangeBounds {
 function computeBounds(range: TimeRange): RangeBounds {
   const now = Date.now();
   if (typeof range === "string") {
-    const DAY = 86400000;
+    const calendarDays = (count: number): RangeBounds => {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - (count - 1));
+      return makeBounds(start.getTime(), now);
+    };
     switch (range) {
       case "today": {
         const s = new Date(now);
         s.setHours(0, 0, 0, 0);
         return makeBounds(s.getTime(), now);
       }
-      case "3d": return makeBounds(now - 3 * DAY, now);
-      case "7d": return makeBounds(now - 7 * DAY, now);
-      case "14d": return makeBounds(now - 14 * DAY, now);
-      case "30d": return makeBounds(now - 30 * DAY, now);
-      case "90d": return makeBounds(now - 90 * DAY, now);
+      case "3d": return calendarDays(3);
+      case "7d": return calendarDays(7);
+      case "14d": return calendarDays(14);
+      case "30d": return calendarDays(30);
+      case "90d": return calendarDays(90);
       case "mtd": {
         const s = new Date(now);
         s.setDate(1);
@@ -190,14 +216,21 @@ export async function open(dbPath: string): Promise<void> {
   // 旧库可能残留它们，触发器仍会在每次插入时产生写开销且按 UTC 分桶与本地不一致。
   await exec("DROP TRIGGER IF EXISTS trg_events_aggregate").catch(() => 0);
   await exec("DROP TABLE IF EXISTS daily_aggregate").catch(() => 0);
+  // Recreate on every open so a partially migrated or manually repaired DB
+  // cannot retain a stale analytics definition. Raw event rows stay intact.
+  await invoke("usage_exec_script", { sql: CREATE_USAGE_EVENTS_VIEW_SQL });
   const rows = await query("SELECT MAX(version) AS version FROM schema_versions");
   const current = num(rows[0]?.version, 0);
   if (current < SCHEMA_VERSION) {
+    // v2: the same physical log could previously be reached through both the
+    // ~/.kimi-code symlink and its environment path. request_id included that
+    // path, so exact copies were stored twice. The canonical view above keeps
+    // raw rows recoverable while excluding exact copies from analytics.
     // INSERT OR IGNORE：幂等写入，避免并发/重复 open() 时两次插入同一 version
     // 触发 UNIQUE constraint failed（首次启动 StrictMode 双调用会复现）。
     await exec(
       "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc, description) VALUES (@v, @t, @d)",
-      { v: SCHEMA_VERSION, t: Date.now(), d: "initial schema" },
+      { v: SCHEMA_VERSION, t: Date.now(), d: "create canonical usage view" },
     );
   }
 }
@@ -287,8 +320,16 @@ export async function insertEventsBatch(events: UsageEvent[]): Promise<number> {
   return invoke<number>("usage_exec_batch", { sql: INSERT_SQL, rows });
 }
 
+export async function updateEventTiming(requestId: string, latencyMs: number, tsEnd: number): Promise<void> {
+  const safeLatency = Math.max(0, Math.min(MAX_RELIABLE_LATENCY_MS, Math.round(latencyMs)));
+  await exec(
+    "UPDATE events SET latency_ms = @latency_ms, ts_end = @ts_end WHERE request_id = @request_id",
+    { request_id: requestId, latency_ms: safeLatency, ts_end: tsEnd },
+  );
+}
+
 export async function getEventCount(): Promise<number> {
-  const rows = await query("SELECT COUNT(*) AS cnt FROM events");
+  const rows = await query("SELECT COUNT(*) AS cnt FROM usage_events");
   return num(rows[0]?.cnt);
 }
 
@@ -299,22 +340,25 @@ export async function queryOverview(range: TimeRange, environmentId?: string): P
        COUNT(*) AS calls,
        COALESCE(SUM(prompt_tokens+completion_tokens+cache_read_tokens+cache_creation_tokens+reasoning_tokens),0) AS tokens,
        COALESCE(SUM(cache_read_tokens),0) AS cache_read,
-       COALESCE(SUM(prompt_tokens+cache_read_tokens),0) AS cache_input,
+       COALESCE(SUM(prompt_tokens+cache_read_tokens+cache_creation_tokens),0) AS cache_input,
        COALESCE(SUM(reasoning_tokens),0) AS reasoning,
-       COALESCE(SUM(latency_ms),0) AS latency_sum,
+       COALESCE(SUM(CASE WHEN latency_ms > 0 AND latency_ms <= ${MAX_RELIABLE_LATENCY_MS} THEN latency_ms ELSE 0 END),0) AS latency_sum,
+       COALESCE(SUM(CASE WHEN latency_ms > 0 AND latency_ms <= ${MAX_RELIABLE_LATENCY_MS} THEN 1 ELSE 0 END),0) AS latency_samples,
        COALESCE(SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END),0) AS errors
-     FROM events WHERE ${conditions.join(" AND ")}`,
+     FROM usage_events WHERE ${conditions.join(" AND ")}`,
     params,
   );
   const r = rows[0] ?? {};
   const calls = num(r.calls);
   const cacheInput = num(r.cache_input);
+  const latencySamples = num(r.latency_samples);
   return {
     totalCalls: calls,
     totalTokens: num(r.tokens),
     cacheHitRate: cacheInput > 0 ? num(r.cache_read) / cacheInput : 0,
     reasoningTokens: num(r.reasoning),
-    avgLatencyMs: calls > 0 ? num(r.latency_sum) / calls : 0,
+    avgLatencyMs: latencySamples > 0 ? num(r.latency_sum) / latencySamples : 0,
+    latencySamples,
     errorRate: calls > 0 ? num(r.errors) / calls : 0,
   };
 }
@@ -327,7 +371,7 @@ export async function queryTrend(range: TimeRange, bucket: Bucket, groupBy: Grou
       `SELECT (ts/3600000)*3600000 AS bucket, ${groupCol} AS grp,
          SUM(prompt_tokens+completion_tokens+cache_read_tokens+cache_creation_tokens+reasoning_tokens) AS tokens,
          COUNT(*) AS calls
-       FROM events WHERE ${conditions.join(" AND ")}
+       FROM usage_events WHERE ${conditions.join(" AND ")}
        GROUP BY bucket, grp ORDER BY bucket`,
       params,
     );
@@ -337,7 +381,7 @@ export async function queryTrend(range: TimeRange, bucket: Bucket, groupBy: Grou
     `SELECT strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime') AS bucket, ${groupCol} AS grp,
        SUM(prompt_tokens+completion_tokens+cache_read_tokens+cache_creation_tokens+reasoning_tokens) AS tokens,
        COUNT(*) AS calls
-     FROM events WHERE ${conditions.join(" AND ")}
+     FROM usage_events WHERE ${conditions.join(" AND ")}
      GROUP BY bucket, grp ORDER BY bucket`,
     params,
   );
@@ -352,9 +396,9 @@ export async function queryBreakdown(dim: "profile" | "model", range: TimeRange,
     `SELECT ${dim} AS name, COUNT(*) AS calls,
        SUM(prompt_tokens+completion_tokens+cache_read_tokens+cache_creation_tokens+reasoning_tokens) AS tokens,
        SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-       CAST(SUM(latency_ms) AS REAL)/NULLIF(COUNT(*),0) AS avg_latency_ms,
-       CAST(SUM(cache_read_tokens) AS REAL)/NULLIF(SUM(prompt_tokens+cache_read_tokens),0) AS cache_hit_rate
-     FROM events WHERE ${conditions.join(" AND ")}
+       AVG(CASE WHEN latency_ms > 0 AND latency_ms <= ${MAX_RELIABLE_LATENCY_MS} THEN latency_ms END) AS avg_latency_ms,
+       CAST(SUM(cache_read_tokens) AS REAL)/NULLIF(SUM(prompt_tokens+cache_read_tokens+cache_creation_tokens),0) AS cache_hit_rate
+     FROM usage_events WHERE ${conditions.join(" AND ")}
      GROUP BY ${dim} ORDER BY ${orderCol} DESC LIMIT @limit`,
     params,
   );
@@ -368,15 +412,28 @@ export async function queryBreakdown(dim: "profile" | "model", range: TimeRange,
   }));
 }
 
+type TokenSumsGranularity = "none" | "day" | "hour";
+
+function tokenSumsBucketExpr(granularity: TokenSumsGranularity): string {
+  switch (granularity) {
+    case "none":
+      return "0";
+    case "day":
+      return "strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime')";
+    case "hour":
+      return "(ts/3600000)*3600000";
+  }
+}
+
 /**
- * Per-model token-type sums over a range, optionally bucketed by day. Returned
- * rows carry the raw token dimensions so the caller can compute cost at read
- * time with the model's *current* pricing (cost is never read from a stored
- * value). `day` is an empty string when `byDay` is false.
+ * Per-model token-type sums over a range, optionally bucketed. Returned rows
+ * carry the raw token dimensions so the caller can compute cost at read time
+ * with the model's *current* pricing (cost is never read from a stored value).
+ * `bucketMs` is `0` for the "none" granularity.
  */
 export interface ModelTokenSums {
   model: string;
-  day: string;
+  bucketMs: number;
   prompt_tokens: number;
   completion_tokens: number;
   cache_read_tokens: number;
@@ -384,22 +441,24 @@ export interface ModelTokenSums {
   reasoning_tokens: number;
 }
 
-export async function queryModelTokenSums(range: TimeRange, byDay: boolean, environmentId?: string): Promise<ModelTokenSums[]> {
+export async function queryModelTokenSums(range: TimeRange, granularity: "none" | "day" | "hour", environmentId?: string): Promise<ModelTokenSums[]> {
   const { conditions, params } = buildRangeConditions(range, environmentId);
+  const bucketExpr = tokenSumsBucketExpr(granularity);
+  const groupCols = granularity === "none" ? "model" : "model, bucket";
   const rows = await query(
-    `SELECT model AS model, ${byDay ? "strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime')" : "''"} AS day,
+    `SELECT model AS model, ${bucketExpr} AS bucket,
        SUM(prompt_tokens) AS prompt_tokens,
        SUM(completion_tokens) AS completion_tokens,
        SUM(cache_read_tokens) AS cache_read_tokens,
        SUM(cache_creation_tokens) AS cache_creation_tokens,
        SUM(reasoning_tokens) AS reasoning_tokens
-     FROM events WHERE ${conditions.join(" AND ")}
-     GROUP BY model${byDay ? ", day" : ""}`,
+     FROM usage_events WHERE ${conditions.join(" AND ")}
+     GROUP BY ${groupCols}`,
     params,
   );
   return rows.map((r) => ({
     model: str(r.model),
-    day: str(r.day),
+    bucketMs: granularity === "day" ? localDayStringToMs(str(r.bucket)) : num(r.bucket),
     prompt_tokens: num(r.prompt_tokens),
     completion_tokens: num(r.completion_tokens),
     cache_read_tokens: num(r.cache_read_tokens),
@@ -408,23 +467,111 @@ export async function queryModelTokenSums(range: TimeRange, byDay: boolean, envi
   }));
 }
 
+export async function queryTokenTotals(range: TimeRange, environmentId?: string): Promise<TokenUsageTotals> {
+  const { conditions, params } = buildRangeConditions(range, environmentId);
+  const rows = await query(
+    `SELECT
+       COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens),0) AS completion_tokens,
+       COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,
+       COALESCE(SUM(cache_creation_tokens),0) AS cache_creation_tokens
+     FROM usage_events WHERE ${conditions.join(" AND ")}`,
+    params,
+  );
+  const r = rows[0] ?? {};
+  return {
+    promptTokens: num(r.prompt_tokens),
+    completionTokens: num(r.completion_tokens),
+    cacheCreationTokens: num(r.cache_creation_tokens),
+    cacheReadTokens: num(r.cache_read_tokens),
+  };
+}
+
+export async function queryTrendTokens(range: TimeRange, granularity: "hour" | "day", environmentId?: string): Promise<TrendTokenPoint[]> {
+  const { conditions, params } = buildRangeConditions(range, environmentId);
+  const bucketExpr = granularity === "hour"
+    ? "(ts/3600000)*3600000"
+    : "strftime('%Y-%m-%d', ts / 1000, 'unixepoch', 'localtime')";
+  const rows = await query(
+    `SELECT ${bucketExpr} AS bucket,
+       SUM(prompt_tokens) AS prompt_tokens,
+       SUM(completion_tokens) AS completion_tokens,
+       SUM(cache_read_tokens) AS cache_read_tokens,
+       SUM(cache_creation_tokens) AS cache_creation_tokens
+     FROM usage_events WHERE ${conditions.join(" AND ")}
+     GROUP BY bucket ORDER BY bucket`,
+    params,
+  );
+  const points = rows.map((r) => ({
+    bucket: granularity === "day" ? localDayStringToMs(str(r.bucket)) : num(r.bucket),
+    prompt: num(r.prompt_tokens),
+    completion: num(r.completion_tokens),
+    cacheCreation: num(r.cache_creation_tokens),
+    cacheRead: num(r.cache_read_tokens),
+  }));
+  return fillTrendTokenBuckets(points, range, granularity);
+}
+
+const EMPTY_TREND_BUCKET = {
+  prompt: 0,
+  completion: 0,
+  cacheCreation: 0,
+  cacheRead: 0,
+} as const;
+
+/**
+ * Materializes empty buckets so the chart represents the selected time range
+ * instead of stretching only the days/hours that happened to contain events.
+ */
+export function fillTrendTokenBuckets(
+  points: ReadonlyArray<TrendTokenPoint>,
+  range: TimeRange,
+  granularity: "hour" | "day",
+): TrendTokenPoint[] {
+  const { fromMs, toMs } = computeBounds(range);
+  if (toMs <= fromMs) return [];
+  const byBucket = new Map(points.map((point) => [point.bucket, point]));
+  const result: TrendTokenPoint[] = [];
+
+  if (granularity === "hour") {
+    const hourMs = 60 * 60 * 1000;
+    const first = Math.floor(fromMs / hourMs) * hourMs;
+    for (let bucket = first; bucket < toMs; bucket += hourMs) {
+      result.push(byBucket.get(bucket) ?? { bucket, ...EMPTY_TREND_BUCKET });
+    }
+    return result;
+  }
+
+  const cursor = new Date(fromMs);
+  cursor.setHours(0, 0, 0, 0);
+  while (cursor.getTime() < toMs) {
+    const bucket = cursor.getTime();
+    result.push(byBucket.get(bucket) ?? { bucket, ...EMPTY_TREND_BUCKET });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+
+export function resolveTrendGranularity(range: TimeRange): "hour" | "day" {
+  if (typeof range === "string") {
+    return range === "today" || range === "3d" ? "hour" : "day";
+  }
+  const spanMs = range.toUtc - range.fromUtc;
+  return spanMs <= 3 * 86400000 ? "hour" : "day";
+}
+
 export async function queryHeaviestSessions(range: TimeRange, limit: number, environmentId?: string): Promise<SessionRow[]> {
   const { conditions, params } = buildRangeConditions(range, environmentId);
   params.limit = Math.max(1, Math.min(50, limit));
-  const environmentJoinCondition = environmentId === DEFAULT_ENVIRONMENT_ID
-    ? " AND (e2.kimi_code_environment_id = @environment_id OR e2.kimi_code_environment_id = '')"
-    : environmentId
-      ? " AND e2.kimi_code_environment_id = @environment_id"
-      : "";
   const rows = await query(
     `SELECT session_hint AS session_id, MIN(ts) AS started_utc, MAX(ts_end) AS ended_utc,
        COUNT(*) AS calls,
        SUM(prompt_tokens+completion_tokens+cache_read_tokens+cache_creation_tokens+reasoning_tokens) AS tokens,
-       (SELECT profile FROM events e2 WHERE e2.session_hint = ue.session_hint${environmentJoinCondition} ORDER BY ts LIMIT 1) AS profile,
+       SUBSTR(MIN(printf('%020d', ts) || profile), 21) AS profile,
        GROUP_CONCAT(DISTINCT model) AS models,
-       CAST(AVG(latency_ms) AS INTEGER) AS avg_latency_ms,
+       CAST(AVG(CASE WHEN latency_ms > 0 AND latency_ms <= ${MAX_RELIABLE_LATENCY_MS} THEN latency_ms END) AS INTEGER) AS avg_latency_ms,
        SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS errors
-     FROM events ue WHERE ${conditions.join(" AND ")} AND session_hint IS NOT NULL
+     FROM usage_events ue WHERE ${conditions.join(" AND ")} AND session_hint IS NOT NULL
      GROUP BY session_hint ORDER BY tokens DESC LIMIT @limit`,
     params,
   );
@@ -468,7 +615,7 @@ export async function queryEvents(filter: EventFilter, cursor: string | null, pa
 
   params.limit = size + 1;
   const rows = await query(
-    `SELECT * FROM events WHERE ${conditions.join(" AND ")} ORDER BY ts DESC, request_id DESC LIMIT @limit`,
+    `SELECT * FROM usage_events WHERE ${conditions.join(" AND ")} ORDER BY ts DESC, request_id DESC LIMIT @limit`,
     params,
   );
   const hasMore = rows.length > size;

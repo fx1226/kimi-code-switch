@@ -35,6 +35,7 @@ import { resolveNearestGitProjectRoot, scanSkills } from "@shared/skillsStore";
 import { remapInstalledPluginRoots, scanKimiPlugins } from "@shared/pluginStore";
 import { compareReleaseVersions } from "@shared/versionUtils";
 import { computeEventCost, resolveModelPricing } from "@shared/pricing";
+import type { CostSeriesPoint, TokenUsageTotals, TrendTokenPoint } from "@shared/usageTypes";
 import type { AppState, FullBackupBundle, KimiCodeEnvironment, KimiCodeEnvironmentPreferenceResult, ManagedFileId, McpServerConfig, ModelConfig, PanelSettings, PortableDirectoryBundle, PreviewBundle, OpenKimiTerminalRequest, FileSnapshotBundle, SaveStateConflictResult, SaveStateResult } from "@shared/types";
 
 import { tauriFileAccess, pathExists, recoverPendingSaveTransaction, recoverPendingRestoreTransaction, removeFile } from "./fileAccess";
@@ -57,7 +58,7 @@ const skillFileAccess = {
   realPath: (path: string) => invoke<string>("real_path", { path }),
 };
 
-// ── 用量洞察运行时（log watcher + db 生命周期）──
+// ── 使用统计运行时（log watcher + db 生命周期）──
 // 全局应用数据库：包含 usage 数据、config_history、panel_settings
 const PANEL_APP_DIR = "~/.kimi-code-switch-gui";
 const USAGE_DB_PATH = `${PANEL_APP_DIR}/app.db`;
@@ -559,27 +560,29 @@ function costForModelTokens(row: usageDb.ModelTokenSums, models: Record<string, 
 /**
  * Aggregates per-model token sums into a cost map keyed by a chosen dimension
  * (`""` for the grand total, the day string for a daily bucket, or the model
- * id). A key's cost is `null` only when not a single contributing model has a
- * known price — so the UI can show "未设定价" instead of a misleading 0.
+ * id). A key's cost is `null` whenever any contributing model has no known
+ * price; reporting only the priced subset as a total would understate cost.
  */
 function aggregateCost(
   rows: usageDb.ModelTokenSums[],
   models: Record<string, ModelConfig>,
   keyOf: (row: usageDb.ModelTokenSums) => string,
 ): Record<string, number | null> {
-  const out: Record<string, { total: number; anyKnown: boolean }> = {};
+  const out: Record<string, { total: number; anyKnown: boolean; anyUnknown: boolean }> = {};
   for (const row of rows) {
     const key = keyOf(row);
     const cost = costForModelTokens(row, models);
-    const bucket = out[key] ?? (out[key] = { total: 0, anyKnown: false });
+    const bucket = out[key] ?? (out[key] = { total: 0, anyKnown: false, anyUnknown: false });
     if (cost !== null) {
       bucket.total += cost;
       bucket.anyKnown = true;
+    } else {
+      bucket.anyUnknown = true;
     }
   }
   const result: Record<string, number | null> = {};
-  for (const [key, { total, anyKnown }] of Object.entries(out)) {
-    result[key] = anyKnown ? total : null;
+  for (const [key, { total, anyKnown, anyUnknown }] of Object.entries(out)) {
+    result[key] = anyKnown && !anyUnknown ? total : null;
   }
   return result;
 }
@@ -663,7 +666,7 @@ function extractInsightsSettings(state: AppState | null): PanelSettings["insight
     insights_onboarding_shown_at: ps?.insights_onboarding_shown_at ?? "",
     insights_last_known_port: ps?.insights_last_known_port ?? null,
     insights_display_currency: ps?.insights_display_currency ?? "USD",
-    insights_currency_rates: ps?.insights_currency_rates ?? {},
+    insights_currency_rates: { ...(ps?.insights_currency_rates ?? {}) },
   } as never;
 }
 
@@ -754,7 +757,7 @@ export const kimiSwitchTauri = {
     } catch (err) {
       console.warn("Official account status load skipped:", err);
     }
-    currentAppState = state;
+    currentAppState = structuredClone(state);
 
     // 在快照基线捕获前，先 await 同步 panel_settings，确保返回的 state 与盘上一致，
     // 避免首次启动时后台改盘导致误报「配置被外部修改」。
@@ -800,11 +803,12 @@ export const kimiSwitchTauri = {
   },
   saveState: async (state: AppState): Promise<SaveStateResult> => {
     // 保存前捕获快照（Kimi 标准配置 + GUI SQLite 导出）
-    const normalized = normalizeStatePaths(state);
+    const workingState = structuredClone(state);
+    const normalized = normalizeStatePaths(workingState);
     const writeBaseline = await captureSnapshotForState(normalized);
     const environmentId = normalized.panelSettings.active_kimi_code_environment_id ?? "";
     const environmentHome = normalized.configPath.replace(/\/config\.toml$/, "");
-    const tuiBaselineHash = state.tuiConfigSha256
+    const tuiBaselineHash = workingState.tuiConfigSha256
       ?? await sha256Text(await tauriFileAccess.readText(`${environmentHome}/tui.toml`));
     await Promise.all([
       captureSnapshot("config", normalized.configPath, undefined, environmentId),
@@ -815,15 +819,15 @@ export const kimiSwitchTauri = {
       captureSnapshot("skills", `${environmentHome}/skills`, undefined, environmentId),
     ]);
 
-    await saveAppState(tauriFileAccess, state, {
+    await saveAppState(tauriFileAccess, workingState, {
       expectedSha256: {
         config: writeBaseline.files.config.sha256,
         mcp: writeBaseline.files.mcp.sha256,
         tui: tuiBaselineHash,
       },
     });
-    await loadTuiRevision(state);
-    currentAppState = state;
+    await loadTuiRevision(workingState);
+    currentAppState = structuredClone(workingState);
 
     await syncWindowToggleShortcut();
 
@@ -840,7 +844,8 @@ export const kimiSwitchTauri = {
     state: AppState,
     options?: { expectedSnapshot?: FileSnapshotBundle; allowOverwrite?: boolean },
   ): Promise<SaveStateResult | SaveStateConflictResult> => {
-    const normalized = normalizeStatePaths(state);
+    const workingState = structuredClone(state);
+    const normalized = normalizeStatePaths(workingState);
     let writeBaseline: FileSnapshotBundle | undefined;
     if (options?.allowOverwrite !== true) {
       const conflict = await detectExternalChangeConflict({
@@ -867,7 +872,7 @@ export const kimiSwitchTauri = {
     // 保存前捕获快照（Kimi 标准配置 + GUI SQLite 导出）
     const environmentId = normalized.panelSettings.active_kimi_code_environment_id ?? "";
     const environmentHome = normalized.configPath.replace(/\/config\.toml$/, "");
-    const tuiBaselineHash = state.tuiConfigSha256
+    const tuiBaselineHash = workingState.tuiConfigSha256
       ?? await sha256Text(await tauriFileAccess.readText(`${environmentHome}/tui.toml`));
     await Promise.all([
       captureSnapshot("config", normalized.configPath, undefined, environmentId),
@@ -878,15 +883,15 @@ export const kimiSwitchTauri = {
       captureSnapshot("skills", `${environmentHome}/skills`, undefined, environmentId),
     ]);
 
-    await saveAppState(tauriFileAccess, state, writeBaseline ? {
+    await saveAppState(tauriFileAccess, workingState, writeBaseline ? {
       expectedSha256: {
         config: writeBaseline.files.config.sha256,
         mcp: writeBaseline.files.mcp.sha256,
         tui: tuiBaselineHash,
       },
     } : undefined);
-    await loadTuiRevision(state);
-    currentAppState = state;
+    await loadTuiRevision(workingState);
+    currentAppState = structuredClone(workingState);
 
     await syncWindowToggleShortcut();
 
@@ -1122,11 +1127,14 @@ export const kimiSwitchTauri = {
       content: nextDocument,
       expectedSha256: config.sha256,
     });
-    currentAppState.projectLocalConfig = {
-      ...config,
-      additionalDirs: normalizedDirs,
-      document: nextDocument,
-      sha256,
+    currentAppState = {
+      ...currentAppState,
+      projectLocalConfig: {
+        ...config,
+        additionalDirs: normalizedDirs,
+        document: nextDocument,
+        sha256,
+      },
     };
     return { ok: true as const };
   },
@@ -1289,7 +1297,12 @@ export const kimiSwitchTauri = {
 
   // ── 托盘 ──
   setTray: async (enabled: boolean) => {
-    if (currentAppState) currentAppState.panelSettings.tray_icon = enabled;
+    if (currentAppState) {
+      currentAppState = {
+        ...currentAppState,
+        panelSettings: { ...currentAppState.panelSettings, tray_icon: enabled },
+      };
+    }
     if (enabled) {
       await setupTray(() => currentAppState, () => window.dispatchEvent(new Event("kimi-tray-reload")));
     } else {
@@ -1306,7 +1319,7 @@ export const kimiSwitchTauri = {
   onTrayCommand: () => () => {},
   onExternalFileChange: () => () => {},
 
-  // ── 用量洞察 ──
+  // ── 使用统计 ──
   usageGetStatus: async () => {
     const stats = logWatcher?.getStats() ?? { sessionsTracked: 0, eventsIngested: 0 };
     return {
@@ -1326,16 +1339,18 @@ export const kimiSwitchTauri = {
   usageEnable: async () => {
     await ensureUsageRuntime();
     if (currentAppState) {
-      currentAppState.panelSettings.insights_status = "enabled";
-      await savePanelSettings(currentAppState.panelSettings);
+      const panelSettings = { ...currentAppState.panelSettings, insights_status: "enabled" as const };
+      currentAppState = { ...currentAppState, panelSettings };
+      await savePanelSettings(panelSettings);
     }
     return { ok: true };
   },
   usageDisable: async () => {
     stopUsageRuntime();
     if (currentAppState) {
-      currentAppState.panelSettings.insights_status = "disabled";
-      await savePanelSettings(currentAppState.panelSettings);
+      const panelSettings = { ...currentAppState.panelSettings, insights_status: "disabled" as const };
+      currentAppState = { ...currentAppState, panelSettings };
+      await savePanelSettings(panelSettings);
     }
     return { ok: true as const };
   },
@@ -1345,13 +1360,15 @@ export const kimiSwitchTauri = {
   },
   usageSetConfig: async (patch: Partial<PanelSettings>) => {
     if (currentAppState) {
-      Object.assign(currentAppState.panelSettings, patch);
-      await savePanelSettings(currentAppState.panelSettings);
+      const safePatch = structuredClone(patch);
+      const panelSettings = { ...currentAppState.panelSettings, ...safePatch };
+      currentAppState = { ...currentAppState, panelSettings };
+      await savePanelSettings(panelSettings);
     }
     return { ok: true as const, settings: extractInsightsSettings(currentAppState) as never };
   },
   usageQueryOverview: async (range: never) => {
-    if (!usageOpen) return { ok: true as const, slice: { totalCalls: 0, totalTokens: 0, cacheHitRate: 0, reasoningTokens: 0, avgLatencyMs: 0, errorRate: 0 } };
+    if (!usageOpen) return { ok: true as const, slice: { totalCalls: 0, totalTokens: 0, cacheHitRate: 0, reasoningTokens: 0, avgLatencyMs: 0, latencySamples: 0, errorRate: 0 } };
     return { ok: true as const, slice: await usageDb.queryOverview(range, activeKimiCodeEnvironmentId()) };
   },
   usageQueryTrend: async (args: { range: never; bucket: never; groupBy: never }) => {
@@ -1376,13 +1393,50 @@ export const kimiSwitchTauri = {
     const models = currentAppState?.mainConfig.models ?? {};
     const environmentId = activeKimiCodeEnvironmentId();
     const [modelSums, modelDaySums] = await Promise.all([
-      usageDb.queryModelTokenSums(range, false, environmentId),
-      usageDb.queryModelTokenSums(range, true, environmentId),
+      usageDb.queryModelTokenSums(range, "none", environmentId),
+      usageDb.queryModelTokenSums(range, "day", environmentId),
     ]);
     const byModel = aggregateCost(modelSums, models, (r) => r.model);
-    const byDay = aggregateCost(modelDaySums, models, (r) => r.day);
+    const byDay = aggregateCost(modelDaySums, models, (r) => r.bucketMs);
     const totalMap = aggregateCost(modelSums, models, () => "");
     return { ok: true as const, total: totalMap[""] ?? null, byDay, byModel };
+  },
+  usageQueryTokenTotals: async (range: unknown) => {
+    if (!usageOpen) return { ok: true as const, totals: { promptTokens: 0, completionTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 } };
+    return { ok: true as const, totals: await usageDb.queryTokenTotals(range as never, activeKimiCodeEnvironmentId()) };
+  },
+  usageQueryTrendTokens: async (args: { range: unknown; granularity?: "hour" | "day" }) => {
+    if (!usageOpen) return { ok: true as const, series: [] };
+    const granularity = args.granularity ?? usageDb.resolveTrendGranularity(args.range as never);
+    return { ok: true as const, series: await usageDb.queryTrendTokens(args.range as never, granularity, activeKimiCodeEnvironmentId()) };
+  },
+  usageQueryCostSeries: async (range: unknown) => {
+    if (!usageOpen) return { ok: true as const, points: [], series: [] };
+    const models = currentAppState?.mainConfig.models ?? {};
+    const environmentId = activeKimiCodeEnvironmentId();
+    const granularity = usageDb.resolveTrendGranularity(range as never);
+    const rows = await usageDb.queryModelTokenSums(range as never, granularity, environmentId);
+    const byBucket = aggregateCost(rows, models, (r) => String(r.bucketMs));
+    const tokensByBucket = new Map<number, { prompt: number; completion: number; cacheCreation: number; cacheRead: number }>();
+    for (const row of rows) {
+      const bucket = tokensByBucket.get(row.bucketMs) ?? { prompt: 0, completion: 0, cacheCreation: 0, cacheRead: 0 };
+      tokensByBucket.set(row.bucketMs, {
+        prompt: bucket.prompt + row.prompt_tokens,
+        completion: bucket.completion + row.completion_tokens,
+        cacheCreation: bucket.cacheCreation + row.cache_creation_tokens,
+        cacheRead: bucket.cacheRead + row.cache_read_tokens,
+      });
+    }
+    const series = usageDb.fillTrendTokenBuckets(
+      [...tokensByBucket.entries()].map(([bucket, tokens]) => ({ bucket, ...tokens })),
+      range as never,
+      granularity,
+    );
+    return {
+      ok: true as const,
+      points: Object.entries(byBucket).map(([bucket, cost]) => ({ bucket: Number(bucket), cost })),
+      series,
+    };
   },
   usageGetStorageInfo: async () => {
     const dbStat = await invoke<{ size: number } | null>("file_stat", { path: USAGE_DB_PATH });
@@ -1625,7 +1679,7 @@ export const kimiSwitchTauri = {
         : message);
     }
     const reloaded = await loadAppState(tauriFileAccess);
-    currentAppState = reloaded;
+    currentAppState = structuredClone(reloaded);
     return reloaded;
   },
 

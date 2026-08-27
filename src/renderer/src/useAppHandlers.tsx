@@ -143,6 +143,7 @@ export function useAppHandlers() {
     onSave,
     persistConfigTarget,
     persistImmediateState,
+    waitForPendingSaves,
     restoreSavedState,
   } = useAppPersistence({
     state,
@@ -155,6 +156,7 @@ export function useAppHandlers() {
     setNotice,
     setDiagnostics,
     fileSnapshot,
+    stateRef,
     fileSnapshotRef,
     setFileSnapshot: updateFileSnapshot,
     setDoctorReport,
@@ -188,6 +190,9 @@ export function useAppHandlers() {
     requestConfirm,
     persistState,
     restoreSavedState,
+    stateRef,
+    savedStateRef,
+    waitForPendingSaves,
   });
   const {
     updateState,
@@ -337,7 +342,7 @@ export function useAppHandlers() {
       const api = getApi();
       if (!api) {
         setNotice("");
-        setError(t(locale, "openInTerminalUnavailable"));
+        setError(t(locale, "runtimeUnavailable"));
         return;
       }
       if (!api.openKimiInTerminal) {

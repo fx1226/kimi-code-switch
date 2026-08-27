@@ -7,6 +7,7 @@ vi.mock("./usageDb", () => ({
   getIngestState: vi.fn(),
   insertEvent: vi.fn(),
   setIngestState: vi.fn(),
+  updateEventTiming: vi.fn(),
 }));
 
 import { invoke } from "@tauri-apps/api/core";
@@ -17,6 +18,7 @@ const mockedInvoke = vi.mocked(invoke);
 const mockedInsert = vi.mocked(db.insertEvent);
 const mockedGetIngestState = vi.mocked(db.getIngestState);
 const mockedSetIngestState = vi.mocked(db.setIngestState);
+const mockedUpdateEventTiming = vi.mocked(db.updateEventTiming);
 
 // A realistic kimi.log excerpt: provider -> model -> session create -> two LLM steps.
 const SESSION = "11111111-2222-3333-4444-555555555555";
@@ -187,6 +189,7 @@ beforeEach(() => {
   mockedInsert.mockResolvedValue(true);
   mockedGetIngestState.mockResolvedValue(null);
   mockedSetIngestState.mockResolvedValue(undefined);
+  mockedUpdateEventTiming.mockResolvedValue(undefined);
 });
 
 describe("UsageLogWatcher parsing", () => {
@@ -316,6 +319,22 @@ describe("UsageLogWatcher parsing", () => {
     expect(watcher.getStats()).toMatchObject({ eventsIngested: 1 });
   });
 
+  it("does not turn a stale request context into multi-day latency", async () => {
+    primeInvokeForKimiCodeSessionLog([
+      "2026-08-04T01:15:42.000Z INFO  llm config  turnStep=1.2 provider=kimi model=k3 modelAlias=kimi-code/k3",
+      "2026-08-25T15:42:23.000Z WARN  llm request failed  turnStep=1.2 model=kimi-code/k3 errorName=APIEmptyResponseError",
+    ].join("\n"));
+    const events: UsageEvent[] = [];
+    const watcher = new UsageLogWatcher({ getActiveProfile: () => "default", onEvent: (event) => events.push(event) });
+
+    await watcher.start();
+    watcher.stop();
+
+    expect(events).toHaveLength(1);
+    expect(events[0].latency_ms).toBe(0);
+    expect(events[0].ts).toBe(new Date("2026-08-25T15:42:23.000Z").getTime());
+  });
+
   it("discovers Kimi Code wire logs and records usage tokens", async () => {
     primeInvokeForKimiCodeWireLog(KIMI_CODE_WIRE_LOG);
     const events: UsageEvent[] = [];
@@ -339,6 +358,45 @@ describe("UsageLogWatcher parsing", () => {
     });
     expect(events[0].request_id).toMatch(/^log-/);
     expect(watcher.getStats()).toMatchObject({ eventsIngested: 1 });
+  });
+
+  it("uses step.end timing for the matching wire usage record", async () => {
+    const usage = { inputOther: 120, output: 30, inputCacheRead: 400, inputCacheCreation: 5 };
+    const log = [
+      JSON.stringify({ type: "usage.record", agentId: "main", model: "kimi/k3", usage, usageScope: "turn", time: 2000 }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        agentId: "main",
+        event: { type: "step.end", usage, llmFirstTokenLatencyMs: 800, llmStreamDurationMs: 250 },
+        time: 3050,
+      }),
+    ].join("\n");
+    primeInvokeForKimiCodeWireLog(log);
+    const watcher = new UsageLogWatcher({ getActiveProfile: () => "default" });
+
+    await watcher.start();
+    watcher.stop();
+
+    const requestId = mockedInsert.mock.calls[0][0].request_id;
+    expect(mockedUpdateEventTiming).toHaveBeenCalledWith(requestId, 1050, 3050);
+  });
+
+  it("ignores session-scope summaries to avoid double-counting turn usage", async () => {
+    const log = JSON.stringify({
+      type: "usage.record",
+      agentId: "main",
+      model: "kimi/k3",
+      usage: { inputOther: 100, output: 20, inputCacheRead: 300, inputCacheCreation: 0 },
+      usageScope: "session",
+      time: 4000,
+    });
+    primeInvokeForKimiCodeWireLog(log);
+    const watcher = new UsageLogWatcher({ getActiveProfile: () => "default" });
+
+    await watcher.start();
+    watcher.stop();
+
+    expect(mockedInsert).not.toHaveBeenCalled();
   });
 
   it("ingests usage from subagent wire logs alongside the main agent", async () => {

@@ -57,10 +57,10 @@ export function CommandPalette({ state, locale, onSelect, onClose }: CommandPale
 
   const typeLabel = (type: SearchResult["type"]): string => {
     const map: Record<string, string> = {
-      provider: t(locale, "searchProviders"),
-      model: t(locale, "searchModels"),
-      profile: t(locale, "searchProfiles"),
-      mcp: t(locale, "searchMcp"),
+      provider: t(locale, "providers"),
+      model: t(locale, "models"),
+      profile: t(locale, "profiles"),
+      mcp: t(locale, "mcp"),
     };
     return map[type] ?? type;
   };

@@ -1155,7 +1155,7 @@ export function applyProfile(state: AppState, profileName: string): void {
   if (!state.mainConfig.models[profile.default_model]) {
     throw new Error(
       formatMissingModelError(profile.default_model, state.mainConfig.models, {
-        context: `配置Profile ${profile.name}`,
+        context: `Profile ${profile.name}`,
       }),
     );
   }
@@ -1313,7 +1313,7 @@ export function upsertProfile(state: AppState, profile: Profile): void {
   if (!state.mainConfig.models[normalizedProfile.default_model]) {
     throw new Error(
       formatMissingModelError(normalizedProfile.default_model, state.mainConfig.models, {
-        context: `配置Profile ${normalizedProfile.name || "（未命名）"}`,
+        context: `Profile ${normalizedProfile.name || "(unnamed)"}`,
       }),
     );
   }
@@ -1429,12 +1429,12 @@ export function formatMissingModelError(
   models: Record<string, unknown>,
   options: { context: string },
 ): string {
-  const normalizedName = modelName || "（空）";
+  const normalizedName = modelName || "(empty)";
   const modelKeys = Object.keys(models);
   const availableHint = modelKeys.length
-    ? `可用模型 key：${modelKeys.slice(0, 3).join("、")}${modelKeys.length > 3 ? ` 等 ${modelKeys.length} 个` : ""}。`
-    : "当前还没有任何模型，请先在“模型”页创建模型。";
-  return `${options.context}引用的默认模型不存在：${normalizedName}。这里需要填写 [models] 下的模型 key，不是 model 字段值。${availableHint}请先创建对应模型，或把配置Profile默认模型改成现有模型。`;
+    ? ` Available model keys: ${modelKeys.slice(0, 3).join(", ")}${modelKeys.length > 3 ? ` (${modelKeys.length} in total)` : ""}.`
+    : " There are no models yet; create one on the Models page first.";
+  return `${options.context} references a missing default model: "${normalizedName}". Fill in the [models] key, not the model field value.${availableHint} Please create the model first, or change the profile's default model to an existing one.`;
 }
 
 export function parseProfiles(

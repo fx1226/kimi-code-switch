@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronsLeft, ChevronsRight, RefreshCw, Search, Terminal, X } from "lucide-react";
 
 import type { KimiCodeEnvironment, ShortcutAction, ShortcutBinding } from "@shared/types";
-import { applyProfile, normalizeKimiCodeEnvironments } from "@shared/configStore";
+import { applyProfile, DEFAULT_KIMI_CODE_ENVIRONMENT_NAME, normalizeKimiCodeEnvironments } from "@shared/configStore";
 import type { SearchResult } from "@shared/configStore";
 import { parseMcpConfigStrict } from "@shared/mcpStore";
 import { formatAcceleratorForPlatform, getBrowserShortcutPlatform, normalizeShortcuts } from "@shared/shortcutStore";
@@ -101,7 +101,10 @@ export function App(): JSX.Element {
     ?? "default";
   const environmentOptions = kimiCodeEnvironments.map((environment: KimiCodeEnvironment) => ({
     value: environment.id,
-    label: environment.name || environment.id,
+    label:
+      environment.name === DEFAULT_KIMI_CODE_ENVIRONMENT_NAME
+        ? t(locale, "kimiCodeEnvironmentDefaultDisplay")
+        : (environment.name || environment.id),
     description: environment.description || environment.id,
   }));
   const toggleSidebar = useCallback(() => {
@@ -227,7 +230,7 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("kimi-tray-reload", handleTrayReload);
   }, [loadState, runAfterUnsavedHandled]);
 
-  // 托盘「用量洞察」入口：显示窗口后切到 Insights 子页
+  // 托盘「使用统计」入口：显示窗口后切到 Insights 子页
   useEffect(() => {
     function handleOpenInsights(): void {
       runAfterUnsavedHandled(() => setActiveTab("insights"));

@@ -93,6 +93,8 @@ export interface OverviewSlice {
   cacheHitRate: number;
   reasoningTokens: number;
   avgLatencyMs: number;
+  /** Number of events that contained a measured, plausible latency. */
+  latencySamples: number;
   errorRate: number;
 }
 
@@ -182,3 +184,30 @@ export interface EnableProxyError {
 }
 
 export type EnableProxyResponse = EnableProxyResult | EnableProxyError;
+
+export interface TokenUsageTotals {
+  promptTokens: number;
+  completionTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+}
+
+export interface TrendTokenPoint {
+  /** 桶起点毫秒时间戳（hour 与 day 用同一套 bucketing，保证能和成本合并） */
+  bucket: number;
+  prompt: number;
+  completion: number;
+  cacheCreation: number;
+  cacheRead: number;
+}
+
+export interface CostSeriesPoint {
+  bucket: number;
+  /** null 表示该桶所有 model 均无定价 */
+  cost: number | null;
+}
+
+/** 面积图每一桶的完整数据（token 与成本按 bucket 合并后的形态） */
+export interface TrendSeries extends TrendTokenPoint {
+  cost: number | null;
+}

@@ -1064,7 +1064,6 @@ export function AboutPage(props: {
           <img className="brand-logo brand-logo-dark" src={logoDark} alt="Kimi Code Switch" />
         </div>
         <div>
-          <p className="about-eyebrow">{t(props.locale, "about")}</p>
           <h2>Kimi Code Switch GUI</h2>
           <p>{aboutText(props.locale, "aboutDescription")}</p>
           <p className="about-meta-summary">

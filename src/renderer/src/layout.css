@@ -1,11 +1,4 @@
 /* Application geometry. Loaded last; this is the sole shell/layout authority. */
-.boot-screen {
-  display: grid;
-  place-items: center;
-  min-height: 100vh;
-  color: var(--muted);
-}
-
 .shell {
   position: relative;
   display: grid;

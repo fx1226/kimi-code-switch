@@ -16,7 +16,7 @@ src/renderer/src/
 |-- styles.css            # entries: fonts.css -> tokens.css -> components.css -> layout.css
 |-- fonts.css             # bundled Inter + JetBrains Mono @font-face
 |-- tokens.css            # design tokens: palettes, radius/shadow/type scales, 9 accent themes
-|-- layout.css            # shell grid (sidebar 232px / collapsed 64px / main)
+|-- layout.css            # shell grid (sidebar 264-288px / collapsed 72px / main)
 |-- components.css        # component styles (large, intentionally central)
 |-- assets/               # dark/light logo PNGs + fonts/ (woff2 + OFL licenses)
 `-- insights.css / toast.css  # usage-dashboard / toast (imported by their components)

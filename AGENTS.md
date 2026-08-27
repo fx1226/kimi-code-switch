@@ -34,7 +34,7 @@ kimi-code-switch-gui/
 |   |-- i18n.ts
 |   |-- fonts.css              # 内置 Inter + JetBrains Mono @font-face（assets/fonts/）
 |   |-- tokens.css             # 设计令牌：色板 / 圆角 / 阴影 / 字号标尺 / 9 套 appearance 主题
-|   |-- layout.css             # 外壳网格：侧栏 232px / 折叠 64px / 主区
+|   |-- layout.css             # 外壳网格：侧栏 264–288px / 折叠 72px / 主区
 |   |-- components.css         # 组件样式主文件（集中且体量大）
 |   |-- insights.css           # 用量洞察仪表盘
 |   `-- toast.css              # Toast 浮层
@@ -93,7 +93,7 @@ kimi-code-switch-gui/
 - `FileAccess` abstracts config filesystem I/O; tests should prefer in-memory implementations over real `~/.kimi-code/` files.
 - i18n remains a simple key-value lookup in `src/renderer/src/i18n.ts`; add all supported locales when adding user-facing keys.
 - CSS theming uses custom properties and root `data-theme`; preserve the mechanism when changing visual behavior.
-- Main window is designed around a 1500 x 980 baseline/minimum; topbar and dense settings layouts assume this width.
+- Main window is designed around a 1440 x 900 baseline (min 1100 x 720); topbar and dense settings layouts assume this width.
 - Keep tests next to source files and run focused Vitest files while iterating.
 - Rust backend should stay thin: expose native primitives and keep business decisions in shared TS unless a feature must survive hidden renderer state.
 

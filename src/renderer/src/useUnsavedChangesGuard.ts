@@ -1,9 +1,9 @@
 import { useCallback, useRef } from "react";
+import type { MutableRefObject } from "react";
 
-import { buildManagedDocuments } from "@shared/configSafety";
 import type { AppState, Locale } from "@shared/types";
 import type { RequestConfirm, UnsavedDecision } from "./dialogs";
-import { collectDirtyKeys, isEqualValue } from "./appHelpers";
+import { buildManualDraftProjection, collectDirtyKeys, isEqualValue } from "./appHelpers";
 import { t } from "./i18n";
 
 interface UnsavedChangesGuardContext {
@@ -13,6 +13,9 @@ interface UnsavedChangesGuardContext {
   requestConfirm: RequestConfirm;
   persistState: (nextState: AppState) => Promise<boolean>;
   restoreSavedState: (nextSavedState: AppState) => void;
+  stateRef?: MutableRefObject<AppState>;
+  savedStateRef?: MutableRefObject<AppState | null>;
+  waitForPendingSaves?: () => Promise<void>;
 }
 
 export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
@@ -23,9 +26,12 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
     requestConfirm,
     persistState,
     restoreSavedState,
+    stateRef,
+    savedStateRef,
+    waitForPendingSaves,
   } = ctx;
   const unsavedResolutionRef = useRef(false);
-  const hasUnsavedChanges = Boolean(state && savedState) && !areManagedDocumentsEqual(state, savedState);
+  const hasUnsavedChanges = Boolean(state && savedState) && !areManualDraftsEqual(state, savedState);
   const dirtyProviders = state && savedState
     ? collectDirtyKeys(state.mainConfig.providers, savedState.mainConfig.providers)
     : new Set<string>();
@@ -40,15 +46,19 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
     : new Set<string>();
 
   const resolveUnsavedChanges = useCallback(async (): Promise<UnsavedDecision | "unchanged"> => {
-    const currentState = state;
-    if (!currentState || !hasUnsavedChanges || !savedState) {
-      return "unchanged";
-    }
     if (unsavedResolutionRef.current) {
       return "cancel";
     }
     unsavedResolutionRef.current = true;
     try {
+      // 自动保存会先更新可见 state，再异步更新 savedState。离开页面/关闭窗口时
+      // 先等保存队列真正 idle，并用 refs 的最新值重判，避免把 in-flight 窗口误报为草稿。
+      await waitForPendingSaves?.();
+      const currentState = stateRef?.current ?? state;
+      const currentSavedState = savedStateRef?.current ?? savedState;
+      if (!currentState || !currentSavedState || areManualDraftsEqual(currentState, currentSavedState)) {
+        return "unchanged";
+      }
       const decision = await requestConfirm({
         title: t(locale, "unsavedChangesTitle"),
         description: t(locale, "unsavedChangesDescription"),
@@ -62,20 +72,22 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
         const saved = await persistState(currentState);
         if (!saved) return "cancel";
       } else if (decision === "discard") {
-        restoreSavedState(savedState);
+        restoreSavedState(currentSavedState);
       }
       return decision;
     } finally {
       unsavedResolutionRef.current = false;
     }
   }, [
-    hasUnsavedChanges,
     locale,
     persistState,
     requestConfirm,
     restoreSavedState,
+    savedStateRef,
     savedState,
+    stateRef,
     state,
+    waitForPendingSaves,
   ]);
 
   const runAfterUnsavedHandled = useCallback((action: () => void | Promise<void>): void => {
@@ -100,9 +112,9 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
   };
 }
 
-function areManagedDocumentsEqual(state: AppState, savedState: AppState | null): boolean {
+function areManualDraftsEqual(state: AppState, savedState: AppState | null): boolean {
   if (!savedState) {
     return false;
   }
-  return isEqualValue(buildManagedDocuments(state), buildManagedDocuments(savedState));
+  return isEqualValue(buildManualDraftProjection(state), buildManualDraftProjection(savedState));
 }

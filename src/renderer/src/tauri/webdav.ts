@@ -281,10 +281,10 @@ export async function testWebDavConnection(settings: PanelSettings): Promise<{ o
     return { ok: true, target: ensured };
   }
   if (resp.status === 401 || resp.status === 403) {
-    throw new Error(`WebDAV 认证失败 (${resp.status})：请检查用户名和密码。`);
+    throw new Error(`WebDAV authentication failed (${resp.status}): check username and password.`);
   }
   if (resp.status === 429) {
-    throw new Error("WebDAV 服务器限流 (429)：请求过于频繁，请稍后再试。");
+    throw new Error("WebDAV server rate-limited (429): try again later.");
   }
   if (!resp.ok) throw new Error(`WebDAV test failed: ${resp.status}`);
   return { ok: true, target };

@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, AlertCircle, BarChart3, CheckCircle2, Clock, Cpu, Database, HardDrive, LineChart, LoaderCircle, PieChart as PieIcon, Power, Table as TableIcon, Terminal, TrendingUp, User, Zap } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Clock, Cpu, Database, HardDrive, LoaderCircle, PieChart as PieIcon, Power, Table as TableIcon, Terminal, TrendingUp, User, Zap } from "lucide-react";
 import type { DisplayCurrency, Locale } from "@shared/types";
-import type { InsightsSettings } from "@shared/usageTypes";
-import { formatCostWithCurrency, DEFAULT_CURRENCY_RATES, SUPPORTED_CURRENCIES } from "@shared/currency";
-import { estimateMonthlyCost } from "@shared/costEstimate";
+import type { InsightsSettings, TokenUsageTotals, TrendSeries } from "@shared/usageTypes";
+import { CURRENCY_SYMBOLS, convertCost, formatCostWithCurrency, DEFAULT_CURRENCY_RATES, SUPPORTED_CURRENCIES } from "@shared/currency";
 import { shouldShowFirstRunDialog } from "@shared/usageStore";
 import { useDialogEscape, useFocusTrap } from "./dialogs";
 import { t } from "./i18n";
-import { CompactSelect, SettingsGroup, SelectField } from "./formControls";
+import { SettingsGroup, SelectField } from "./formControls";
 import { ToastContainer } from "./Toast";
 import { useToast } from "./useToast";
-import { TrendChart, type TrendChartType } from "./insightsChart";
+import { UsageHero } from "./usageHero";
+import { UsageAreaChart } from "./usageAreaChart";
 import { PieChart, type PieDatum } from "./insightsPieChart";
 import "./insights.css";
 
 const UI_PREFS_KEY = "kimi-insights-ui-prefs-v1";
+const CUSTOM_RANGE_MAX_DAYS = 365;
 
-type InsightsTab = "overview" | "trend" | "breakdown" | "sessions";
-type TrendMetric = "tokens" | "calls";
+type InsightsTab = "overview" | "breakdown" | "sessions";
 type BreakdownView = "table" | "pie";
 type TimeRangeMode = "preset" | "custom";
 
@@ -27,8 +27,6 @@ interface InsightsUiPrefs {
   timeRangeMode: TimeRangeMode;
   customFrom: string;
   customTo: string;
-  trendMetric: TrendMetric;
-  trendChartType: TrendChartType;
   breakdownModelView: BreakdownView;
   breakdownProfileView: BreakdownView;
 }
@@ -39,18 +37,47 @@ const DEFAULT_UI_PREFS: InsightsUiPrefs = {
   timeRangeMode: "preset",
   customFrom: "",
   customTo: "",
-  trendMetric: "calls",
-  trendChartType: "bar",
   breakdownModelView: "table",
   breakdownProfileView: "table",
 };
+
+function formatLocalDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateInputDayNumber(value: string): number {
+  const [year, month, day] = value.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+}
+
+function isValidCustomRange(from: string, to: string, today: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return false;
+  const fromDay = dateInputDayNumber(from);
+  const toDay = dateInputDayNumber(to);
+  const todayDay = dateInputDayNumber(today);
+  return Number.isFinite(fromDay)
+    && Number.isFinite(toDay)
+    && fromDay <= toDay
+    && toDay <= todayDay
+    && fromDay >= todayDay - (CUSTOM_RANGE_MAX_DAYS - 1);
+}
 
 function loadUiPrefs(): InsightsUiPrefs {
   try {
     const raw = window.localStorage.getItem(UI_PREFS_KEY);
     if (!raw) return DEFAULT_UI_PREFS;
     const parsed = JSON.parse(raw) as Partial<InsightsUiPrefs>;
-    return { ...DEFAULT_UI_PREFS, ...parsed };
+    let activeTab = (parsed.activeTab ?? DEFAULT_UI_PREFS.activeTab) as string;
+    if (activeTab === "trend") activeTab = "overview";
+    const merged = { ...DEFAULT_UI_PREFS, ...parsed, activeTab: activeTab as InsightsTab };
+    const today = formatLocalDateInput(new Date());
+    if (merged.timeRangeMode === "custom" && !isValidCustomRange(merged.customFrom, merged.customTo, today)) {
+      return { ...merged, timeRangeMode: "preset", customFrom: "", customTo: "" };
+    }
+    return merged;
   } catch {
     return DEFAULT_UI_PREFS;
   }
@@ -232,6 +259,8 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
   const handleRateChange = async (currency: DisplayCurrency, raw: string): Promise<void> => {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
+    const currentRate = settings?.insights_currency_rates?.[currency] ?? DEFAULT_CURRENCY_RATES[currency];
+    if (Math.abs(parsed - currentRate) < 1e-9) return;
     const nextRates = { ...(settings?.insights_currency_rates ?? {}), [currency]: parsed };
     try {
       const result = await window.kimiSwitch.usageSetConfig({ insights_currency_rates: nextRates });
@@ -449,6 +478,7 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
                   {t(locale, "insightsCurrencyRate")} (1 USD =)
                 </span>
                 <input
+                  key={settings?.insights_display_currency ?? "USD"}
                   type="number"
                   min="0"
                   step="0.01"
@@ -537,8 +567,8 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
 }
 
 /**
- * 完整的洞察分析面板（独立 Tab）
- * 包含：总览、趋势、分组统计、会话分析
+ * 完整的使用统计面板（独立 Tab）
+ * 包含：总览、分组统计、会话分析
  */
 interface InsightsDashboardProps {
   locale: Locale;
@@ -554,39 +584,51 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
   const [statusError, setStatusError] = useState("");
   const [overview, setOverview] = useState<{
     totalCalls: number; totalTokens: number; cacheHitRate: number;
-    reasoningTokens: number; avgLatencyMs: number; errorRate: number;
+    reasoningTokens: number; avgLatencyMs: number; latencySamples: number; errorRate: number;
   } | null>(null);
-  const [trendData, setTrendData] = useState<Array<{ date: string; tokens: number; calls: number }>>([]);
+  const [tokenTotals, setTokenTotals] = useState<TokenUsageTotals | null>(null);
+  const [trendSeries, setTrendSeries] = useState<TrendSeries[]>([]);
   const [breakdownDataModel, setBreakdownDataModel] = useState<Array<{ name: string; calls: number; tokens: number; avgLatency: number }>>([]);
   const [breakdownDataProfile, setBreakdownDataProfile] = useState<Array<{ name: string; calls: number; tokens: number; avgLatency: number }>>([]);
   const [sessionsData, setSessionsData] = useState<Array<{ sessionId: string; calls: number; tokens: number; duration: string; profile: string; models: string; avgLatency: number; errors: number; startedAt: number }>>([]);
   const [costTotal, setCostTotal] = useState<number | null>(null);
-  const [costByDay, setCostByDay] = useState<Record<string, number | null>>({});
   const [costByModel, setCostByModel] = useState<Record<string, number | null>>({});
-  const [monthEstimate, setMonthEstimate] = useState<{
-    monthToDate: number;
-    estimatedMonthTotal: number;
-    estimatedRemaining: number;
-  } | null>(null);
+  const loadRequestRef = useRef(0);
+  const refreshRunningRef = useRef(false);
+  const customRangeButtonRef = useRef<HTMLButtonElement>(null);
+  const customFromInputRef = useRef<HTMLInputElement>(null);
   const [timeRangeKey, setTimeRangeKey] = useState<string>(initialPrefs.timeRangeKey);
   const [customFrom, setCustomFrom] = useState(initialPrefs.customFrom);
   const [customTo, setCustomTo] = useState(initialPrefs.customTo);
+  const [draftCustomFrom, setDraftCustomFrom] = useState(initialPrefs.customFrom);
+  const [draftCustomTo, setDraftCustomTo] = useState(initialPrefs.customTo);
+  const [customEditorOpen, setCustomEditorOpen] = useState(false);
   const [timeRangeMode, setTimeRangeMode] = useState<TimeRangeMode>(initialPrefs.timeRangeMode);
   const [loading, setLoading] = useState(false);
-  const [trendMetric, setTrendMetric] = useState<TrendMetric>(initialPrefs.trendMetric);
-  const [trendChartType, setTrendChartType] = useState<TrendChartType>(initialPrefs.trendChartType);
   const [breakdownModelView, setBreakdownModelView] = useState<BreakdownView>(initialPrefs.breakdownModelView);
   const [breakdownProfileView, setBreakdownProfileView] = useState<BreakdownView>(initialPrefs.breakdownProfileView);
-  const [selectedTrendPoint, setSelectedTrendPoint] = useState<{ date: string; tokens: number; calls: number } | null>(null);
   const { toasts, showToast, removeToast } = useToast();
 
   useEffect(() => {
-    saveUiPrefs({ activeTab, timeRangeKey, timeRangeMode, customFrom, customTo, trendMetric, trendChartType, breakdownModelView, breakdownProfileView });
-  }, [activeTab, timeRangeKey, timeRangeMode, customFrom, customTo, trendMetric, trendChartType, breakdownModelView, breakdownProfileView]);
+    saveUiPrefs({ activeTab, timeRangeKey, timeRangeMode, customFrom, customTo, breakdownModelView, breakdownProfileView });
+  }, [activeTab, timeRangeKey, timeRangeMode, customFrom, customTo, breakdownModelView, breakdownProfileView]);
+
+  useEffect(() => {
+    if (customEditorOpen) customFromInputRef.current?.focus();
+  }, [customEditorOpen]);
 
   const getTimeRange = (): unknown => {
-    if (timeRangeMode === "custom" && customFrom && customTo) {
-      return { fromUtc: new Date(customFrom).getTime(), toUtc: new Date(customTo + "T23:59:59").getTime() };
+    const now = new Date();
+    if (timeRangeMode === "custom" && isValidCustomRange(customFrom, customTo, formatLocalDateInput(now))) {
+      const parseLocalDay = (value: string): Date => {
+        const [year, month, day] = value.split("-").map(Number);
+        return new Date(year, month - 1, day);
+      };
+      const from = parseLocalDay(customFrom);
+      const toExclusive = parseLocalDay(customTo);
+      toExclusive.setDate(toExclusive.getDate() + 1);
+      const toUtc = customTo === formatLocalDateInput(now) ? now.getTime() : toExclusive.getTime();
+      return { fromUtc: from.getTime(), toUtc };
     }
     return timeRangeKey;
   };
@@ -608,33 +650,81 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
     }
   };
 
-  const loadData = async (): Promise<void> => {
-    setLoading(true);
+  const loadData = async (options: { ingestLatest?: boolean; showRefreshState?: boolean } = {}): Promise<void> => {
+    if (options.showRefreshState && refreshRunningRef.current) return;
+    if (!options.showRefreshState && refreshRunningRef.current) return;
+    const requestId = ++loadRequestRef.current;
+    if (options.showRefreshState) {
+      refreshRunningRef.current = true;
+      setLoading(true);
+    }
     const range = getTimeRange() as never;
+    const requestedTab = activeTab;
     try {
-      // 先主动摄入一次最新日志，再查询，使「刷新」能立即反映刚产生的用量，
-      // 而不必等待后台 watcher 的 5 秒轮询。
-      await window.kimiSwitch.usageIngestNow?.();
-      const [overviewRes, trendRes, breakdownModelRes, breakdownProfileRes, sessionsRes, costRes] = await Promise.allSettled([
-        window.kimiSwitch.usageQueryOverview(range),
-        window.kimiSwitch.usageQueryTrend({ range, bucket: "day", groupBy: null }),
-        window.kimiSwitch.usageQueryBreakdown({ dim: "model", range, limit: 20, orderBy: "tokens" }),
-        window.kimiSwitch.usageQueryBreakdown({ dim: "profile", range, limit: 20, orderBy: "tokens" }),
-        window.kimiSwitch.usageQuerySessions({ range, limit: 20 }),
-        window.kimiSwitch.usageQueryCost(range),
-      ]);
-      if (overviewRes.status === "fulfilled" && overviewRes.value.ok) setOverview(overviewRes.value.slice);
-      if (trendRes.status === "fulfilled" && trendRes.value.ok) {
-        setTrendData(trendRes.value.series.map((s) => ({ date: new Date(s.bucket).toISOString().slice(0, 10), tokens: s.tokens, calls: s.calls })));
-      }
-      if (breakdownModelRes.status === "fulfilled" && breakdownModelRes.value.ok) {
-        setBreakdownDataModel(breakdownModelRes.value.rows.map((r) => ({ name: r.name, calls: r.calls, tokens: r.tokens, avgLatency: r.avg_latency_ms })));
-      }
-      if (breakdownProfileRes.status === "fulfilled" && breakdownProfileRes.value.ok) {
-        setBreakdownDataProfile(breakdownProfileRes.value.rows.map((r) => ({ name: r.name, calls: r.calls, tokens: r.tokens, avgLatency: r.avg_latency_ms })));
-      }
-      if (sessionsRes.status === "fulfilled" && sessionsRes.value.ok) {
-        setSessionsData(sessionsRes.value.rows.map((r) => ({
+      // 范围切换只查询现有 SQLite 数据。遍历全部 session/agent 日志成本较高，
+      // 仅显式刷新时主动摄入；后台 watcher 仍会按 5 秒周期持续更新。
+      if (options.ingestLatest) await window.kimiSwitch.usageIngestNow?.();
+      if (requestedTab === "overview") {
+        const [overviewRes, tokenTotalsRes, costSeriesRes] = await Promise.allSettled([
+          window.kimiSwitch.usageQueryOverview(range),
+          window.kimiSwitch.usageQueryTokenTotals(range),
+          window.kimiSwitch.usageQueryCostSeries(range),
+        ]);
+        if (requestId !== loadRequestRef.current) return;
+        const overviewOk = overviewRes.status === "fulfilled" && overviewRes.value.ok;
+        const totalsOk = tokenTotalsRes.status === "fulfilled" && tokenTotalsRes.value.ok;
+        const seriesOk = costSeriesRes.status === "fulfilled" && costSeriesRes.value.ok;
+        if (overviewOk && totalsOk && seriesOk) {
+          const costByBucket = new Map<number, number | null>();
+          for (const point of costSeriesRes.value.points) costByBucket.set(point.bucket, point.cost);
+          const nextTrend = costSeriesRes.value.series.map((point) => ({
+            ...point,
+            cost: costByBucket.get(point.bucket) ?? null,
+          }));
+          const costs = costSeriesRes.value.points.map((point) => point.cost);
+          const nextCost = costs.length > 0 && costs.every((cost) => cost !== null)
+            ? costs.reduce((sum, cost) => sum + (cost ?? 0), 0)
+            : null;
+          setOverview(overviewRes.value.slice);
+          setTokenTotals(tokenTotalsRes.value.totals);
+          setTrendSeries(nextTrend);
+          setCostTotal(nextCost);
+        } else {
+          setOverview(null);
+          setTokenTotals(null);
+          setTrendSeries([]);
+          setCostTotal(null);
+          const failures = [overviewRes, tokenTotalsRes, costSeriesRes]
+            .filter((result) => result.status === "rejected" || !result.value.ok).length;
+          showToast(`${t(locale, "insightsToastLoadError")} (${failures}/3)`, "error");
+        }
+      } else if (requestedTab === "breakdown") {
+        const [breakdownModelRes, breakdownProfileRes, costRes] = await Promise.allSettled([
+          window.kimiSwitch.usageQueryBreakdown({ dim: "model", range, limit: 20, orderBy: "tokens" }),
+          window.kimiSwitch.usageQueryBreakdown({ dim: "profile", range, limit: 20, orderBy: "tokens" }),
+          window.kimiSwitch.usageQueryCost(range),
+        ]);
+        if (requestId !== loadRequestRef.current) return;
+        const modelOk = breakdownModelRes.status === "fulfilled" && breakdownModelRes.value.ok;
+        const profileOk = breakdownProfileRes.status === "fulfilled" && breakdownProfileRes.value.ok;
+        const costOk = costRes.status === "fulfilled" && costRes.value.ok;
+        if (modelOk && profileOk && costOk) {
+          setBreakdownDataModel(breakdownModelRes.value.rows.map((row) => ({ name: row.name, calls: row.calls, tokens: row.tokens, avgLatency: row.avg_latency_ms })));
+          setBreakdownDataProfile(breakdownProfileRes.value.rows.map((row) => ({ name: row.name, calls: row.calls, tokens: row.tokens, avgLatency: row.avg_latency_ms })));
+          setCostByModel(costRes.value.byModel);
+        } else {
+          setBreakdownDataModel([]);
+          setBreakdownDataProfile([]);
+          setCostByModel({});
+          const failures = [breakdownModelRes, breakdownProfileRes, costRes]
+            .filter((result) => result.status === "rejected" || !result.value.ok).length;
+          showToast(`${t(locale, "insightsToastLoadError")} (${failures}/3)`, "error");
+        }
+      } else {
+        const sessionsRes = await window.kimiSwitch.usageQuerySessions({ range, limit: 20 });
+        if (requestId !== loadRequestRef.current) return;
+        if (sessionsRes.ok) {
+          setSessionsData(sessionsRes.rows.map((r) => ({
           sessionId: r.session_id,
           calls: r.calls,
           tokens: r.tokens,
@@ -644,32 +734,44 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
           avgLatency: r.avg_latency_ms,
           errors: r.errors,
           startedAt: r.started_utc,
-        })));
-      }
-      if (costRes.status === "fulfilled" && costRes.value.ok) {
-        setCostTotal(costRes.value.total);
-        setCostByDay(costRes.value.byDay);
-        setCostByModel(costRes.value.byModel);
-      }
-      const partialFailures = [overviewRes, trendRes, breakdownModelRes, breakdownProfileRes, sessionsRes, costRes]
-        .filter((result) => result.status === "rejected" || !result.value.ok).length;
-      if (partialFailures > 0) {
-        showToast(`${t(locale, "insightsToastLoadError")} (${partialFailures}/6)`, "error");
+          })));
+        }
       }
     } catch (err) {
+      if (requestId === loadRequestRef.current) {
+        if (requestedTab === "overview") {
+          setOverview(null);
+          setTokenTotals(null);
+          setTrendSeries([]);
+          setCostTotal(null);
+        } else if (requestedTab === "breakdown") {
+          setBreakdownDataModel([]);
+          setBreakdownDataProfile([]);
+          setCostByModel({});
+        } else {
+          setSessionsData([]);
+        }
+      }
       showToast(`${t(locale, "insightsToastLoadError")}: ${String(err)}`, "error");
     } finally {
-      setLoading(false);
+      if (options.showRefreshState) {
+        refreshRunningRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => { void loadStatus(); }, []);
-  useEffect(() => { if (settings?.insights_status === "enabled") void loadData(); }, [settings, timeRangeKey, timeRangeMode, customFrom, customTo]);
   useEffect(() => {
-    const handler = (): void => { void loadData(); };
+    if (settings?.insights_status !== "enabled") return;
+    const timer = window.setTimeout(() => { void loadData(); }, 80);
+    return () => window.clearTimeout(timer);
+  }, [settings, activeTab, timeRangeKey, timeRangeMode, customFrom, customTo]);
+  useEffect(() => {
+    const handler = (): void => { void loadData({ ingestLatest: true, showRefreshState: true }); };
     window.addEventListener("kimi-refresh", handler);
     return () => window.removeEventListener("kimi-refresh", handler);
-  }, [timeRangeKey, timeRangeMode, customFrom, customTo]);
+  }, [activeTab, timeRangeKey, timeRangeMode, customFrom, customTo]);
 
   const isEnabled = settings?.insights_status === "enabled";
   if (statusLoading) {
@@ -698,6 +800,19 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
 
   const displayCurrency: DisplayCurrency = settings?.insights_display_currency ?? "USD";
   const currencyRates = settings?.insights_currency_rates;
+  const displayTrendSeries = trendSeries.map((point) => ({
+    ...point,
+    cost: convertCost(point.cost, displayCurrency, currencyRates),
+  }));
+  const todayInput = formatLocalDateInput(new Date());
+  const earliestCustomDate = new Date();
+  earliestCustomDate.setDate(earliestCustomDate.getDate() - (CUSTOM_RANGE_MAX_DAYS - 1));
+  const earliestCustomInput = formatLocalDateInput(earliestCustomDate);
+  const customRangeDirty = timeRangeMode !== "custom"
+    || draftCustomFrom !== customFrom
+    || draftCustomTo !== customTo;
+  const customRangeValid = isValidCustomRange(draftCustomFrom, draftCustomTo, todayInput)
+    && customRangeDirty;
 
   return (
     <div className="insights-dashboard">
@@ -707,41 +822,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
           <h2>{t(locale, "insights")}</h2>
         </div>
         <div className="insights-dashboard-actions">
-          {timeRangeMode === "preset" ? (
-            <CompactSelect
-              ariaLabel={t(locale, "insightsTimeRangeLabel")}
-              value={timeRangeKey}
-              className="insights-compact-select"
-              onChange={(value) => {
-                if (value === "__custom__") {
-                  setTimeRangeMode("custom");
-                  const now = new Date();
-                  setCustomTo(now.toISOString().slice(0, 10));
-                  setCustomFrom(new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10));
-                } else {
-                  setTimeRangeKey(value);
-                }
-              }}
-              options={[
-                { value: "today", label: t(locale, "insightsTimeRangeToday") },
-                { value: "3d", label: t(locale, "insightsTimeRange3d") },
-                { value: "7d", label: t(locale, "insightsTimeRange7d") },
-                { value: "14d", label: t(locale, "insightsTimeRange14d") },
-                { value: "30d", label: t(locale, "insightsTimeRange30d") },
-                { value: "90d", label: t(locale, "insightsTimeRange90d") },
-                { value: "mtd", label: t(locale, "insightsTimeRangeMonth") },
-                { value: "__custom__", label: t(locale, "insightsTimeRangeCustomOption") },
-              ]}
-            />
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="insights-select" />
-              <span style={{ color: "var(--muted)" }}>—</span>
-              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="insights-select" />
-              <button onClick={() => setTimeRangeMode("preset")} className="insights-button-secondary" style={{ padding: "6px 10px" }}>{t(locale, "insightsTimeRangePreset")}</button>
-            </div>
-          )}
-          <button onClick={() => void loadData()} className="insights-button-secondary" disabled={loading}>
+          <button onClick={() => void loadData({ ingestLatest: true, showRefreshState: true })} className="insights-button-secondary" disabled={loading}>
             <Activity size={14} />
             {loading ? t(locale, "insightsRefreshLoading") : t(locale, "insightsRefresh")}
           </button>
@@ -749,10 +830,9 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
       </div>
 
       <div className="insights-tabs-nav">
-        {([["overview", "insightsOverview"], ["trend", "insightsTrend"], ["breakdown", "insightsBreakdown"], ["sessions", "insightsSessions"]] as const).map(([tab, key]) => (
-          <button key={tab} onClick={() => setActiveTab(tab)} className={`insights-tab-button ${activeTab === tab ? "active" : ""}`}>
+        {([["overview", "insightsOverview"], ["breakdown", "insightsBreakdown"], ["sessions", "insightsSessions"]] as const).map(([tab, key]) => (
+          <button key={tab} disabled={loading} onClick={() => setActiveTab(tab)} className={`insights-tab-button ${activeTab === tab ? "active" : ""}`}>
             {tab === "overview" && <Activity size={16} />}
-            {tab === "trend" && <TrendingUp size={16} />}
             {tab === "breakdown" && <Database size={16} />}
             {tab === "sessions" && <Zap size={16} />}
             {t(locale, key)}
@@ -762,92 +842,180 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
 
       <div className="insights-dashboard-content">
         {activeTab === "overview" && (
-          <div className="insights-overview-grid">
-            <OverviewMetricCard icon={<Activity size={20} />} label={t(locale, "insightsTotalCalls")} value={overview ? formatNumber(overview.totalCalls) : "-"} color="blue" />
-            <OverviewMetricCard icon={<Zap size={20} />} label={t(locale, "insightsTotalTokens")} value={overview ? formatNumber(overview.totalTokens) : "-"} color="purple" />
-            <OverviewMetricCard icon={<TrendingUp size={20} />} label={t(locale, "insightsCacheHitRate")} value={overview ? `${(overview.cacheHitRate * 100).toFixed(1)}%` : "-"} color="green" />
-            <OverviewMetricCard icon={<Database size={20} />} label={t(locale, "insightsReasoningTokens")} value={overview ? formatNumber(overview.reasoningTokens) : "-"} color="orange" />
-            <OverviewMetricCard icon={<Activity size={20} />} label={t(locale, "insightsAvgLatency")} value={overview ? `${Math.round(overview.avgLatencyMs)} ms` : "-"} color="cyan" />
-            <OverviewMetricCard icon={<AlertCircle size={20} />} label={t(locale, "insightsErrorRate")} value={overview ? `${(overview.errorRate * 100).toFixed(1)}%` : "-"} color="red" />
-            <OverviewMetricCard icon={<TrendingUp size={20} />} label={t(locale, "costEstimate")} value={formatCost(costTotal, locale, displayCurrency, currencyRates)} color="green" />
-          </div>
-        )}
-
-        {activeTab === "trend" && (
-          <div className="insights-trend-panel">
-            <p className="insights-tab-desc">{t(locale, "insightsTrendDesc")}</p>
-            <div className="insights-trend-controls">
-              <CompactSelect
-                ariaLabel={t(locale, "insightsTrendMetricLabel")}
-                value={trendMetric}
-                className="insights-compact-select"
-                onChange={(value) => setTrendMetric(value as TrendMetric)}
-                options={[
-                  { value: "tokens", label: t(locale, "insightsTrendMetricTokens") },
-                  { value: "calls", label: t(locale, "insightsTrendMetricCalls") },
-                ]}
+          <div className="insights-overview">
+            {overview && tokenTotals ? (
+              <UsageHero
+                locale={locale}
+                overview={overview}
+                totals={tokenTotals}
+                costTotal={costTotal}
+                currency={displayCurrency}
+                currencyRates={currencyRates}
               />
-              <div className="insights-chart-type-toggle" role="tablist" aria-label={t(locale, "insightsChartTypeLabel")}>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={trendChartType === "bar"}
-                  className={`insights-chart-type-btn ${trendChartType === "bar" ? "active" : ""}`}
-                  onClick={() => setTrendChartType("bar")}
-                  title={t(locale, "insightsChartTypeBar")}
-                >
-                  <BarChart3 size={14} />
-                  <span>{t(locale, "insightsChartTypeBar")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={trendChartType === "line"}
-                  className={`insights-chart-type-btn ${trendChartType === "line" ? "active" : ""}`}
-                  onClick={() => setTrendChartType("line")}
-                  title={t(locale, "insightsChartTypeLine")}
-                >
-                  <LineChart size={14} />
-                  <span>{t(locale, "insightsChartTypeLine")}</span>
-                </button>
-              </div>
-            </div>
-            {trendData.length === 0 ? (
-              <div className="insights-coming-soon"><TrendingUp size={48} /><h3>{t(locale, "insightsTrendEmpty")}</h3><p>{t(locale, "insightsTrendEmptyHint")}</p></div>
             ) : (
-              <>
-                <div className="insights-trend-cost-summary">
-                  <span className="insights-trend-cost-label">{t(locale, "costEstimate")}</span>
-                  <span className="insights-trend-cost-value">{formatCost(costTotal, locale, displayCurrency, currencyRates)}</span>
-                </div>
-                <TrendChart
-                  data={trendData}
-                  metric={trendMetric}
-                  chartType={trendChartType}
-                  labels={{
-                    legend: t(locale, "chartLegend"),
-                    clickHint: t(locale, "chartClickHint"),
-                    metricLabel: t(locale, trendMetric === "tokens" ? "insightsTrendMetricTokens" : "insightsTrendMetricCalls"),
-                    tooltipLabel: t(locale, trendMetric === "tokens" ? "insightsChartTooltipToken" : "insightsChartTooltipCalls"),
-                    unit: trendMetric === "tokens" ? "tokens" : t(locale, "insightsChartUnitTimes")
-                  }}
-                  onPointClick={(point) =>
-                    setSelectedTrendPoint((prev) => (prev?.date === point.date ? null : point))
-                  }
-                />
-                {selectedTrendPoint && (
-                  <div className="insights-trend-detail">
-                    <span className="insights-trend-detail-date">{selectedTrendPoint.date}</span>
-                    <span className="insights-trend-detail-stat">
-                      {t(locale, "insightsTotalTokens")}: {formatNumber(selectedTrendPoint.tokens)}
-                    </span>
-                    <span className="insights-trend-detail-stat">
-                      {t(locale, "insightsTotalCalls")}: {formatNumber(selectedTrendPoint.calls)}
-                    </span>
+              <div className="usage-hero" aria-busy="true">
+                <div className="usage-hero-main">
+                  <div className="usage-hero-icon" aria-hidden="true">
+                    <Activity size={22} />
                   </div>
-                )}
-              </>
+                  <div className="usage-hero-copy">
+                    <div className="usage-hero-label">{t(locale, "usageHeroTitle")}</div>
+                    <div className="usage-hero-value">-</div>
+                    <div className="usage-hero-sub">-</div>
+                  </div>
+                </div>
+                <div className="usage-hero-side">
+                  <div className="usage-hero-side-item">
+                    <div className="usage-hero-side-label">{t(locale, "usageTotalCalls")}</div>
+                    <div className="usage-hero-side-value">-</div>
+                  </div>
+                  <div className="usage-hero-side-item">
+                    <div className="usage-hero-side-label">{t(locale, "usageTotalCost")}</div>
+                    <div className="usage-hero-side-value">-</div>
+                  </div>
+                </div>
+              </div>
             )}
+            <section className="insights-trend-section">
+              <div className="insights-trend-section-head">
+                <h3>{t(locale, "usageTrendTitle")}</h3>
+                <div className="insights-trend-time-controls">
+                  <div
+                    className="insights-trend-range-control"
+                    role="group"
+                    aria-label={t(locale, "insightsTimeRangeLabel")}
+                  >
+                    {([
+                      ["today", "insightsTimeRangeToday"],
+                      ["3d", "insightsTimeRange3d"],
+                      ["7d", "insightsTimeRange7d"],
+                      ["14d", "insightsTimeRange14d"],
+                      ["30d", "insightsTimeRange30d"],
+                      ["90d", "insightsTimeRange90d"],
+                      ["mtd", "insightsTimeRangeMonth"],
+                    ] as const).map(([value, labelKey]) => (
+                      <button
+                          key={value}
+                          type="button"
+                          disabled={loading}
+                        className={`insights-trend-range-button${timeRangeMode === "preset" && timeRangeKey === value ? " active" : ""}`}
+                        aria-pressed={timeRangeMode === "preset" && timeRangeKey === value}
+                        onClick={() => {
+                          setTimeRangeMode("preset");
+                          setTimeRangeKey(value);
+                          setCustomEditorOpen(false);
+                        }}
+                      >
+                        {t(locale, labelKey)}
+                      </button>
+                    ))}
+                    <button
+                      ref={customRangeButtonRef}
+                      type="button"
+                      disabled={loading}
+                      className={`insights-trend-range-button custom${timeRangeMode === "custom" ? " active" : ""}`}
+                      aria-pressed={timeRangeMode === "custom"}
+                      aria-expanded={customEditorOpen}
+                      aria-controls="insights-custom-range-editor"
+                      onClick={() => {
+                        const now = new Date();
+                        const from = new Date(now);
+                        from.setDate(from.getDate() - 6);
+                        setDraftCustomTo(customTo || formatLocalDateInput(now));
+                        setDraftCustomFrom(customFrom || formatLocalDateInput(from));
+                        setCustomEditorOpen(true);
+                      }}
+                    >
+                      {t(locale, "insightsTimeRangeCustom")}
+                    </button>
+                  </div>
+                  {timeRangeMode === "custom" && customFrom && customTo ? (
+                    <span className="insights-trend-custom-summary">{customFrom} — {customTo}</span>
+                  ) : null}
+                  {customEditorOpen ? (
+                    <div
+                      id="insights-custom-range-editor"
+                      className="insights-trend-time-custom"
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setDraftCustomFrom(customFrom);
+                          setDraftCustomTo(customTo);
+                          setCustomEditorOpen(false);
+                          customRangeButtonRef.current?.focus();
+                        }
+                      }}
+                    >
+                      <input
+                        ref={customFromInputRef}
+                        aria-label={t(locale, "insightsTimeRangeFrom")}
+                        type="date"
+                        disabled={loading}
+                        value={draftCustomFrom}
+                        min={earliestCustomInput}
+                        max={draftCustomTo || todayInput}
+                        onChange={(e) => setDraftCustomFrom(e.target.value)}
+                        className="insights-select"
+                      />
+                      <span>—</span>
+                      <input
+                        aria-label={t(locale, "insightsTimeRangeTo")}
+                        type="date"
+                        disabled={loading}
+                        value={draftCustomTo}
+                        min={draftCustomFrom || undefined}
+                        max={todayInput}
+                        onChange={(e) => setDraftCustomTo(e.target.value)}
+                        className="insights-select"
+                      />
+                      <button
+                        type="button"
+                        disabled={loading || !customRangeValid}
+                        onClick={() => {
+                          setCustomFrom(draftCustomFrom);
+                          setCustomTo(draftCustomTo);
+                          setTimeRangeMode("custom");
+                          setCustomEditorOpen(false);
+                          customRangeButtonRef.current?.focus();
+                        }}
+                        className="insights-button-primary"
+                      >
+                        {t(locale, "insightsTimeRangeApply")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          setDraftCustomFrom(customFrom);
+                          setDraftCustomTo(customTo);
+                          setCustomEditorOpen(false);
+                          customRangeButtonRef.current?.focus();
+                        }}
+                        className="insights-button-secondary"
+                      >
+                        {t(locale, "cancel")}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              {trendSeries.length === 0 ? (
+                <div className="insights-coming-soon"><TrendingUp size={48} /><h3>{t(locale, "insightsTrendEmpty")}</h3><p>{t(locale, "insightsTrendEmptyHint")}</p></div>
+              ) : (
+                <UsageAreaChart
+                  data={displayTrendSeries}
+                  locale={locale}
+                  currencySymbol={CURRENCY_SYMBOLS[displayCurrency]}
+                  labels={{
+                    cost: t(locale, "usageLegendCost"),
+                    cacheCreation: t(locale, "usageCacheCreation"),
+                    cacheRead: t(locale, "usageCacheHits"),
+                    input: t(locale, "usageLegendInput"),
+                    output: t(locale, "usageLegendOutput"),
+                    axisTokens: t(locale, "insightsTrendMetricTokens"),
+                  }}
+                />
+              )}
+            </section>
           </div>
         )}
 
@@ -1038,22 +1206,8 @@ function BreakdownCard({ title, data, view, onViewChange, locale, costByName, cu
   );
 }
 
-interface OverviewMetricCardProps {
-  icon: JSX.Element;
-  label: string;
-  value: string;
-  color: "blue" | "purple" | "green" | "orange" | "cyan" | "red";
-}
-
-function OverviewMetricCard({ icon, label, value, color }: OverviewMetricCardProps): JSX.Element {
-  return (
-    <div className={`insights-metric-overview-card color-${color}`}>
-      <div className="insights-metric-overview-icon">{icon}</div>
-      <div className="insights-metric-overview-label">{label}</div>
-      <div className="insights-metric-overview-value">{value}</div>
-    </div>
-  );
-}
+// 加载中（overview/tokenTotals 为 null）时 Hero 区域渲染占位卡片（数字 `-`），
+// 数据就绪后才会渲染真正的 UsageHero。
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";

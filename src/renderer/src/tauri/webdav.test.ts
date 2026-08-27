@@ -264,18 +264,18 @@ describe("testWebDavConnection error mapping", () => {
 
   it("maps 401 to a friendly auth error", async () => {
     mockedInvoke.mockResolvedValue(httpReply(401));
-    await expect(testWebDavConnection(settings())).rejects.toThrow(/认证失败 \(401\)/);
+    await expect(testWebDavConnection(settings())).rejects.toThrow(/WebDAV authentication failed \(401\)/);
   });
 
   it("maps 403 to a friendly auth error", async () => {
     mockedInvoke.mockResolvedValue(httpReply(403));
-    await expect(testWebDavConnection(settings())).rejects.toThrow(/认证失败 \(403\)/);
+    await expect(testWebDavConnection(settings())).rejects.toThrow(/WebDAV authentication failed \(403\)/);
   });
 
   it("maps 429 to a friendly rate-limit error containing '429'", async () => {
     mockedInvoke.mockResolvedValue(httpReply(429));
     await expect(testWebDavConnection(settings())).rejects.toThrow(/429/);
-    await expect(testWebDavConnection(settings())).rejects.toThrow(/限流/);
+    await expect(testWebDavConnection(settings())).rejects.toThrow(/rate-limited/);
   });
 
   it("falls back to a generic error for other non-ok statuses", async () => {

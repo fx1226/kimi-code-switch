@@ -177,7 +177,7 @@ export function OverviewDashboard(props: {
     <section className="overview-grid overview-dashboard-v2">
       <section className="glass-panel overview-card overview-card-wide overview-hero overview-context-card">
         <div className="overview-context-main">
-          <div className="overview-hero-header"><Zap size={16} /><span>{t(locale, "overviewActiveProfile")}</span></div>
+          <div className="overview-hero-header"><Zap size={16} /><span>{activeProfileDisplayName}</span></div>
           <div className="overview-app-title"><span className="overview-app-name">{activeProfileDisplayName}</span></div>
           <div className="overview-context-model">{activeProfileModelName || t(locale, "overviewProfileModelUnset")}</div>
           <div className="overview-context-modes">
@@ -187,7 +187,6 @@ export function OverviewDashboard(props: {
           </div>
         </div>
         <div className="overview-health-card">
-          <div className="overview-hero-col-title">{t(locale, "diagnosticsTitle")}</div>
           <strong className={hasDiagnosticIssue ? "text-warn" : "text-ok"}>
             {hasDiagnosticIssue ? t(locale, "doctorStatusNeedsAttention") : t(locale, "doctorStatusOk")}
           </strong>
