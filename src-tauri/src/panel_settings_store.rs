@@ -1,6 +1,6 @@
 //! 面板设置存储（SQLite）。
 //!
-//! 设计：结构化表存储，每个配置项独立列，复杂对象（shortcuts、mcp_servers 等）使用 JSON 列。
+//! 设计：结构化表存储，每个配置项独立列，复杂对象（shortcuts、model_ui_metadata 等）使用 JSON 列。
 //! 单行设计（id=1），version 字段用于未来 schema 升级。
 
 use rusqlite::OptionalExtension;
@@ -16,6 +16,17 @@ fn lock_conn<'a>(
         .conn
         .lock()
         .map_err(|_| "database lock poisoned".to_string())
+}
+
+fn is_known_legacy_panel_path(path: &std::path::Path) -> Result<bool, String> {
+    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
+    Ok([
+        home.join(".kimi/config.panel.toml"),
+        home.join(".kimi-code/.panel/config.panel.toml"),
+        home.join(".kimi-code-switch-gui/config.panel.toml"),
+    ]
+    .iter()
+    .any(|candidate| candidate == path))
 }
 
 fn ensure_column(
@@ -88,6 +99,10 @@ fn ensure_structured_panel_settings_columns(
             "active_official_account_id TEXT NOT NULL DEFAULT ''",
         ),
         (
+            "official_account_vault_enabled",
+            "official_account_vault_enabled INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
             "backup_strategy",
             "backup_strategy TEXT NOT NULL DEFAULT 'manual'",
         ),
@@ -124,7 +139,10 @@ fn ensure_structured_panel_settings_columns(
             "backup_webdav_path TEXT NOT NULL DEFAULT '/kimi-backups'",
         ),
         ("shortcuts", "shortcuts TEXT NOT NULL DEFAULT '{}'"),
-        ("mcp_servers", "mcp_servers TEXT NOT NULL DEFAULT '{}'"),
+        (
+            "model_ui_metadata",
+            "model_ui_metadata TEXT NOT NULL DEFAULT '{}'",
+        ),
         ("kimi_code_environments", "kimi_code_environments TEXT"),
         (
             "active_kimi_code_environment_id",
@@ -167,6 +185,122 @@ fn ensure_structured_panel_settings_columns(
         ensure_column(conn, columns, column_name, column_definition)?;
     }
     Ok(())
+}
+
+fn has_legacy_mcp_servers_column(conn: &rusqlite::Connection) -> Result<bool, String> {
+    let columns: Vec<String> = conn
+        .prepare("SELECT name FROM pragma_table_info('panel_settings')")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()
+        })
+        .map_err(|e| format!("inspect panel_settings columns: {e}"))?;
+    Ok(columns.iter().any(|column| column == "mcp_servers"))
+}
+
+/// Serializes the only Model data that belongs to the GUI database.
+///
+/// Provider connection data and native Model definitions belong exclusively in
+/// `config.toml`. Keep this allow-list strict at the Rust command boundary so a
+/// renderer bug or a direct command invocation cannot persist a secret here.
+fn model_ui_metadata_json(settings: &serde_json::Value) -> Result<String, String> {
+    let Some(metadata) = settings.get("model_ui_metadata") else {
+        return Ok("{}".to_string());
+    };
+    if metadata.is_null() {
+        return Ok("{}".to_string());
+    }
+
+    let environments = metadata
+        .as_object()
+        .ok_or("model_ui_metadata must be an object")?;
+    let mut sanitized_environments = serde_json::Map::new();
+
+    for (environment_id, models) in environments {
+        if environment_id.trim().is_empty() {
+            return Err("model_ui_metadata environment id must not be empty".to_string());
+        }
+        let models = models
+            .as_object()
+            .ok_or("model_ui_metadata environment value must be an object")?;
+        let mut sanitized_models = serde_json::Map::new();
+
+        for (model_id, metadata) in models {
+            if model_id.trim().is_empty() {
+                return Err("model_ui_metadata model id must not be empty".to_string());
+            }
+            let metadata = metadata
+                .as_object()
+                .ok_or("model_ui_metadata model value must be an object")?;
+            let mut sanitized = serde_json::Map::new();
+
+            for (key, value) in metadata {
+                match key.as_str() {
+                    "auth_mode" => match value.as_str() {
+                        Some("api-key") | Some("official-account") => {
+                            sanitized.insert(key.clone(), value.clone());
+                        }
+                        _ => return Err("model_ui_metadata.auth_mode is invalid".to_string()),
+                    },
+                    "official_account_scope" => match value.as_str() {
+                        Some("global") => {
+                            sanitized.insert(key.clone(), value.clone());
+                        }
+                        _ => {
+                            return Err(
+                                "model_ui_metadata.official_account_scope is invalid".to_string()
+                            )
+                        }
+                    },
+                    "pricing" => {
+                        let pricing = value
+                            .as_object()
+                            .ok_or("model_ui_metadata.pricing must be an object")?;
+                        let mut sanitized_pricing = serde_json::Map::new();
+                        for (pricing_key, price) in pricing {
+                            if !matches!(
+                                pricing_key.as_str(),
+                                "input_per_mtok"
+                                    | "output_per_mtok"
+                                    | "cache_read_per_mtok"
+                                    | "cache_creation_per_mtok"
+                            ) {
+                                return Err(format!(
+                                    "model_ui_metadata.pricing.{pricing_key} is not supported"
+                                ));
+                            }
+                            let price = price.as_f64().ok_or_else(|| {
+                                format!("model_ui_metadata.pricing.{pricing_key} must be a number")
+                            })?;
+                            if !price.is_finite() || price < 0.0 {
+                                return Err(format!(
+                                    "model_ui_metadata.pricing.{pricing_key} must be non-negative"
+                                ));
+                            }
+                            sanitized_pricing.insert(pricing_key.clone(), price.into());
+                        }
+                        sanitized.insert(
+                            key.clone(),
+                            serde_json::Value::Object(sanitized_pricing),
+                        );
+                    }
+                    _ => {
+                        return Err(format!(
+                            "model_ui_metadata.{key} is not supported; native definitions and secrets are not stored in the GUI database"
+                        ))
+                    }
+                }
+            }
+
+            sanitized_models.insert(model_id.clone(), serde_json::Value::Object(sanitized));
+        }
+        sanitized_environments.insert(
+            environment_id.clone(),
+            serde_json::Value::Object(sanitized_models),
+        );
+    }
+
+    Ok(serde_json::Value::Object(sanitized_environments).to_string())
 }
 
 /// 初始化 panel_settings 表。
@@ -243,11 +377,11 @@ pub fn get_panel_settings(
                 backup_strategy, backup_frequency, backup_retention_count, backup_destination_type,
                 backup_local_path, backup_webdav_url, backup_webdav_username,
                 backup_webdav_password, backup_webdav_path,
-                shortcuts, mcp_servers, kimi_code_environments, active_kimi_code_environment_id,
+                shortcuts, model_ui_metadata, kimi_code_environments, active_kimi_code_environment_id,
                 insights_status, insights_proxy_port, insights_retention_days,
                 insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                 insights_onboarding_shown_at, insights_last_known_port,
-                insights_display_currency, insights_currency_rates
+                insights_display_currency, insights_currency_rates, official_account_vault_enabled
             FROM panel_settings WHERE id = 1",
             [],
             |row| {
@@ -284,7 +418,7 @@ pub fn get_panel_settings(
                     "backup_webdav_password": row.get::<_, String>(27)?,
                     "backup_webdav_path": row.get::<_, String>(28)?,
                     "shortcuts": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(29)?).unwrap_or(serde_json::json!({})),
-                    "mcp_servers": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(30)?).unwrap_or(serde_json::json!({})),
+                    "model_ui_metadata": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(30)?).unwrap_or(serde_json::json!({})),
                     "kimi_code_environments": row.get::<_, Option<String>>(31)?
                         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                     "active_kimi_code_environment_id": row.get::<_, String>(32)?,
@@ -299,6 +433,7 @@ pub fn get_panel_settings(
                     "insights_display_currency": row.get::<_, String>(40)?,
                     "insights_currency_rates": row.get::<_, Option<String>>(41)?
                         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                    "official_account_vault_enabled": row.get::<_, i64>(42)? != 0,
                 });
                 Ok(json.to_string())
             },
@@ -307,6 +442,68 @@ pub fn get_panel_settings(
         .map_err(|e| format!("query panel_settings: {e}"))?;
 
     Ok(row_json)
+}
+
+fn parse_panel_settings_json(settings_json: &str) -> Result<serde_json::Value, String> {
+    let settings: serde_json::Value = serde_json::from_str(settings_json)
+        .map_err(|error| format!("parse settings json: {error}"))?;
+    if !settings.is_object() {
+        return Err("panel settings must be a JSON object".to_string());
+    }
+    Ok(settings)
+}
+
+fn is_retired_default_environment_home(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").trim_end_matches('/').to_string();
+    normalized.ends_with("/.kimi-code-switch-gui/.env/default")
+}
+
+fn normalize_retired_default_environment_paths(settings: &mut serde_json::Value) {
+    let Some(root) = settings.as_object_mut() else {
+        return;
+    };
+    if root
+        .get("config_path")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|path| {
+            path.replace('\\', "/")
+                .trim_end_matches('/')
+                .ends_with("/.kimi-code-switch-gui/.env/default/config.toml")
+        })
+    {
+        root.insert(
+            "config_path".to_string(),
+            serde_json::Value::String("~/.kimi-code/config.toml".to_string()),
+        );
+    }
+    let Some(environments) = root
+        .get_mut("kimi_code_environments")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for environment in environments {
+        let Some(entry) = environment.as_object_mut() else {
+            continue;
+        };
+        if entry.get("id").and_then(serde_json::Value::as_str) != Some("default") {
+            continue;
+        }
+        let home_path = entry
+            .get("homePath")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if is_retired_default_environment_home(home_path) {
+            entry.insert(
+                "homePath".to_string(),
+                serde_json::Value::String("~/.kimi-code".to_string()),
+            );
+        }
+        entry.insert(
+            "kind".to_string(),
+            serde_json::Value::String("default".to_string()),
+        );
+    }
 }
 
 /// 保存面板设置。
@@ -320,8 +517,8 @@ pub fn save_panel_settings(
     let guard = lock_conn(&state)?;
     let conn = guard.as_ref().ok_or("usage db not open")?;
 
-    let settings: serde_json::Value =
-        serde_json::from_str(&settings_json).map_err(|e| format!("parse settings json: {e}"))?;
+    let mut settings = parse_panel_settings_json(&settings_json)?;
+    normalize_retired_default_environment_paths(&mut settings);
 
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -353,9 +550,12 @@ pub fn save_panel_settings(
             settings[key].to_string()
         }
     };
+    let model_ui_metadata = model_ui_metadata_json(&settings)?;
 
-    // UPSERT
-    conn.execute(
+    // Old installations have a `mcp_servers TEXT NOT NULL` column without a
+    // default. Keep it opaque and unchanged so their historical data remains
+    // recoverable while all current reads and writes use native mcp.json.
+    let mut save_sql = String::from(
         "INSERT INTO panel_settings (
             id, version,
             config_target, config_path, profiles, active_profile, profiles_path, follow_config_profiles,
@@ -365,11 +565,11 @@ pub fn save_panel_settings(
             backup_strategy, backup_frequency, backup_retention_count, backup_destination_type,
             backup_local_path, backup_webdav_url, backup_webdav_username,
             backup_webdav_password, backup_webdav_path,
-            shortcuts, mcp_servers, kimi_code_environments, active_kimi_code_environment_id,
+            shortcuts, model_ui_metadata, kimi_code_environments, active_kimi_code_environment_id,
             insights_status, insights_proxy_port, insights_retention_days,
             insights_disk_warn_threshold_mb, insights_store_prompt_preview,
             insights_onboarding_shown_at, insights_last_known_port,
-            insights_display_currency, insights_currency_rates,
+            insights_display_currency, insights_currency_rates, official_account_vault_enabled,
             updated_at, created_at
         ) VALUES (
             1, ?1,
@@ -384,8 +584,8 @@ pub fn save_panel_settings(
             ?34, ?35, ?36,
             ?37, ?38,
             ?39, ?40,
-            ?41, ?42,
-            ?43, ?43
+            ?41, ?42, ?43,
+            ?44, ?44
         )
         ON CONFLICT(id) DO UPDATE SET
             version = excluded.version,
@@ -418,7 +618,7 @@ pub fn save_panel_settings(
             backup_webdav_password = excluded.backup_webdav_password,
             backup_webdav_path = excluded.backup_webdav_path,
             shortcuts = excluded.shortcuts,
-            mcp_servers = excluded.mcp_servers,
+            model_ui_metadata = excluded.model_ui_metadata,
             kimi_code_environments = excluded.kimi_code_environments,
             active_kimi_code_environment_id = excluded.active_kimi_code_environment_id,
             insights_status = excluded.insights_status,
@@ -430,7 +630,23 @@ pub fn save_panel_settings(
             insights_last_known_port = excluded.insights_last_known_port,
             insights_display_currency = excluded.insights_display_currency,
             insights_currency_rates = excluded.insights_currency_rates,
+            official_account_vault_enabled = excluded.official_account_vault_enabled,
             updated_at = excluded.updated_at",
+    );
+    if has_legacy_mcp_servers_column(conn)? {
+        save_sql = save_sql
+            .replace(
+                "shortcuts, model_ui_metadata, kimi_code_environments",
+                "shortcuts, model_ui_metadata, mcp_servers, kimi_code_environments",
+            )
+            .replace(
+                "?30, ?31, ?32, ?33,",
+                "?30, ?31, COALESCE((SELECT mcp_servers FROM panel_settings WHERE id = 1), '{}'), ?32, ?33,",
+            );
+    }
+
+    conn.execute(
+        &save_sql,
         rusqlite::params![
             get_i64("version"),
             get_str("config_target"),
@@ -462,13 +678,17 @@ pub fn save_panel_settings(
             get_str("backup_webdav_password"),
             get_str("backup_webdav_path"),
             get_json_object_str("shortcuts"),
-            get_json_object_str("mcp_servers"),
+            model_ui_metadata,
             get_json_str("kimi_code_environments"),
             get_str("active_kimi_code_environment_id"),
             get_str("insights_status"),
             // insights_proxy_port: number | "auto" | null
-            settings["insights_proxy_port"].as_str().map(|s| s.to_string())
-                .or_else(|| settings["insights_proxy_port"].as_i64().map(|n| n.to_string())),
+            settings["insights_proxy_port"]
+                .as_str()
+                .map(|s| s.to_string())
+                .or_else(|| settings["insights_proxy_port"]
+                    .as_i64()
+                    .map(|n| n.to_string())),
             get_i64("insights_retention_days"),
             get_i64("insights_disk_warn_threshold_mb"),
             get_bool("insights_store_prompt_preview"),
@@ -476,6 +696,7 @@ pub fn save_panel_settings(
             get_opt_i64("insights_last_known_port"),
             get_str("insights_display_currency"),
             get_json_str("insights_currency_rates"),
+            get_bool("official_account_vault_enabled"),
             now,
         ],
     )
@@ -518,6 +739,11 @@ pub fn migrate_panel_settings_from_toml(
     use std::fs;
 
     let resolved_path = crate::fs_access::resolve_home(&toml_path);
+    if !is_known_legacy_panel_path(&resolved_path)? {
+        return Err(
+            "panel TOML migration only accepts known legacy panel settings paths".to_string(),
+        );
+    }
 
     // 检查 TOML 文件是否存在
     if !resolved_path.exists() {
@@ -549,6 +775,12 @@ pub fn migrate_panel_settings_from_toml(
 
     // 重命名 TOML 文件（无论数据库是否已有设置）
     let migrated_path = resolved_path.with_extension("toml.migrated");
+    if migrated_path.exists() {
+        return Err(format!(
+            "refusing to overwrite existing migrated panel settings: {}",
+            migrated_path.display()
+        ));
+    }
     fs::rename(&resolved_path, &migrated_path).map_err(|e| format!("rename toml: {e}"))?;
 
     log::info!("Renamed {} to .migrated", toml_path);
@@ -568,6 +800,16 @@ mod tests {
         crate::usage::UsageState {
             conn: Mutex::new(Some(conn)),
         }
+    }
+
+    #[test]
+    fn only_allows_known_legacy_panel_toml_paths() {
+        let home = dirs::home_dir().expect("home directory");
+        assert!(is_known_legacy_panel_path(&home.join(".kimi/config.panel.toml")).unwrap());
+        assert!(
+            is_known_legacy_panel_path(&home.join(".kimi-code/.panel/config.panel.toml")).unwrap()
+        );
+        assert!(!is_known_legacy_panel_path(&home.join(".kimi-code/config.toml")).unwrap());
     }
 
     fn lock_test_conn<'a>(
@@ -615,7 +857,7 @@ mod tests {
             }
         };
 
-        conn.execute(
+        let mut save_sql = String::from(
             "INSERT INTO panel_settings (
                 id, version,
                 config_target, config_path, profiles, active_profile, profiles_path, follow_config_profiles,
@@ -625,11 +867,11 @@ mod tests {
                 backup_strategy, backup_frequency, backup_retention_count, backup_destination_type,
                 backup_local_path, backup_webdav_url, backup_webdav_username,
                 backup_webdav_password, backup_webdav_path,
-                shortcuts, mcp_servers, kimi_code_environments, active_kimi_code_environment_id,
+                shortcuts, model_ui_metadata, kimi_code_environments, active_kimi_code_environment_id,
                 insights_status, insights_proxy_port, insights_retention_days,
                 insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                 insights_onboarding_shown_at, insights_last_known_port,
-                insights_display_currency, insights_currency_rates,
+                insights_display_currency, insights_currency_rates, official_account_vault_enabled,
                 updated_at, created_at
             ) VALUES (
                 1, ?1,
@@ -644,8 +886,8 @@ mod tests {
                 ?34, ?35, ?36,
                 ?37, ?38,
                 ?39, ?40,
-                ?41, ?42,
-                ?43, ?43
+                ?41, ?42, ?43,
+                ?44, ?44
             )
             ON CONFLICT(id) DO UPDATE SET
                 version = excluded.version,
@@ -678,7 +920,7 @@ mod tests {
                 backup_webdav_password = excluded.backup_webdav_password,
                 backup_webdav_path = excluded.backup_webdav_path,
                 shortcuts = excluded.shortcuts,
-                mcp_servers = excluded.mcp_servers,
+                model_ui_metadata = excluded.model_ui_metadata,
                 kimi_code_environments = excluded.kimi_code_environments,
                 active_kimi_code_environment_id = excluded.active_kimi_code_environment_id,
                 insights_status = excluded.insights_status,
@@ -690,7 +932,23 @@ mod tests {
                 insights_last_known_port = excluded.insights_last_known_port,
                 insights_display_currency = excluded.insights_display_currency,
                 insights_currency_rates = excluded.insights_currency_rates,
+                official_account_vault_enabled = excluded.official_account_vault_enabled,
                 updated_at = excluded.updated_at",
+        );
+        if has_legacy_mcp_servers_column(conn)? {
+            save_sql = save_sql
+                .replace(
+                    "shortcuts, model_ui_metadata, kimi_code_environments",
+                    "shortcuts, model_ui_metadata, mcp_servers, kimi_code_environments",
+                )
+                .replace(
+                    "?30, ?31, ?32, ?33,",
+                    "?30, ?31, COALESCE((SELECT mcp_servers FROM panel_settings WHERE id = 1), '{}'), ?32, ?33,",
+                );
+        }
+
+        conn.execute(
+            &save_sql,
             rusqlite::params![
                 get_i64("version"),
                 get_str("config_target"),
@@ -722,12 +980,16 @@ mod tests {
                 get_str("backup_webdav_password"),
                 get_str("backup_webdav_path"),
                 get_json_object_str("shortcuts"),
-                get_json_object_str("mcp_servers"),
+                model_ui_metadata_json(&settings)?,
                 get_json_str("kimi_code_environments"),
                 get_str("active_kimi_code_environment_id"),
                 get_str("insights_status"),
-                settings["insights_proxy_port"].as_str().map(|s| s.to_string())
-                    .or_else(|| settings["insights_proxy_port"].as_i64().map(|n| n.to_string())),
+                settings["insights_proxy_port"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| settings["insights_proxy_port"]
+                        .as_i64()
+                        .map(|n| n.to_string())),
                 get_i64("insights_retention_days"),
                 get_i64("insights_disk_warn_threshold_mb"),
                 get_bool("insights_store_prompt_preview"),
@@ -735,6 +997,7 @@ mod tests {
                 get_opt_i64("insights_last_known_port"),
                 get_str("insights_display_currency"),
                 get_json_str("insights_currency_rates"),
+                get_bool("official_account_vault_enabled"),
                 now,
             ],
         )
@@ -757,11 +1020,11 @@ mod tests {
                     backup_strategy, backup_frequency, backup_retention_count, backup_destination_type,
                     backup_local_path, backup_webdav_url, backup_webdav_username,
                     backup_webdav_password, backup_webdav_path,
-                    shortcuts, mcp_servers, kimi_code_environments, active_kimi_code_environment_id,
+                    shortcuts, model_ui_metadata, kimi_code_environments, active_kimi_code_environment_id,
                     insights_status, insights_proxy_port, insights_retention_days,
                     insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                     insights_onboarding_shown_at, insights_last_known_port,
-                    insights_display_currency, insights_currency_rates
+                    insights_display_currency, insights_currency_rates, official_account_vault_enabled
                 FROM panel_settings WHERE id = 1",
                 [],
                 |row| {
@@ -798,7 +1061,7 @@ mod tests {
                         "backup_webdav_password": row.get::<_, String>(27)?,
                         "backup_webdav_path": row.get::<_, String>(28)?,
                         "shortcuts": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(29)?).unwrap_or(serde_json::json!({})),
-                        "mcp_servers": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(30)?).unwrap_or(serde_json::json!({})),
+                        "model_ui_metadata": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(30)?).unwrap_or(serde_json::json!({})),
                         "kimi_code_environments": row.get::<_, Option<String>>(31)?
                             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                         "active_kimi_code_environment_id": row.get::<_, String>(32)?,
@@ -813,6 +1076,7 @@ mod tests {
                         "insights_display_currency": row.get::<_, String>(40)?,
                         "insights_currency_rates": row.get::<_, Option<String>>(41)?
                             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                        "official_account_vault_enabled": row.get::<_, i64>(42)? != 0,
                     });
                     Ok(json.to_string())
                 },
@@ -845,6 +1109,7 @@ mod tests {
             "uiState": {"activeTab": "providers"},
             "favorites": {"providers": ["openai"]},
             "active_official_account_id": "acct-test",
+            "official_account_vault_enabled": true,
             "backup_strategy": "manual",
             "backup_frequency": "daily",
             "backup_retention_count": 7,
@@ -855,7 +1120,15 @@ mod tests {
             "backup_webdav_password": "",
             "backup_webdav_path": "/kimi-backups",
             "shortcuts": {},
-            "mcp_servers": {},
+            "model_ui_metadata": {
+                "default": {
+                    "kimi-k2": {
+                        "auth_mode": "official-account",
+                        "official_account_scope": "global",
+                        "pricing": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}
+                    }
+                }
+            },
             "kimi_code_environments": [{"id": "default", "name": "Default", "homePath": "~/.kimi-code"}],
             "active_kimi_code_environment_id": "default",
             "insights_status": "enabled",
@@ -882,13 +1155,18 @@ mod tests {
         assert_eq!(loaded_json["tray_icon"], true);
         assert_eq!(loaded_json["last_display_id"], 123);
         assert_eq!(loaded_json["active_official_account_id"], "acct-test");
+        assert_eq!(loaded_json["official_account_vault_enabled"], true);
         assert_eq!(loaded_json["active_kimi_code_environment_id"], "default");
+        assert_eq!(
+            loaded_json["model_ui_metadata"]["default"]["kimi-k2"]["pricing"]["input_per_mtok"],
+            1.0
+        );
     }
 
     #[test]
     fn omitted_json_object_columns_default_to_empty_object_not_null() {
         let state = make_test_state();
-        // 故意不带 profiles/shortcuts/mcp_servers 字段
+        // 故意不带 profiles/shortcuts/model_ui_metadata 字段
         let test_settings = serde_json::json!({
             "version": 1,
             "config_target": "kimi-code",
@@ -938,10 +1216,11 @@ mod tests {
             loaded_json["shortcuts"]
         );
         assert!(
-            loaded_json["mcp_servers"].is_object(),
-            "mcp_servers should be {{}}, got {:?}",
-            loaded_json["mcp_servers"]
+            loaded_json["model_ui_metadata"].is_object(),
+            "model_ui_metadata should be {{}}, got {:?}",
+            loaded_json["model_ui_metadata"]
         );
+        assert_eq!(loaded_json["official_account_vault_enabled"], false);
     }
 
     #[test]
@@ -972,7 +1251,7 @@ mod tests {
             "backup_webdav_password": "pass",
             "backup_webdav_path": "/backups",
             "shortcuts": {},
-            "mcp_servers": {},
+            "model_ui_metadata": {},
             "kimi_code_environments": [{"id": "default", "name": "Default", "homePath": "~/.kimi-code"}],
             "active_kimi_code_environment_id": "default",
             "insights_status": "disabled",
@@ -1026,7 +1305,7 @@ mod tests {
             "backup_webdav_password": "",
             "backup_webdav_path": "",
             "shortcuts": {},
-            "mcp_servers": {},
+            "model_ui_metadata": {},
             "kimi_code_environments": [{
                 "id": "default",
                 "name": "Default",
@@ -1064,6 +1343,67 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_retired_default_environment_paths_on_every_panel_write() {
+        let mut settings = serde_json::json!({
+            "config_path": "~/.kimi-code-switch-gui/.env/default/config.toml",
+            "kimi_code_environments": [{
+                "id": "default",
+                "homePath": "~/.kimi-code-switch-gui/.env/default",
+                "kind": "managed"
+            }]
+        });
+
+        normalize_retired_default_environment_paths(&mut settings);
+
+        assert_eq!(settings["config_path"], "~/.kimi-code/config.toml");
+        assert_eq!(
+            settings["kimi_code_environments"][0]["homePath"],
+            "~/.kimi-code"
+        );
+        assert_eq!(settings["kimi_code_environments"][0]["kind"], "default");
+    }
+
+    #[test]
+    fn new_panel_schema_does_not_create_an_mcp_mirror() {
+        let state = make_test_state();
+        let guard = lock_test_conn(&state).unwrap();
+        let conn = guard.as_ref().unwrap();
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('panel_settings')")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(columns.contains(&"model_ui_metadata".to_string()));
+        assert!(!columns.contains(&"mcp_servers".to_string()));
+    }
+
+    #[test]
+    fn model_ui_metadata_rejects_native_definitions_and_secrets() {
+        let settings = serde_json::json!({
+            "model_ui_metadata": {
+                "default": {
+                    "kimi-k2": {
+                        "api_key": "secret-value"
+                    }
+                }
+            }
+        });
+
+        let error = model_ui_metadata_json(&settings).unwrap_err();
+        assert!(error.contains("native definitions and secrets"));
+    }
+
+    #[test]
+    fn panel_settings_import_requires_a_json_object() {
+        assert!(parse_panel_settings_json("[]").is_err());
+        assert!(parse_panel_settings_json("null").is_err());
+        assert!(parse_panel_settings_json(r#"{"locale":"en-US"}"#).is_ok());
+    }
+
+    #[test]
     fn init_adds_missing_columns_for_partial_structured_schema() {
         let state = {
             let conn = Connection::open_in_memory().unwrap();
@@ -1077,6 +1417,12 @@ mod tests {
                   mcp_servers TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   created_at TEXT NOT NULL
+                );
+                INSERT INTO panel_settings (
+                  id, version, config_path, shortcuts, mcp_servers, updated_at, created_at
+                ) VALUES (
+                  1, 1, '~/.kimi-code/config.toml', '{}',
+                  '{"legacy-server":{"env":{"API_KEY":"old-secret"}}}', 'old', 'old'
                 );
                 "#,
             )
@@ -1115,5 +1461,22 @@ mod tests {
         assert!(columns.contains(&"active_kimi_code_environment_id".to_string()));
         assert!(columns.contains(&"insights_display_currency".to_string()));
         assert!(columns.contains(&"backup_local_path".to_string()));
+        assert!(columns.contains(&"model_ui_metadata".to_string()));
+
+        save_test(r#"{"config_path":"~/.kimi-code/config.toml"}"#, &state).unwrap();
+        let legacy_mcp = {
+            let guard = lock_test_conn(&state).unwrap();
+            let conn = guard.as_ref().unwrap();
+            conn.query_row(
+                "SELECT mcp_servers FROM panel_settings WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            legacy_mcp,
+            r#"{"legacy-server":{"env":{"API_KEY":"old-secret"}}}"#
+        );
     }
 }

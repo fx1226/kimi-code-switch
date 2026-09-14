@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { AppState, BackupRecord, ConfigDoctorReport, ExternalChangeNotifyPayload, FileSnapshotBundle, Locale, McpServerConfig, ModelConfig, PreviewBundle, Profile, ProviderConfig } from "@shared/types";
 import type { SkillDiscoveryPath, SkillEntry, SkillsScanReport } from "@shared/skillsStore";
 import type { SkillsViewMode } from "../skillsWorkspace";
-import type { TabId, PreviewFileId } from "../appOptions";
+import type { KimiCodeSubTab, PreviewFileId, SettingsSubTab, TabId } from "../appOptions";
 import type { BackupRecordsDialogState, ConfirmDialogState, DocumentViewerState } from "../dialogs";
 import type { DiagnosticsState } from "../overviewDashboard";
 
@@ -13,6 +13,10 @@ export interface AppContext {
   title: string;
   activeTab: TabId;
   setActiveTab: (tab: TabId) => void;
+  activeSettingsSubTab: SettingsSubTab;
+  setActiveSettingsSubTab: (tab: SettingsSubTab) => void;
+  kimiCodeSubTab: KimiCodeSubTab;
+  setKimiCodeSubTab: (tab: KimiCodeSubTab) => void;
   diagnostics: DiagnosticsState;
   setDiagnostics: Dispatch<SetStateAction<DiagnosticsState>>;
   // Selected items

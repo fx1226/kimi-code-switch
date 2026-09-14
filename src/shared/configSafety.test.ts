@@ -106,7 +106,7 @@ describe("configSafety", () => {
     const preview = buildRedactedPreviewBundle(state);
 
     expect(redactedState.state.panelSettings.backup_webdav_password).toBe("[REDACTED]");
-    expect(preview.panelSettingsDocument).toContain('backup_webdav_password = "[REDACTED]"');
+    expect(preview.panelSettingsDocument).toContain('"backup_webdav_password": "[REDACTED]"');
     expect(preview.panelSettingsDocument).not.toContain("super-secret");
   });
 

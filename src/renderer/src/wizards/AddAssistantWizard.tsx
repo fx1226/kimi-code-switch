@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { X } from "lucide-react";
 import type { AppState, Locale } from "@shared/types";
 import { upsertProvider, upsertModel, upsertProfile, applyProfile } from "@shared/configStore";
 import { buildModelName } from "@shared/nameRules";
 import { createUniqueName } from "../appHelpers";
-import { useDialogEscape, useFocusTrap } from "../dialogs";
+import { DialogShell } from "../dialogs";
 import type { SourcePreset } from "./sourcePresets";
 import type { ConnectionFormData } from "./WizardStep2Connect";
 import { WizardStep1Source } from "./WizardStep1Source";
@@ -27,14 +27,15 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
   const [source, setSource] = useState<SourcePreset | null>(null);
   const [formData, setFormData] = useState<ConnectionFormData>({ apiKey: "", endpoint: "", modelId: "", profileName: "" });
   const isDirty = source !== null || Object.values(formData).some((value) => value.trim().length > 0);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(() => onCancel(isDirty));
-  useFocusTrap(dialogRef);
-
   return (
     // 多步表单：不允许点遮罩关闭（防半填误触丢失），仅 Esc / 右上角 ✕ 关闭
-    <div className="wizard-overlay">
-      <div className="wizard-modal glass-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(locale, "newProfile")}>
+    <DialogShell
+      backdropClassName="wizard-overlay"
+      dialogClassName="wizard-modal glass-panel"
+      ariaLabel={t(locale, "newProfile")}
+      closeOnBackdrop={false}
+      onClose={() => onCancel(isDirty)}
+    >
         <div className="wizard-topbar">
           <div className="wizard-progress">
             {([1, 2, 3] as const).map((s) => (
@@ -117,7 +118,6 @@ export function AddAssistantWizard(props: WizardProps): JSX.Element {
             }}
           />
         ) : null}
-      </div>
-    </div>
+    </DialogShell>
   );
 }

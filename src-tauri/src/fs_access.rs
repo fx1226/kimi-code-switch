@@ -6,6 +6,7 @@
 //!   1. 固定受管根（~/.kimi、~/.kimi-code、~/.kimi-code-switch-gui）
 //!   2. 由 Rust 原生 dialog 产生的临时 grant（导出文件、备份目录）
 //!   3. 项目本地配置组合命令 `write_project_local_config`（仅 <project-root>/.kimi-code/local.toml）
+//!
 //! symlink 目标在写/删/移前会解析并复核对最终目标。
 
 use std::collections::HashMap;
@@ -46,8 +47,6 @@ struct PathGrant {
 #[derive(Default)]
 pub(crate) struct PathGrantState {
     grants: Mutex<HashMap<String, PathGrant>>,
-    /// 持久授权 id => root，供备份路径这类长期偏好使用；未来升级时持久化于 SQLite（GUI 元数据）。
-    durable_roots: Mutex<Vec<(String, PathBuf, GrantTargetKind)>>,
 }
 
 const GRANT_TTL: Duration = Duration::from_secs(15 * 60);
@@ -78,13 +77,6 @@ impl PathGrantState {
                 durable,
             },
         );
-        if durable {
-            self.durable_roots.lock().expect("durable root lock").push((
-                id.clone(),
-                normalized_root,
-                kind,
-            ));
-        }
         id
     }
 
@@ -93,26 +85,19 @@ impl PathGrantState {
     fn scope_contains(&self, candidate: &Path, kind: GrantTargetKind) -> bool {
         let now = Instant::now();
         let mut grants = self.grants.lock().expect("grant lock");
-        {
-            let durable_roots = self.durable_roots.lock().expect("durable root lock");
-            for (_, root, durable_kind) in durable_roots.iter() {
-                if *durable_kind == kind && candidate.starts_with(root) {
-                    return true;
-                }
-            }
-        }
         grants.retain(|_, grant| grant.durable || grant.expires_at > now);
         grants
             .values()
-            .any(|grant| grant.kind == kind && candidate.starts_with(&grant.root))
+            .any(|grant| {
+                candidate.starts_with(&grant.root)
+                    && matches!(
+                        (grant.kind, kind),
+                        (GrantTargetKind::DirectoryTree, _)
+                            | (GrantTargetKind::File, GrantTargetKind::File)
+                    )
+            })
     }
 
-    fn revoke(&self, id: &str) {
-        let mut grants = self.grants.lock().expect("grant lock");
-        grants.remove(id);
-        let mut durable_roots = self.durable_roots.lock().expect("durable root lock");
-        durable_roots.retain(|(registered_id, _, _)| registered_id != id);
-    }
 }
 
 /// 命令希望产生的写入目标类型。
@@ -138,7 +123,7 @@ fn resolve_final_target(path: &Path) -> Result<PathBuf, String> {
                 if parent.as_os_str().is_empty() {
                     return Err(format!("cannot scope path {}", path.display()));
                 }
-                return Ok(parent.join(path.file_name().unwrap_or_default().to_os_string()));
+                return Ok(parent.join(path.file_name().unwrap_or_default()));
             };
             let resolved_ancestor = std::fs::canonicalize(existing)
                 .map_err(|e| format!("canonicalize {}: {e}", existing.display()))?;
@@ -396,6 +381,76 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
             std::fs::copy(&source, &target)
                 .map_err(|e| format!("copy {} to {}: {}", source.display(), target.display(), e))?;
         }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryMergeResult {
+    source_exists: bool,
+    copied_entries: usize,
+    skipped_conflicts: usize,
+}
+
+fn merge_directory_missing_recursive(
+    from: &Path,
+    to: &Path,
+    result: &mut DirectoryMergeResult,
+) -> Result<(), String> {
+    let source_metadata = match std::fs::symlink_metadata(from) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("stat source directory {}: {error}", from.display())),
+    };
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err(format!(
+            "Source is not a real directory: {}",
+            from.display()
+        ));
+    }
+    if !to.exists() {
+        std::fs::create_dir_all(to).map_err(|error| format!("create {}: {error}", to.display()))?;
+    }
+
+    for entry in
+        std::fs::read_dir(from).map_err(|error| format!("read_dir {}: {error}", from.display()))?
+    {
+        let entry = entry.map_err(|error| format!("read_dir entry {}: {error}", from.display()))?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        let source_type = entry
+            .file_type()
+            .map_err(|error| format!("file_type {}: {error}", source.display()))?;
+
+        if target.exists() {
+            let target_type = std::fs::symlink_metadata(&target)
+                .map_err(|error| format!("stat target {}: {error}", target.display()))?
+                .file_type();
+            if source_type.is_dir() && target_type.is_dir() && !target_type.is_symlink() {
+                merge_directory_missing_recursive(&source, &target, result)?;
+            } else {
+                result.skipped_conflicts += 1;
+            }
+            continue;
+        }
+
+        if source_type.is_symlink() {
+            let link_target = std::fs::read_link(&source)
+                .map_err(|error| format!("read_link {}: {error}", source.display()))?;
+            create_symlink_path(&link_target, &target)?;
+        } else if source_type.is_dir() {
+            std::fs::create_dir_all(&target)
+                .map_err(|error| format!("create {}: {error}", target.display()))?;
+            merge_directory_missing_recursive(&source, &target, result)?;
+        } else if source_type.is_file() {
+            std::fs::copy(&source, &target).map_err(|error| {
+                format!("copy {} to {}: {error}", source.display(), target.display())
+            })?;
+        } else {
+            continue;
+        }
+        result.copied_entries += 1;
     }
     Ok(())
 }
@@ -705,6 +760,35 @@ pub fn copy_dir(
     let from_final = authorize_mutation(&state, &from_resolved, MutationKind::DirectoryTree)?;
     let to_final = authorize_mutation(&state, &to_resolved, MutationKind::DirectoryTree)?;
     copy_dir_recursive(&from_final, &to_final)
+}
+
+/// Recursively copy only entries absent from the target directory. This is
+/// used to recover retired GUI-managed Kimi configuration without replacing
+/// data that already belongs to the native KIMI_CODE_HOME.
+#[tauri::command]
+pub fn merge_directory_missing(
+    from: String,
+    to: String,
+    state: tauri::State<'_, PathGrantState>,
+) -> Result<DirectoryMergeResult, String> {
+    let from_resolved = resolve_home(&from);
+    let to_resolved = resolve_home(&to);
+    let from_final = authorize_mutation(&state, &from_resolved, MutationKind::DirectoryTree)?;
+    let to_final = authorize_mutation(&state, &to_resolved, MutationKind::DirectoryTree)?;
+    if !from_final.exists() {
+        return Ok(DirectoryMergeResult {
+            source_exists: false,
+            copied_entries: 0,
+            skipped_conflicts: 0,
+        });
+    }
+    let mut result = DirectoryMergeResult {
+        source_exists: true,
+        copied_entries: 0,
+        skipped_conflicts: 0,
+    };
+    merge_directory_missing_recursive(&from_final, &to_final, &mut result)?;
+    Ok(result)
 }
 
 /// 主机名（备份元信息用）。
@@ -1292,59 +1376,10 @@ pub fn save_file_with_dialog(
                 .map_err(|e| format!("ensure parent {}: {}", parent.display(), e))?;
         }
         atomic_write_text(&resolved, &content, None)?;
-        return Ok(Some(resolved.to_string_lossy().to_string()));
+        Ok(Some(resolved.to_string_lossy().to_string()))
     }
     #[cfg(not(desktop))]
     Err("save_file_with_dialog is only available on desktop".to_string())
-}
-
-/// Rust 原生 folder picker：登记一个持久目录 grant 并返回 `{ path, grantId }`。
-/// 后续受管写命令（write_text/ensure_private_dir/remove_dir）在该 grant 范围内被授权。
-/// 路径由系统对话框产生，renderer 无法伪造。
-#[tauri::command]
-pub fn pick_backup_folder(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, PathGrantState>,
-) -> Result<Option<(String, String)>, String> {
-    #[cfg(desktop)]
-    {
-        let picked = app.dialog().file().blocking_pick_folder();
-        let Some(folder) = picked else {
-            return Ok(None);
-        };
-        let Some(path_buf) = folder.as_path() else {
-            return Err("dialog returned an invalid path".to_string());
-        };
-        let resolved = resolve_home(&path_buf.to_string_lossy());
-        let grant_id = state.register_durable(resolved.clone(), GrantTargetKind::DirectoryTree);
-        return Ok(Some((resolved.to_string_lossy().to_string(), grant_id)));
-    }
-    #[cfg(not(desktop))]
-    Err("pick_backup_folder is only available on desktop".to_string())
-}
-
-/// 登记一个项目本地配置根（Rust dialog 选目录），返回 grant id。
-#[tauri::command]
-pub fn pick_project_local_config_root(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, PathGrantState>,
-) -> Result<Option<String>, String> {
-    #[cfg(desktop)]
-    {
-        let picked = app.dialog().file().blocking_pick_folder();
-        let Some(folder) = picked else {
-            return Ok(None);
-        };
-        let Some(path_buf) = folder.as_path() else {
-            return Err("dialog returned an invalid path".to_string());
-        };
-        let resolved = resolve_home(&path_buf.to_string_lossy());
-        // 只允许该目录下 `.kimi-code/local.toml` 单文件写。
-        let grant_id = state.register_durable(resolved.clone(), GrantTargetKind::File);
-        return Ok(Some(grant_id));
-    }
-    #[cfg(not(desktop))]
-    Err("pick_project_local_config_root is only available on desktop".to_string())
 }
 
 /// 项目本地配置写入：仅允许写 `<project_root>/.kimi-code/local.toml`。
@@ -1375,46 +1410,52 @@ pub fn write_project_local_config(
     Ok(sha256_bytes(content.as_bytes()))
 }
 
-/// 吊销之前 dialog 登记的 grant（例如用户更改备份目录后）。
-#[tauri::command]
-pub fn revoke_grant(
-    grant_id: String,
-    state: tauri::State<'_, PathGrantState>,
-) -> Result<(), String> {
-    state.revoke(&grant_id);
-    Ok(())
+fn durable_grant_paths_from_panel_settings(settings_json: &str) -> Result<Vec<String>, String> {
+    let settings: serde_json::Value = serde_json::from_str(settings_json)
+        .map_err(|error| format!("parse saved panel settings for grants: {error}"))?;
+    let settings = settings
+        .as_object()
+        .ok_or("saved panel settings for grants must be a JSON object")?;
+    let mut paths = Vec::new();
+    let mut add_path = |value: Option<&str>| {
+        let Some(path) = value.map(str::trim).filter(|path| !path.is_empty()) else {
+            return;
+        };
+        if !paths.iter().any(|existing| existing == path) {
+            paths.push(path.to_string());
+        }
+    };
+    add_path(settings.get("backup_local_path").and_then(serde_json::Value::as_str));
+    if let Some(environments) = settings
+        .get("kimi_code_environments")
+        .and_then(serde_json::Value::as_array)
+    {
+        for environment in environments {
+            add_path(
+                environment
+                    .as_object()
+                    .and_then(|environment| environment.get("homePath"))
+                    .and_then(serde_json::Value::as_str),
+            );
+        }
+    }
+    Ok(paths)
 }
 
 /// 启动时用已持久化的用户偏好（备份目录、已注册的环境 home、项目根）重建持久授权。
-/// 这些路径来自用户主动保存的面板设置/环境注册表（非 renderer 临时字符串），
-/// 因此重新登记为 Rust 侧 durable grant 不会削弱安全边界。
+/// 路径只从 SQLite 中已保存的面板设置读取，避免 renderer 临时字符串扩大可写范围。
 #[tauri::command]
 pub fn reconcile_durable_grants(
-    paths: Vec<String>,
-    state: tauri::State<'_, PathGrantState>,
+    usage_state: tauri::State<'_, crate::usage::UsageState>,
+    grant_state: tauri::State<'_, PathGrantState>,
 ) -> Result<(), String> {
-    for path in paths {
-        let trimmed = path.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let resolved = resolve_home(trimmed);
-        state.register_durable(resolved, GrantTargetKind::DirectoryTree);
+    let Some(settings_json) = crate::panel_settings_store::get_panel_settings(usage_state)? else {
+        return Ok(());
+    };
+    for path in durable_grant_paths_from_panel_settings(&settings_json)? {
+        grant_state.register_durable(resolve_home(&path), GrantTargetKind::DirectoryTree);
     }
     Ok(())
-}
-
-/// 列出当前持久授权的规范路径（诊断/审计用），不包含 grant id 对 renderer 的意义。
-#[tauri::command]
-pub fn list_durable_grants(state: tauri::State<'_, PathGrantState>) -> Result<Vec<String>, String> {
-    let durable_roots = state.durable_roots.lock().expect("durable root lock");
-    let mut roots = durable_roots
-        .iter()
-        .map(|(_, root, _)| root.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    roots.sort();
-    roots.dedup();
-    Ok(roots)
 }
 
 /// 把损坏/未知版本的 journal 原文件原子移动到 private quarantine 目录。
@@ -1422,7 +1463,12 @@ pub fn list_durable_grants(state: tauri::State<'_, PathGrantState>) -> Result<Ve
 #[tauri::command]
 pub fn quarantine_journal(path: String) -> Result<String, String> {
     let source = resolve_home(&path);
-    let metadata = match std::fs::symlink_metadata(&source) {
+    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
+    quarantine_journal_at_home(&source, &home)
+}
+
+fn quarantine_journal_at_home(source: &Path, home: &Path) -> Result<String, String> {
+    let metadata = match std::fs::symlink_metadata(source) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
         Err(error) => return Err(format!("stat journal {}: {error}", source.display())),
@@ -1433,7 +1479,6 @@ pub fn quarantine_journal(path: String) -> Result<String, String> {
             source.display()
         ));
     }
-    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
     let quarantine_dir = home.join(".kimi-code-switch-gui").join("quarantine");
     #[cfg(unix)]
     {
@@ -1454,7 +1499,7 @@ pub fn quarantine_journal(path: String) -> Result<String, String> {
         .and_then(|name| name.to_str())
         .unwrap_or("journal.json");
     let destination = quarantine_dir.join(format!("{file_name}.{suffix}"));
-    std::fs::rename(&source, &destination)
+    std::fs::rename(source, &destination)
         .map_err(|e| format!("move journal to quarantine: {e}"))?;
     #[cfg(unix)]
     {
@@ -1463,57 +1508,6 @@ pub fn quarantine_journal(path: String) -> Result<String, String> {
             .map_err(|e| format!("chmod quarantined journal: {e}"))?;
     }
     Ok(destination.to_string_lossy().to_string())
-}
-
-/// 列出 quarantine 目录内容（供 UI 查看/管理）。
-#[tauri::command]
-pub fn list_quarantine() -> Result<Vec<String>, String> {
-    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
-    let quarantine_dir = home.join(".kimi-code-switch-gui").join("quarantine");
-    let entries = match std::fs::read_dir(&quarantine_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("list quarantine: {error}")),
-    };
-    let mut files = entries
-        .flatten()
-        .filter(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .map(|entry| entry.path().to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    files.sort();
-    Ok(files)
-}
-
-/// 物理删除一个已隔离的 journal（用户确认"放弃"后调用）。
-#[tauri::command]
-pub fn delete_quarantined_journal(path: String) -> Result<(), String> {
-    let resolved = resolve_home(&path);
-    let metadata = match std::fs::symlink_metadata(&resolved) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(format!(
-                "stat quarantined journal {}: {error}",
-                resolved.display()
-            ))
-        }
-    };
-    if !metadata.is_file() {
-        return Err(format!(
-            "quarantined path is not a file: {}",
-            resolved.display()
-        ));
-    }
-    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
-    let quarantine_dir = home.join(".kimi-code-switch-gui").join("quarantine");
-    if !resolved.starts_with(&quarantine_dir) {
-        return Err(format!(
-            "refusing to delete outside quarantine dir: {}",
-            resolved.display()
-        ));
-    }
-    std::fs::remove_file(&resolved)
-        .map_err(|e| format!("remove quarantined journal {}: {e}", resolved.display()))
 }
 
 #[cfg(test)]
@@ -1573,16 +1567,6 @@ mod tests {
             authorize_mutation(&grants, &home.join(".ssh/id_rsa"), MutationKind::SingleFile)
                 .is_err()
         );
-        // 对文件类型的写入不匹配目录 grant
-        let tmp = std::env::temp_dir();
-        let root = tmp.join("granted-dir");
-        let _ = std::fs::create_dir_all(&root);
-        let grant_id = grants.register_durable(root.clone(), GrantTargetKind::DirectoryTree);
-        assert!(
-            authorize_mutation(&grants, &root.join("child.txt"), MutationKind::SingleFile).is_err()
-        );
-        grants.revoke(&grant_id);
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1610,7 +1594,7 @@ mod tests {
                 .unwrap_or(0)
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        let grant_id = grants.register_durable(tmp.clone(), GrantTargetKind::DirectoryTree);
+        grants.register_durable(tmp.clone(), GrantTargetKind::DirectoryTree);
         // 目录树 grant 允许任何子路径
         assert!(authorize_mutation(
             &grants,
@@ -1618,17 +1602,37 @@ mod tests {
             MutationKind::DirectoryTree
         )
         .is_ok());
+        // A folder picked for local backups must also authorize the files
+        // written into the backup directory.
+        assert!(authorize_mutation(
+            &grants,
+            &tmp.join("backups/2026/config.toml"),
+            MutationKind::SingleFile
+        )
+        .is_ok());
         // sibling（前缀欺骗）不匹配
         let sibling = tmp.display().to_string() + "_evil";
         assert!(
             authorize_mutation(&grants, Path::new(&sibling), MutationKind::DirectoryTree).is_err()
         );
-        grants.revoke(&grant_id);
-        // 吊销后不再允许
-        assert!(
-            authorize_mutation(&grants, &tmp.join("backups"), MutationKind::DirectoryTree).is_err()
-        );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn durable_grants_are_loaded_only_from_saved_panel_settings() {
+        let paths = durable_grant_paths_from_panel_settings(
+            r#"{
+              "backup_local_path": "~/backups",
+              "kimi_code_environments": [
+                { "homePath": "~/custom-kimi" },
+                { "homePath": "" }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(paths, vec!["~/backups", "~/custom-kimi"]);
+        assert!(durable_grant_paths_from_panel_settings("[]").is_err());
     }
 
     #[test]
@@ -1972,6 +1976,50 @@ mod tests {
     }
 
     #[test]
+    fn merge_directory_missing_preserves_native_entries_and_copies_legacy_only_entries() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-merge-directory-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let source = base.join("legacy");
+        let target = base.join("native");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(source.join("same.md"), "legacy").unwrap();
+        std::fs::write(source.join("legacy-only.md"), "legacy only").unwrap();
+        std::fs::write(source.join("nested").join("SKILL.md"), "nested skill").unwrap();
+        std::fs::write(target.join("same.md"), "native").unwrap();
+
+        let mut result = DirectoryMergeResult {
+            source_exists: true,
+            copied_entries: 0,
+            skipped_conflicts: 0,
+        };
+        merge_directory_missing_recursive(&source, &target, &mut result).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(target.join("same.md")).unwrap(),
+            "native"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("legacy-only.md")).unwrap(),
+            "legacy only"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("nested").join("SKILL.md")).unwrap(),
+            "nested skill"
+        );
+        assert!(result.copied_entries >= 2);
+        assert_eq!(result.skipped_conflicts, 1);
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["sourceExists"], true);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn resolve_home_expands_bare_tilde() {
         let home = dirs::home_dir().expect("home dir required for this test");
         assert_eq!(resolve_home("~"), home);
@@ -2010,21 +2058,24 @@ mod tests {
 
     #[test]
     fn quarantine_journal_moves_file_with_private_permissions_and_is_idempotent() {
-        let home = dirs::home_dir().expect("home dir required for this test");
+        let base = std::env::temp_dir().join(format!(
+            "kimi-quarantine-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let home = base.join("home");
         let source = home
             .join(".kimi-code-switch-gui")
             .join("pending-save-transaction.json");
-        if source.exists() {
-            // 幂等：不存在时返回空串
-            let _ = std::fs::remove_file(&source);
-        }
         assert_eq!(
-            quarantine_journal(source.to_string_lossy().into_owned()).unwrap(),
+            quarantine_journal_at_home(&source, &home).unwrap(),
             ""
         );
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "{bad-json").unwrap();
-        let quarantined = quarantine_journal(source.to_string_lossy().into_owned()).unwrap();
+        let quarantined = quarantine_journal_at_home(&source, &home).unwrap();
         assert!(quarantined.contains("quarantine"));
         assert!(!source.exists());
         #[cfg(unix)]
@@ -2050,6 +2101,6 @@ mod tests {
             );
         }
         // 清理测试产物
-        let _ = std::fs::remove_file(&quarantined);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

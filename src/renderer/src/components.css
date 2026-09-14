@@ -114,7 +114,6 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: calc(var(--titlebar-height) + 14px) 12px 14px;
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
@@ -133,8 +132,6 @@ textarea:focus-visible {
 
 .shell.sidebar-collapsed .sidebar {
   gap: 12px;
-  width: 64px;
-  padding: calc(var(--titlebar-height) + 14px) 8px 14px;
   border-radius: 0;
 }
 
@@ -151,10 +148,10 @@ textarea:focus-visible {
 }
 
 .shell.sidebar-collapsed .brand {
-  grid-template-columns: 1fr;
-  gap: 10px;
-  justify-content: center;
-  /* 按钮已脱离流定位到侧栏右上角，此处只留 logo + 隐藏的 copy */
+  grid-template-columns: 26px 28px;
+  gap: 0;
+  justify-content: space-between;
+  padding: 0;
 }
 
 .brand-mark {
@@ -171,6 +168,7 @@ textarea:focus-visible {
 .shell.sidebar-collapsed .brand-mark {
   width: 26px;
   height: 26px;
+  justify-self: center;
 }
 
 .brand-logo {
@@ -269,24 +267,13 @@ textarea:focus-visible {
 }
 
 .shell.sidebar-collapsed .brand-copy {
-  opacity: 0;
-  max-width: 0;
-  max-height: 0;
-  /* 折叠时文字先快速淡出，避免内容溢出窄栏 */
-  transition:
-    opacity 120ms ease,
-    max-width 320ms cubic-bezier(0.22, 1, 0.36, 1),
-    max-height 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  display: none;
 }
 
 .shell.sidebar-collapsed .sidebar-collapse-button {
-  /* 折叠后仍保持在侧栏右上角，与展开态位置一致 */
-  position: absolute;
-  top: calc(var(--titlebar-height) + 14px);
-  right: 8px;
   width: 28px;
   height: 28px;
-  margin-left: 0;
+  justify-self: center;
   border-radius: var(--radius-sm);
   background: transparent;
   box-shadow: none;
@@ -3324,6 +3311,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
   min-width: 0;
   min-height: 0;
 }
@@ -5025,13 +5013,6 @@ textarea:focus-visible {
   border-top: 1px solid var(--line);
 }
 
-/* 编辑区表单内容列限宽，避免超大窗口下字段/标题/按钮行过度拉伸；不影响 .settings-grid/.settings-inline-fields 多栏 */
-.split-layout > :nth-child(2) > .form-panel,
-.split-layout > :nth-child(2) > .mcp-workspace > .form-panel {
-  width: 100%;
-  max-width: 720px;
-}
-
 .about-page {
   padding: 20px;
   border-radius: var(--radius-lg);
@@ -5652,6 +5633,12 @@ textarea:focus-visible {
   gap: 14px 24px;
   align-content: start;
   min-width: 0;
+}
+
+/* Kimi Code 子页一次只展示一套详情，宽屏下不能留下未使用的网格列。 */
+.kimi-code-settings-panel > .settings-group,
+.kimi-code-settings-panel > .oauth-login-panel {
+  grid-column: 1 / -1;
 }
 
 /* Kimi Code 设置页内的横向子 tab 导航 */
@@ -7214,6 +7201,7 @@ textarea:focus-visible {
 .skills-workspace {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-width: 0;
   min-height: 100%;
   height: 100%;
@@ -7611,25 +7599,6 @@ textarea:focus-visible {
 .skills-view-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-}
-
-.skills-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.skills-pagination-info {
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-
-.skills-pagination-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .skills-detail-header p {
@@ -8816,17 +8785,26 @@ textarea:focus-visible {
   transform: translateY(0);
 }
 
-/* 卡片可点击选中（进入右侧编辑） */
-.pcv-active[role="button"],
-.pcv-list-item[role="button"] {
+/* 选择与卡片行操作保持同级，避免按钮嵌套。 */
+.pcv-profile-select {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   text-align: left;
-  width: 100%;
   font: inherit;
 }
 
-.pcv-active:focus-visible,
-.pcv-list-item:focus-visible {
+.pcv-active .pcv-profile-select { padding: 18px; }
+.pcv-list-item .pcv-profile-select { padding: 12px 16px; }
+
+.pcv-profile-select:focus-visible {
   outline: 2px solid rgba(var(--primary-rgb), 0.5);
   outline-offset: 2px;
 }

@@ -171,25 +171,6 @@ export function ShortcutRecorderField(props: {
   );
 }
 
-export function TextAreaField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}): JSX.Element {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <textarea
-        rows={4}
-        value={props.value}
-        placeholder={props.placeholder}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
 export function KeyValueListField(props: {
   locale: Locale;
   label: string;

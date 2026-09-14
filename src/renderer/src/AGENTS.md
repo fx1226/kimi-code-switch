@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-React renderer for the Kimi configuration console. It owns UI state, tab composition, i18n, dialogs, CSS theme tokens, and calls the preload bridge for all native work.
+React renderer for the Kimi configuration console. It owns UI state, tab composition, i18n, dialogs, CSS theme tokens, and calls the Tauri `window.kimiSwitch` bridge for all native work.
 
 ## STRUCTURE
 
@@ -13,11 +13,14 @@ src/renderer/src/
 |-- useAppHandlers.tsx    # central state/action hook
 |-- use*Actions.ts        # persistence, backup, safety, preview, shortcuts, mutations
 |-- tabs/                 # TabPanels router and AppContext type only
-|-- styles.css            # entries: fonts.css -> tokens.css -> components.css -> layout.css
+|-- styles.css            # layered entry: fonts, tokens, components, primitives, patterns, features, overrides, shell
 |-- fonts.css             # bundled Inter + JetBrains Mono @font-face
 |-- tokens.css            # design tokens: palettes, radius/shadow/type scales, 9 accent themes
 |-- layout.css            # shell grid (sidebar 264-288px / collapsed 72px / main)
-|-- components.css        # component styles (large, intentionally central)
+|-- components.css        # legacy component styles, migrated incrementally into layers below
+|-- primitives.css        # shared visual primitives
+|-- patterns.css          # reusable layout/component patterns
+|-- foundation.css        # targeted visual overrides during migration
 |-- assets/               # dark/light logo PNGs + fonts/ (woff2 + OFL licenses)
 `-- insights.css / toast.css  # usage-dashboard / toast (imported by their components)
 ```
@@ -26,7 +29,7 @@ src/renderer/src/
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Add tab or nav item | `appOptions.ts`, `tabs/TabPanels.tsx`, `App.tsx` | Keep `TabId`, `TAB_ITEMS`, routing, shortcuts aligned. |
+| Add tab or nav item | `appOptions.ts`, `tabs/TabPanels.tsx`, `App.tsx` | Keep `TabId`, `NAVIGATION_ITEMS`, routing, shortcuts aligned. |
 | Add renderer state/action | `useAppHandlers.tsx` plus focused `use*` hook | Avoid pushing more unrelated logic into `App.tsx`. |
 | Persist or preview state | `useAppPersistence.ts`, `usePreviewAndSkills.ts` | Native work goes through `getApi()`. |
 | Edit provider/model/profile/MCP forms | `tabComponents.tsx`, `tabs/TabPanels.tsx` | Shared transforms live under `@shared/`. |

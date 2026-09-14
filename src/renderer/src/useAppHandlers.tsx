@@ -4,7 +4,7 @@ import type { AppState, ConfigDoctorReport, ExternalChangeNotifyPayload, FileSna
 import type { BackupRecordsDialogState, DocumentViewerState } from "./dialogs";
 import type { DiagnosticsState } from "./overviewDashboard";
 import { SkillsViewMode } from "./skillsWorkspace";
-import { TabId, PreviewFileId } from "./appOptions";
+import type { KimiCodeSubTab, PreviewFileId, SettingsSubTab, TabId } from "./appOptions";
 import { getApi } from "./appHelpers";
 import { getAppDerivedData } from "./appDerivedData";
 import { t, translateError } from "./i18n";
@@ -16,6 +16,9 @@ import { usePreviewAndSkills } from "./usePreviewAndSkills";
 import { useSafetyActions } from "./useSafetyActions";
 import { useStateMutations } from "./useStateMutations";
 import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
+import { applyPrimarySelections, getRetainedPrimarySelections } from "./primarySelections";
+import { mergeUiRouteState, normalizeUiRouteState } from "./uiRouteState";
+import type { UiRouteState } from "./uiRouteState";
 
 const POST_CONFIG_TARGET_SWITCH_TAB_KEY = "kimi-switch:post-config-target-switch-tab";
 
@@ -24,6 +27,8 @@ export function useAppHandlers() {
   const [state, setState] = useState<AppState>(() => createFallbackState());
   const [savedState, setSavedState] = useState<AppState | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [activeSettingsSubTab, setActiveSettingsSubTab] = useState<SettingsSubTab>("kimi-code");
+  const [kimiCodeSubTab, setKimiCodeSubTab] = useState<KimiCodeSubTab>("instance");
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedProfile, setSelectedProfile] = useState("");
@@ -216,7 +221,14 @@ export function useAppHandlers() {
     void loadState();
   }, []);
 
-  // Restore activeTab from persisted uiState after initial load
+  const persistUiRouteState = useCallback((patch: Partial<UiRouteState>): void => {
+    updateImmediateState((draft) => {
+      draft.panelSettings.uiState = mergeUiRouteState(draft.panelSettings.uiState, patch);
+    });
+  }, [updateImmediateState]);
+
+  // Restore the complete UI route after initial load. Invalid persisted resource ids
+  // are normalized against the loaded state before they can reach the workspace.
   const hasRestoredUiState = useRef(false);
   useEffect(() => {
     if (hasRestoredUiState.current) return;
@@ -230,28 +242,56 @@ export function useAppHandlers() {
     } catch {
       forcedTab = null;
     }
-    if (forcedTab === "overview") {
-      setActiveTab("overview");
-      hasRestoredUiState.current = true;
-      return;
-    }
-    const persistedTab = savedState.panelSettings.uiState?.activeTab;
-    if (persistedTab) {
-      setActiveTab(persistedTab as TabId);
-    }
+    const route = normalizeUiRouteState(savedState.panelSettings.uiState);
+    setActiveTab(forcedTab === "overview" ? "overview" : route.activeTab);
+    setActiveSettingsSubTab(route.settingsSubTab);
+    setKimiCodeSubTab(route.kimiCodeSubTab);
+    applyPrimarySelections(
+      getRetainedPrimarySelections(savedState, {
+        provider: route.selectedProvider,
+        model: route.selectedModel,
+        profile: route.selectedProfile,
+        mcpServer: route.selectedMcpServer,
+      }),
+      { setSelectedProvider, setSelectedModel, setSelectedProfile, setSelectedMcpServer },
+    );
     hasRestoredUiState.current = true;
   }, [savedState]);
 
-  // Wrap setActiveTab to persist uiState
+  // Route changes are GUI-only: write the SQLite-backed panel preference without
+  // creating a config draft or rewriting Kimi Code configuration files.
   const handleSetActiveTab = useCallback((tab: TabId): void => {
     setActiveTab(tab);
-    updateImmediateState((draft) => {
-      if (!draft.panelSettings.uiState) {
-        draft.panelSettings.uiState = {};
-      }
-      draft.panelSettings.uiState.activeTab = tab;
-    });
-  }, [updateImmediateState]);
+    persistUiRouteState({ activeTab: tab });
+  }, [persistUiRouteState]);
+  const handleSetActiveSettingsSubTab = useCallback((tab: SettingsSubTab): void => {
+    setActiveSettingsSubTab(tab);
+    persistUiRouteState({ settingsSubTab: tab });
+  }, [persistUiRouteState]);
+  const handleSetKimiCodeSubTab = useCallback((tab: KimiCodeSubTab): void => {
+    setKimiCodeSubTab(tab);
+    persistUiRouteState({ kimiCodeSubTab: tab });
+  }, [persistUiRouteState]);
+  const handleSetSelectedProvider = useCallback<Dispatch<SetStateAction<string>>>((next) => {
+    const value = typeof next === "function" ? next(selectedProvider) : next;
+    setSelectedProvider(value);
+    persistUiRouteState({ selectedProvider: value });
+  }, [persistUiRouteState, selectedProvider]);
+  const handleSetSelectedModel = useCallback<Dispatch<SetStateAction<string>>>((next) => {
+    const value = typeof next === "function" ? next(selectedModel) : next;
+    setSelectedModel(value);
+    persistUiRouteState({ selectedModel: value });
+  }, [persistUiRouteState, selectedModel]);
+  const handleSetSelectedProfile = useCallback<Dispatch<SetStateAction<string>>>((next) => {
+    const value = typeof next === "function" ? next(selectedProfile) : next;
+    setSelectedProfile(value);
+    persistUiRouteState({ selectedProfile: value });
+  }, [persistUiRouteState, selectedProfile]);
+  const handleSetSelectedMcpServer = useCallback<Dispatch<SetStateAction<string>>>((next) => {
+    const value = typeof next === "function" ? next(selectedMcpServer) : next;
+    setSelectedMcpServer(value);
+    persistUiRouteState({ selectedMcpServer: value });
+  }, [persistUiRouteState, selectedMcpServer]);
 
   useEffect(() => {
     applyAppearanceMode(state.panelSettings.theme);
@@ -450,14 +490,18 @@ export function useAppHandlers() {
     setSavedState,
     activeTab,
     setActiveTab: handleSetActiveTab,
+    activeSettingsSubTab,
+    setActiveSettingsSubTab: handleSetActiveSettingsSubTab,
+    kimiCodeSubTab,
+    setKimiCodeSubTab: handleSetKimiCodeSubTab,
     selectedProvider,
-    setSelectedProvider,
+    setSelectedProvider: handleSetSelectedProvider,
     selectedModel,
-    setSelectedModel,
+    setSelectedModel: handleSetSelectedModel,
     selectedProfile,
-    setSelectedProfile,
+    setSelectedProfile: handleSetSelectedProfile,
     selectedMcpServer,
-    setSelectedMcpServer,
+    setSelectedMcpServer: handleSetSelectedMcpServer,
     setSelectedSkill,
     setSelectedSkillPath,
     skillsViewMode,

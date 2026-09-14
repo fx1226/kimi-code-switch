@@ -91,7 +91,6 @@ function createState(): AppState {
       backup_webdav_password: "",
       backup_webdav_path: "",
       shortcuts: {} as AppState["panelSettings"]["shortcuts"],
-      mcp_servers: {},
     },
     mcpConfig: {
       mcpServers: {},
@@ -384,6 +383,28 @@ describe("updateImmediateState", () => {
     expect(persistedDraft.mainConfig.providers["draft-provider"]).toBeUndefined();
     expect(visibleDraft.panelSettings.uiState?.activeTab).toBe("providers");
     expect(persistedDraft.panelSettings.uiState?.activeTab).toBe("providers");
+  });
+
+  it("merges consecutive immediate updates through the latest refs", () => {
+    const current = createState();
+    const ctx = createMockContext({ state: current, savedState: current });
+    const stateRef = { current };
+    const savedStateRef = { current };
+    const { updateImmediateState } = useStateMutations({ ...ctx, stateRef, savedStateRef });
+
+    updateImmediateState((draft) => {
+      draft.panelSettings.uiState = { activeTab: "settings" };
+    });
+    updateImmediateState((draft) => {
+      draft.panelSettings.uiState = {
+        ...(draft.panelSettings.uiState ?? {}),
+        settingsSubTab: "backup",
+      };
+    });
+
+    const [visibleDraft, persistedDraft] = ctx.persistImmediateState.mock.calls[1];
+    expect(visibleDraft.panelSettings.uiState).toMatchObject({ activeTab: "settings", settingsSubTab: "backup" });
+    expect(persistedDraft.panelSettings.uiState).toMatchObject({ activeTab: "settings", settingsSubTab: "backup" });
   });
 
   it("catches updater errors and sets error message", () => {

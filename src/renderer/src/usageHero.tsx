@@ -43,10 +43,10 @@ export function UsageHero(props: UsageHeroProps): JSX.Element {
     && overview.latencySamples / overview.totalCalls >= 0.8;
 
   const metricCards = [
-    { icon: <ArrowDownLeft size={18} />, label: t(locale, "usageInputTokens"), value: formatCompactToken(totals.promptTokens, locale) },
-    { icon: <ArrowUpRight size={18} />, label: t(locale, "usageOutputTokens"), value: formatCompactToken(totals.completionTokens, locale) },
-    { icon: <Database size={18} />, label: t(locale, "usageCacheCreation"), value: formatCompactToken(totals.cacheCreationTokens, locale) },
-    { icon: <Sparkles size={18} />, label: t(locale, "usageCacheHits"), value: formatCompactToken(totals.cacheReadTokens, locale) },
+    { tone: "metric-input", icon: <ArrowDownLeft size={18} />, label: t(locale, "usageInputTokens"), value: formatCompactToken(totals.promptTokens, locale) },
+    { tone: "metric-output", icon: <ArrowUpRight size={18} />, label: t(locale, "usageOutputTokens"), value: formatCompactToken(totals.completionTokens, locale) },
+    { tone: "metric-cache-create", icon: <Database size={18} />, label: t(locale, "usageCacheCreation"), value: formatCompactToken(totals.cacheCreationTokens, locale) },
+    { tone: "metric-cache-read", icon: <Sparkles size={18} />, label: t(locale, "usageCacheHits"), value: formatCompactToken(totals.cacheReadTokens, locale) },
   ];
 
   const secondaryCards = [
@@ -56,7 +56,7 @@ export function UsageHero(props: UsageHeroProps): JSX.Element {
   ];
 
   return (
-    <>
+    <section className="usage-overview-summary" aria-label={t(locale, "usageHeroTitle")}>
       <div className="usage-hero">
         <div className="usage-hero-main">
           <div className="usage-hero-icon" aria-hidden="true">
@@ -82,7 +82,7 @@ export function UsageHero(props: UsageHeroProps): JSX.Element {
 
       <div className="usage-metric-row">
         {metricCards.map((card) => (
-          <div key={card.label} className="usage-metric-card">
+          <div key={card.label} className={`usage-metric-card ${card.tone}`}>
             <div className="usage-metric-head">
               <div className="usage-metric-icon" aria-hidden="true">{card.icon}</div>
               <div className="usage-metric-label">{card.label}</div>
@@ -90,7 +90,7 @@ export function UsageHero(props: UsageHeroProps): JSX.Element {
             <div className="usage-metric-value">{card.value}</div>
           </div>
         ))}
-        <div className="usage-metric-card">
+        <div className="usage-metric-card metric-cache-rate">
           <div className="usage-metric-head">
             <div className="usage-metric-icon" aria-hidden="true"><Activity size={18} /></div>
             <div className="usage-metric-label">{t(locale, "insightsCacheHitRate")}</div>
@@ -113,6 +113,6 @@ export function UsageHero(props: UsageHeroProps): JSX.Element {
           </div>
         ))}
       </div>
-    </>
+    </section>
   );
 }

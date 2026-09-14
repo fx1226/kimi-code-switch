@@ -54,11 +54,6 @@ export interface ProviderConfig {
   env?: Record<string, string>;
   /** 0.38.0：自定义请求头（子表，例如 Authorization / Cookie 等）。 */
   custom_headers?: Record<string, string>;
-  /**
-   * 是否启用。SQLite 为唯一真源，此开关决定是否投影写入 Kimi Code config.toml。
-   * 缺省（旧数据）视为 true。
-   */
-  enabled?: boolean;
 }
 
 export interface ModelPricing {
@@ -105,11 +100,16 @@ export interface ModelConfig {
   adaptive_thinking?: boolean;
   /** 0.38.0：任意子表透传（能存活 registry refresh）。 */
   overrides?: Record<string, unknown>;
-  /**
-   * 是否启用。仅当自身启用且其 Provider 也启用时，才投影写入 config.toml。
-   * 缺省（旧数据）视为 true。
-   */
-  enabled?: boolean;
+}
+
+/**
+ * GUI-only display metadata for a native model definition. This must never
+ * contain provider connection details or secrets.
+ */
+export interface ModelUiMetadata {
+  auth_mode?: ModelAuthMode;
+  official_account_scope?: "global";
+  pricing?: ModelPricing;
 }
 
 export interface OfficialAccount {
@@ -334,12 +334,19 @@ export interface PanelSettings {
   backup_webdav_password: string;
   backup_webdav_path: string;
   shortcuts: Record<ShortcutAction, ShortcutBinding>;
-  mcp_servers: Record<string, McpServerConfig>;
+  /** GUI-only metadata, keyed by Kimi Code environment id then model id. */
+  model_ui_metadata?: Record<string, Record<string, ModelUiMetadata>>;
   kimi_code_environments?: KimiCodeEnvironment[];
   active_kimi_code_environment_id?: string;
   last_display_id?: number;
   uiState?: {
     activeTab?: string;
+    settingsSubTab?: string;
+    kimiCodeSubTab?: string;
+    selectedProvider?: string;
+    selectedModel?: string;
+    selectedProfile?: string;
+    selectedMcpServer?: string;
     providerSortBy?: string;
     profileSortBy?: string;
   };
@@ -347,6 +354,8 @@ export interface PanelSettings {
     providers?: string[];
     profiles?: string[];
   };
+  /** Explicit opt-in for the GUI-only multi-account credential vault. */
+  official_account_vault_enabled?: boolean;
   active_official_account_id?: string;
   insights_status?: import("./usageTypes").InsightsStatus;
   insights_proxy_port?: number | "auto";
@@ -671,7 +680,7 @@ export interface PortableDirectoryBundle {
 
 /**
  * 单个 Kimi Code 环境的配置（用于全量备份的 environments[] 元素）。
- * Provider/Model/MCP/Profile 均按环境隔离，含真实密钥与 enabled 状态。
+ * Provider/Model/MCP/Profile 均按环境隔离，含完整原生配置与真实密钥。
  */
 export interface EnvironmentConfigBundle {
   environment: KimiCodeEnvironment;

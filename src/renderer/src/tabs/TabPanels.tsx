@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Activity, Braces, Bug, CircleCheckBig, Copy, Download, ExternalLink, FileInput, FolderOpen, History, LoaderCircle, LogIn, Plus, Power, RefreshCw, RotateCcw, Save, Terminal, Trash2, Upload, X } from "lucide-react";
-import { applyProfile, assessFullBackupRisk, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, setModelEnabled, setProviderEnabled, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
+import { applyProfile, assessFullBackupRisk, cloneProfile, createDefaultKimiCodeEnvironment, deleteModel, deleteProfile, deleteProvider, fullBackupContainsRedactedSecrets, getKimiCodeConfigPath, getKimiCodeMcpConfigPath, getKimiCodeSkillsPath, getKimiCodeEnvironmentHomePath, normalizeKimiCodeEnvironments, validateFullBackup, upsertModel, upsertProfile, upsertProvider } from "@shared/configStore";
 import { buildMcpConfigDocument } from "@shared/mcpStore";
 import { buildModelName, ensureUniqueEntryName, normalizeEntryName } from "@shared/nameRules";
 import { getCascadePreview } from "@shared/configRelations";
@@ -41,7 +40,8 @@ import {
   BACKUP_DESTINATION_OPTIONS, BACKUP_FREQUENCY_OPTIONS, BACKUP_STRATEGY_OPTIONS,
   CLOSE_BEHAVIOR_OPTIONS, DISPLAY_OPEN_OPTIONS, labelForLocale, LOCALE_OPTIONS, TERMINAL_APP_OPTIONS, THEME_OPTIONS, UI_FONT_SIZE_OPTIONS,
 } from "../appOptions";
-import { useDialogEscape, useFocusTrap } from "../dialogs";
+import type { KimiCodeSubTab, SettingsSubTab } from "../appOptions";
+import { DialogShell } from "../dialogs";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { CompactSelect, Field, FontSizeSliderField, SelectField, SettingsGroup, ShortcutRecorderField } from "../formControls";
 import { t, translateError } from "../i18n";
@@ -50,6 +50,7 @@ import { EmptyState, SplitLayout } from "../layoutComponents";
 import { ProviderHealthBanner } from "../providerHealthBanner";
 import { OverviewDashboard } from "../overviewDashboard";
 import { SkillsWorkspace } from "../skillsWorkspace";
+import { TabList } from "../tabList";
 import type { KimiOAuthLoginEvent, ProviderCatalogSummary, ProviderHealthResult } from "../tauri/cli";
 import {
   assignLegacySnapshotEnvironment,
@@ -146,10 +147,8 @@ type TabPanelsProps = Pick<
 > & {
   shortcuts: Record<ShortcutAction, ShortcutBinding>;
   onRequestCascadeDelete: (type: "provider" | "model", name: string) => void;
+  onOpenProfileWizard: () => void;
 };
-
-type SettingsSubTab = "general" | "kimi-code" | "shortcuts" | "backup" | "doctor" | "insights" | "history";
-type KimiCodeSubTab = "instance" | "accounts" | "environment" | "plugins";
 
 type CreateEnvironmentDraft = {
   id: string;
@@ -272,6 +271,10 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
   const {
     state,
     activeTab,
+    activeSettingsSubTab,
+    setActiveSettingsSubTab,
+    kimiCodeSubTab,
+    setKimiCodeSubTab,
     locale,
     diagnostics,
     selectedProvider,
@@ -285,6 +288,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
     setSelectedSkill,
     setSelectedSkillPath,
     onRequestCascadeDelete,
+    onOpenProfileWizard,
     skillsViewMode,
     setSkillsViewMode,
     skillsReport,
@@ -609,8 +613,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
   const hasProviders = Object.keys(state.mainConfig.providers).length > 0;
   const hasModels = Object.keys(state.mainConfig.models).length > 0;
 
-  const [activeSettingsSubTab, setActiveSettingsSubTab] = useState<SettingsSubTab>("kimi-code");
-  const [kimiCodeSubTab, setKimiCodeSubTab] = useState<KimiCodeSubTab>("instance");
   const [fullBackupImportDialog, setFullBackupImportDialog] = useState<{ open: boolean; data: FullBackupBundle | null; envCount: number; hasRedactedSecrets: boolean; riskItems: string[] }>({ open: false, data: null, envCount: 0, hasRedactedSecrets: false, riskItems: [] });
   const [providerCatalogDialog, setProviderCatalogDialog] = useState<ProviderCatalogDialogState>(createProviderCatalogDialogState);
   const [isImportingFullBackup, setIsImportingFullBackup] = useState(false);
@@ -623,6 +625,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
   const [officialAccountsLoading, setOfficialAccountsLoading] = useState(false);
 
   const refreshOfficialAccounts = (): void => {
+    if (!state.panelSettings.official_account_vault_enabled) {
+      setOfficialAccounts([]);
+      setOfficialAccountsLoading(false);
+      return;
+    }
     const api = getApi();
     if (!api?.listOfficialAccounts) return;
     setOfficialAccountsLoading(true);
@@ -635,7 +642,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
   useEffect(() => {
     // 仅在挂载时拉取一次官方账号列表；后续变更由各操作显式调用 refreshOfficialAccounts。
     refreshOfficialAccounts();
-  }, []);
+  }, [state.panelSettings.official_account_vault_enabled]);
 
   const startKimiOAuthLogin = (): void => {
     const api = getApi();
@@ -902,6 +909,10 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               if (tab === "providers" && item) setSelectedProvider(item);
               if (tab === "models" && item) setSelectedModel(item);
             })}
+            onOpenDoctor={() => runAfterUnsavedHandled(() => {
+              setActiveSettingsSubTab("doctor");
+              setActiveTab("settings");
+            })}
           />
         ) : null}
 
@@ -951,35 +962,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             dirtyItems={dirtyProviders}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedProviderName}
-            itemClassName={(name) =>
-              state.mainConfig.providers[name]?.enabled === false ? "provider-list-row disabled" : "provider-list-row"
-            }
-            renderItemAction={(name) => {
-              const provider = state.mainConfig.providers[name];
-              if (!provider) return null;
-              const isEnabled = provider.enabled !== false;
-              return (
-                <button
-                  className={isEnabled ? "list-toggle-button" : "list-toggle-button disabled"}
-                  type="button"
-                  aria-label={isEnabled ? t(locale, "disableProvider") : t(locale, "enableProvider")}
-                  title={isEnabled ? t(locale, "disableProvider") : t(locale, "enableProvider")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    updateState((draft) => {
-                      setProviderEnabled(draft, name, !isEnabled);
-                    }, {
-                      historySummary: formatMessage(
-                        t(locale, isEnabled ? "historyDisableProvider" : "historyEnableProvider"),
-                        { name },
-                      ),
-                    });
-                  }}
-                >
-                  <Power size={15} />
-                </button>
-              );
-            }}
+            itemClassName={() => "provider-list-row"}
             onSelect={(item) => setSelectedProvider(item)}
             copyLabel={t(locale, "clone")}
             onCopy={(name) =>
@@ -1073,44 +1056,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             dirtyItems={dirtyModels}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedModelName}
-            itemClassName={(name) => {
-              const model = state.mainConfig.models[name];
-              if (!model) return null;
-              const providerEnabled = state.mainConfig.providers[model.provider]?.enabled !== false;
-              return model.enabled === false || !providerEnabled ? "disabled" : null;
-            }}
-            renderItemAction={(name) => {
-              const model = state.mainConfig.models[name];
-              if (!model) return null;
-              const providerEnabled = state.mainConfig.providers[model.provider]?.enabled !== false;
-              const isEnabled = model.enabled !== false;
-              const title = !providerEnabled
-                ? t(locale, "modelProviderDisabled")
-                : isEnabled ? t(locale, "disableModel") : t(locale, "enableModel");
-              return (
-                <button
-                  className={isEnabled && providerEnabled ? "list-toggle-button" : "list-toggle-button disabled"}
-                  type="button"
-                  disabled={!providerEnabled}
-                  aria-label={title}
-                  title={title}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!providerEnabled) return;
-                    updateState((draft) => {
-                      setModelEnabled(draft, name, !isEnabled);
-                    }, {
-                      historySummary: formatMessage(
-                        t(locale, isEnabled ? "historyDisableModel" : "historyEnableModel"),
-                        { name },
-                      ),
-                    });
-                  }}
-                >
-                  <Power size={15} />
-                </button>
-              );
-            }}
             onSelect={(item) => setSelectedModel(item)}
             copyLabel={t(locale, "clone")}
             onCopy={(name) =>
@@ -1218,8 +1163,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
 
         {activeTab === "profiles" ? (
           <SplitLayout
-            hideList
+            listTitle={t(locale, "profiles")}
             listItems={profileEntries.map(([name]) => name)}
+            searchPlaceholder={t(locale, "searchResources")}
             dirtyItems={dirtyProfiles}
             dirtyLabel={t(locale, "editedBadge")}
             selectedItem={selectedProfileName}
@@ -1239,32 +1185,9 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             onSelect={(item) => setSelectedProfile(item)}
             addLabel={t(locale, "newProfile")}
             addButtonClassName="action-button compact icon-only"
-            addButtonTitle={!hasModels ? t(locale, "tooltipAddModelFirst") : t(locale, "newProfile")}
+            addButtonTitle={t(locale, "newProfile")}
             addButtonContent={<Plus size={15} />}
-            addButtonDisabled={!hasModels}
-            onAdd={() =>
-              updateState((draft) => {
-                const firstModel = Object.keys(draft.mainConfig.models)[0];
-                if (!firstModel) {
-                  throw new Error(t(locale, "errorCreateModelFirst"));
-                }
-                const name = createUniqueName("profile", Object.keys(draft.profiles));
-                upsertProfile(draft, {
-                  name,
-                  label: t(locale, "newProfileLabel"),
-                  default_model: firstModel,
-                  default_plan_mode: false,
-                  default_permission_mode: "manual",
-                  merge_all_available_skills: draft.mainConfig.merge_all_available_skills,
-                  thinking_enabled: true,
-                });
-                setSelectedProfile(name);
-              }, {
-                persist: false,
-                recordHistory: true,
-                historySummary: formatMessage(t(locale, "historyNewProfile"), { name }),
-              })
-            }
+            onAdd={onOpenProfileWizard}
             renderItemAction={(name) =>
               (
                 <span className="list-row-action-set profile-actions">
@@ -1589,7 +1512,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                     const api = getApi();
                     const runAction = getMcpAction(api, action);
                     if (!api) {
-                      setError("Electron preload API is unavailable. MCP command cannot continue.");
+                      setError("Tauri runtime API is unavailable. MCP command cannot continue.");
                       return;
                     }
                     if (!runAction) {
@@ -1761,19 +1684,21 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               <span className="autosave-status">{t(locale, "changesAutoSaved")}</span>
             </div>
             {activeSettingsSubTab === "kimi-code" ? (
-              <div className="settings-tab-panel">
-                <div className="settings-inner-tabs-nav">
-                  {([["instance", "settingsGroupConfigTarget"], ["accounts", "officialAccountsTitle"], ["environment", "kimiCodeEnvironmentTitle"], ["plugins", "pluginsTitle"]] as const).map(([tab, key]) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setKimiCodeSubTab(tab)}
-                      className={`settings-inner-tab-button ${kimiCodeSubTab === tab ? "active" : ""}`}
-                    >
-                      {t(locale, key)}
-                    </button>
-                  ))}
-                </div>
+              <div className="settings-tab-panel kimi-code-settings-panel" id={`kimi-code-panel-${kimiCodeSubTab}`} role="tabpanel" aria-labelledby={`kimi-code-tab-${kimiCodeSubTab}`} tabIndex={0}>
+                <TabList
+                  label={t(locale, "settingsTabKimiCode")}
+                  activeId={kimiCodeSubTab}
+                  onChange={setKimiCodeSubTab}
+                  className="settings-inner-tabs-nav"
+                  tabClassName="settings-inner-tab-button"
+                  panelIdPrefix="kimi-code"
+                  items={([
+                    ["instance", "settingsGroupConfigTarget"],
+                    ["accounts", "officialAccountsTitle"],
+                    ["environment", "kimiCodeEnvironmentTitle"],
+                    ["plugins", "pluginsTitle"],
+                  ] as const).map(([id, key]) => ({ id, label: t(locale, key) }))}
+                />
                 <p className="settings-inner-tab-desc">
                   {renderInlineCodeMessage(t(locale, kimiCodeSubTab === "instance"
                     ? "kimiCodeSubTabInstanceDesc"
@@ -1988,6 +1913,20 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 </div>
                 <SettingsGroup>
                   <div className="official-account-panel">
+                    <label className="settings-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(state.panelSettings.official_account_vault_enabled)}
+                        onChange={(event) => updateImmediateState((draft) => {
+                          draft.panelSettings.official_account_vault_enabled = event.target.checked;
+                          if (!event.target.checked) draft.panelSettings.active_official_account_id = "";
+                        })}
+                      />
+                      <span>{t(locale, "officialAccountVaultEnable")}</span>
+                    </label>
+                    <p className="form-note">{t(locale, "officialAccountVaultDescription")}</p>
+                    {state.panelSettings.official_account_vault_enabled ? (
+                    <>
                     <div className="official-account-toolbar">
                       <div>
                         <strong>{t(locale, "officialAccountsCurrent")}</strong>
@@ -2041,6 +1980,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                         </div>
                       ))}
                     </div>
+                    </>
+                    ) : null}
                   </div>
                 </SettingsGroup>
                 </>
@@ -2947,12 +2888,13 @@ function ProviderCatalogDialog(props: {
   onClose: () => void;
 }): JSX.Element {
   const { locale, state, onChange, onRefresh, onImport, onImportRegistry, onClose } = props;
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onClose);
-  useFocusTrap(dialogRef);
-  return createPortal(
-    <div className="dialog-overlay" role="presentation">
-      <div className="dialog import-preview-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-catalog-title">
+  return (
+    <DialogShell
+      backdropClassName="dialog-overlay"
+      dialogClassName="dialog import-preview-dialog"
+      ariaLabelledBy="provider-catalog-title"
+      onClose={onClose}
+    >
         <div className="dialog-header">
           <h3 id="provider-catalog-title">{t(locale, "providerCatalogTitle")}</h3>
           <button className="icon-button" type="button" onClick={onClose} aria-label={t(locale, "close")}>
@@ -3019,9 +2961,7 @@ function ProviderCatalogDialog(props: {
             {t(locale, "providerRegistryImportAction")}
           </button>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -3036,12 +2976,14 @@ export function FullBackupImportDialog(props: {
 }): JSX.Element {
   const { locale, envCount, hasRedactedSecrets, riskItems, isImporting, onConfirm, onCancel } = props;
   const [trustConfirmed, setTrustConfirmed] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onCancel);
-  useFocusTrap(dialogRef);
   return (
-    <div className="dialog-overlay" role="presentation">
-      <div className="dialog import-preview-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="full-backup-import-title">
+    <DialogShell
+      backdropClassName="dialog-overlay"
+      dialogClassName="dialog import-preview-dialog"
+      ariaLabelledBy="full-backup-import-title"
+      closeOnBackdrop={false}
+      onClose={onCancel}
+    >
         <div className="dialog-header">
           <h3 id="full-backup-import-title">{t(locale, "fullBackupImportTitle")}</h3>
           <button className="icon-button" type="button" onClick={onCancel} aria-label={t(locale, "close")}>
@@ -3082,8 +3024,7 @@ export function FullBackupImportDialog(props: {
             {isImporting ? t(locale, "fullBackupImporting") : t(locale, "importConfirm")}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 
@@ -3106,14 +3047,13 @@ function CreateKimiCodeEnvironmentDialog(props: {
       label: environment.name || environment.id,
     })),
   ];
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onCancel);
-  useFocusTrap(dialogRef);
-  return createPortal(
-    <div className="dialog-overlay" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onCancel();
-    }}>
-      <div ref={dialogRef} className="dialog create-environment-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+  return (
+    <DialogShell
+      backdropClassName="dialog-overlay"
+      dialogClassName="dialog create-environment-dialog"
+      ariaLabelledBy={titleId}
+      onClose={onCancel}
+    >
         <div className="dialog-header">
           <h3 id={titleId}>{t(locale, "kimiCodeEnvironmentCreateTitle")}</h3>
           <button className="icon-button" type="button" aria-label={t(locale, "close")} title={t(locale, "close")} onClick={onCancel}>
@@ -3160,9 +3100,7 @@ function CreateKimiCodeEnvironmentDialog(props: {
             <span>{t(locale, "kimiCodeEnvironmentCreate")}</span>
           </button>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 

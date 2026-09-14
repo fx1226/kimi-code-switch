@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Search, X } from "lucide-react";
 
 import { searchConfig } from "@shared/configStore";
@@ -7,6 +6,7 @@ import type { SearchResult } from "@shared/configStore";
 import type { AppState, Locale } from "@shared/types";
 
 import { t } from "./i18n";
+import { DialogShell } from "./dialogs";
 
 interface CommandPaletteProps {
   state: AppState;
@@ -28,27 +28,27 @@ export function CommandPalette({ state, locale, onSelect, onClose }: CommandPale
 
   useEffect(() => {
     const item = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-    item?.scrollIntoView({ block: "nearest" });
+    if (typeof item?.scrollIntoView === "function") {
+      item.scrollIntoView({ block: "nearest" });
+    }
   }, [selectedIndex]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent): void => {
       switch (event.key) {
         case "ArrowDown":
+          if (results.length === 0) return;
           event.preventDefault();
           setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
           break;
         case "ArrowUp":
+          if (results.length === 0) return;
           event.preventDefault();
           setSelectedIndex((i) => Math.max(i - 1, 0));
           break;
         case "Enter":
           event.preventDefault();
           if (results[selectedIndex]) onSelect(results[selectedIndex]);
-          break;
-        case "Escape":
-          event.preventDefault();
-          onClose();
           break;
       }
     },
@@ -65,9 +65,14 @@ export function CommandPalette({ state, locale, onSelect, onClose }: CommandPale
     return map[type] ?? type;
   };
 
-  return createPortal(
-    <div className="command-palette-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="command-palette" role="dialog" aria-modal="true" aria-label={t(locale, "searchPlaceholder")} onKeyDown={handleKeyDown}>
+  return (
+    <DialogShell
+      backdropClassName="command-palette-backdrop"
+      dialogClassName="command-palette"
+      ariaLabel={t(locale, "searchPlaceholder")}
+      onClose={onClose}
+      onKeyDown={handleKeyDown}
+    >
         <div className="command-palette-input-row">
           <Search size={18} className="command-palette-icon" />
           <input
@@ -78,18 +83,24 @@ export function CommandPalette({ state, locale, onSelect, onClose }: CommandPale
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label={t(locale, "searchPlaceholder")}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-results"
+            aria-activedescendant={results[selectedIndex] ? `command-palette-option-${selectedIndex}` : undefined}
+            data-dialog-initial-focus
           />
           <button type="button" className="command-palette-close" onClick={onClose} aria-label={t(locale, "close")}>
             <X size={14} />
           </button>
         </div>
-        <div className={query.trim() ? "command-palette-results" : "command-palette-results is-idle"} ref={listRef} role="listbox">
+        <div id="command-palette-results" className={query.trim() ? "command-palette-results" : "command-palette-results is-idle"} ref={listRef} role="listbox">
           {query.trim() && results.length === 0 ? (
             <div className="command-palette-empty">{t(locale, "searchNoResults")}</div>
           ) : null}
           {results.map((result, index) => (
             <button
               key={`${result.type}-${result.name}`}
+              id={`command-palette-option-${index}`}
               type="button"
               role="option"
               aria-selected={index === selectedIndex}
@@ -107,8 +118,6 @@ export function CommandPalette({ state, locale, onSelect, onClose }: CommandPale
           <span><kbd>Enter</kbd> {t(locale, "open")}</span>
           <span><kbd>Esc</kbd> {t(locale, "close")}</span>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }

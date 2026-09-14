@@ -76,7 +76,6 @@ function createState(): AppState {
       backup_webdav_password: "",
       backup_webdav_path: "",
       shortcuts: createDefaultShortcuts(),
-      mcp_servers: {},
     },
     mcpConfig: {
       mcpServers: {},

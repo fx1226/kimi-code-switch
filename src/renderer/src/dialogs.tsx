@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { KeyboardEventHandler, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { FileText, History, LoaderCircle, Save, Trash2, X } from "lucide-react";
 
@@ -50,10 +50,19 @@ export interface BackupRecordsDialogState {
   legacyEncryptionPassword?: string;
 }
 
-export function useDialogEscape(onClose: () => void): void {
+const dialogStack: HTMLElement[] = [];
+
+function isTopmostDialog(dialog: HTMLElement | null): boolean {
+  return Boolean(dialog) && dialogStack[dialogStack.length - 1] === dialog;
+}
+
+export function useDialogEscape(
+  onClose: () => void,
+  dialogRef?: RefObject<HTMLElement | null>,
+): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") {
+      if (event.key !== "Escape" || (dialogRef && !isTopmostDialog(dialogRef.current))) {
         return;
       }
       event.preventDefault();
@@ -62,7 +71,7 @@ export function useDialogEscape(onClose: () => void): void {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [dialogRef, onClose]);
 }
 
 export function DialogShell(props: {
@@ -70,9 +79,15 @@ export function DialogShell(props: {
   backdropClassName: string;
   dialogClassName: string;
   dialogRef?: RefObject<HTMLElement | null>;
-  children: React.ReactNode;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
+  ariaDescribedBy?: string;
+  closeOnBackdrop?: boolean;
+  onKeyDown?: KeyboardEventHandler<HTMLElement>;
+  children: ReactNode;
 }): JSX.Element {
   const internalDialogRef = useRef<HTMLElement>(null);
+  useDialogEscape(props.onClose ?? (() => {}), internalDialogRef);
   useFocusTrap(internalDialogRef);
 
   return createPortal(
@@ -80,7 +95,7 @@ export function DialogShell(props: {
       className={props.backdropClassName}
       role="presentation"
       onClick={(event) => {
-        if (event.target === event.currentTarget && props.onClose) {
+        if (event.target === event.currentTarget && props.closeOnBackdrop !== false && props.onClose) {
           props.onClose();
         }
       }}
@@ -95,6 +110,10 @@ export function DialogShell(props: {
         className={props.dialogClassName}
         role="dialog"
         aria-modal="true"
+        aria-label={props.ariaLabel}
+        aria-labelledby={props.ariaLabelledBy}
+        aria-describedby={props.ariaDescribedBy}
+        onKeyDown={props.onKeyDown}
       >
         {props.children}
       </section>
@@ -109,7 +128,7 @@ const FOCUSABLE_SELECTOR =
 export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent): void => {
-      if (event.key !== "Tab" || !dialogRef.current) {
+      if (event.key !== "Tab" || !dialogRef.current || !isTopmostDialog(dialogRef.current)) {
         return;
       }
 
@@ -153,15 +172,17 @@ export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const inertedSiblings: HTMLElement[] = [];
+    dialogStack.push(dialog);
+    const inertedSiblings: Array<{ element: HTMLElement; previousAriaHidden: string | null }> = [];
     let branch: HTMLElement | null = dialog;
     while (branch?.parentElement) {
       const parent = branch.parentElement;
       for (const sibling of Array.from(parent.children)) {
         if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("inert")) {
+          const previousAriaHidden = sibling.getAttribute("aria-hidden");
           sibling.setAttribute("inert", "");
           sibling.setAttribute("aria-hidden", "true");
-          inertedSiblings.push(sibling);
+          inertedSiblings.push({ element: sibling, previousAriaHidden });
         }
       }
       branch = parent;
@@ -180,9 +201,15 @@ export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      for (const sibling of inertedSiblings) {
-        sibling.removeAttribute("inert");
-        sibling.removeAttribute("aria-hidden");
+      const stackIndex = dialogStack.lastIndexOf(dialog);
+      if (stackIndex >= 0) dialogStack.splice(stackIndex, 1);
+      for (const { element, previousAriaHidden } of inertedSiblings) {
+        element.removeAttribute("inert");
+        if (previousAriaHidden === null) {
+          element.removeAttribute("aria-hidden");
+        } else {
+          element.setAttribute("aria-hidden", previousAriaHidden);
+        }
       }
       if (previouslyFocused?.isConnected) {
         previouslyFocused.focus();
@@ -233,23 +260,16 @@ export function ConfirmDialog(
     onCancel: () => void;
   },
 ): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
   const Icon = props.kind === "delete" ? Trash2 : Save;
 
-  useDialogEscape(props.onCancel);
-  useFocusTrap(dialogRef);
-
-  return createPortal(
-    <div
-      className="confirm-dialog-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onCancel();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="confirm-dialog-backdrop"
+      dialogClassName="confirm-dialog glass-panel"
+      ariaLabelledBy="confirm-dialog-title"
+      ariaDescribedBy={props.description ? "confirm-dialog-description" : undefined}
+      onClose={props.onCancel}
     >
-      <section ref={dialogRef} className="confirm-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby={props.description ? "confirm-dialog-description" : undefined}>
         <div className="confirm-dialog-header">
           <div className={props.tone === "danger" ? "confirm-dialog-icon danger" : "confirm-dialog-icon"}>
             <Icon size={20} />
@@ -280,9 +300,7 @@ export function ConfirmDialog(
             {props.confirmLabel}
           </button>
         </div>
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -292,11 +310,7 @@ export function DocumentViewerDialog(
     onClose: () => void;
   },
 ): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
   const [copied, setCopied] = useState(false);
-
-  useDialogEscape(props.onClose);
-  useFocusTrap(dialogRef);
 
   const handleCopy = (): void => {
     void navigator.clipboard.writeText(props.content).then(() => {
@@ -305,17 +319,13 @@ export function DocumentViewerDialog(
     });
   };
 
-  return createPortal(
-    <div
-      className="document-viewer-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="document-viewer-backdrop"
+      dialogClassName="document-viewer glass-panel"
+      ariaLabelledBy="document-viewer-title"
+      onClose={props.onClose}
     >
-      <section ref={dialogRef} className="document-viewer glass-panel" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title">
         <div className="document-viewer-header">
           <div className="document-viewer-title">
             <div className="document-viewer-icon">
@@ -339,9 +349,7 @@ export function DocumentViewerDialog(
           onCopy={handleCopy}
           copied={copied}
         />
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -355,26 +363,18 @@ export function BackupRecordsDialog(
     onClose: () => void;
   },
 ): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
   const sourceLabel =
     props.destinationType === "webdav"
       ? t(props.locale, "backupRecordsSourceWebdav")
       : t(props.locale, "backupRecordsSourceLocal");
 
-  useDialogEscape(props.onClose);
-  useFocusTrap(dialogRef);
-
-  return createPortal(
-    <div
-      className="backup-records-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="backup-records-backdrop"
+      dialogClassName="backup-records-dialog glass-panel"
+      ariaLabelledBy="backup-records-title"
+      onClose={props.onClose}
     >
-      <section ref={dialogRef} className="backup-records-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="backup-records-title">
         <div className="backup-records-header">
           <div className="backup-records-title">
             <div className="backup-records-icon">
@@ -481,8 +481,6 @@ export function BackupRecordsDialog(
             <span>{t(props.locale, "backupRecordsEmpty")}</span>
           </div>
         )}
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }

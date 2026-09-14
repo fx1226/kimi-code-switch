@@ -55,6 +55,7 @@ function enabledApi() {
     })),
     usageQueryBreakdown: vi.fn(async () => ({ ok: true as const, rows: [] })),
     usageQuerySessions: vi.fn(async () => ({ ok: true as const, rows: [] })),
+    usageGetStorageInfo: vi.fn(async () => ({ ok: true as const, info: { totalBytes: 0, exceedsWarn: false } })),
   } as unknown as Window["kimiSwitch"];
 }
 
@@ -74,12 +75,24 @@ describe("InsightsDashboard", () => {
 
     const { findAllByRole } = render(<InsightsDashboard locale="zh-CN" />);
 
-    const allButtons = await findAllByRole("button");
-    const tabs = allButtons.filter((btn) => btn.className.includes("insights-tab-button"));
+    const tabs = await findAllByRole("tab");
     expect(tabs).toHaveLength(3);
 
     const labels = tabs.map((btn) => btn.textContent);
     expect(labels).toEqual(["总览", "分组统计", "会话"]);
+  });
+
+  it("uses accessible tabs and supports keyboard navigation", async () => {
+    window.kimiSwitch = enabledApi();
+    const { findByRole } = render(<InsightsDashboard locale="zh-CN" />);
+    const overviewTab = await findByRole("tab", { name: "总览" });
+
+    expect(overviewTab.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(overviewTab, { key: "ArrowRight" });
+
+    const breakdownTab = await findByRole("tab", { name: "分组统计" });
+    await waitFor(() => expect(breakdownTab.getAttribute("aria-selected")).toBe("true"));
+    expect(await findByRole("tabpanel", { name: "分组统计" })).toBeDefined();
   });
 
   it("does not render trend metric switching controls after ready", async () => {
@@ -183,6 +196,18 @@ describe("InsightsDashboard", () => {
 });
 
 describe("InsightsSettingsPanel", () => {
+  it("uses the shared accessible dialog for irreversible data reset confirmation", async () => {
+    window.kimiSwitch = enabledApi();
+    const { findByRole, queryByRole } = render(<InsightsSettingsPanel locale="en-US" />);
+
+    fireEvent.click(await findByRole("button", { name: "Clear Data" }));
+    const dialog = await findByRole("dialog", { name: "Confirm Clearing Insights Data" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(queryByRole("dialog")).toBeNull());
+  });
+
   it("does not persist an implicit default exchange rate when the input was not changed", async () => {
     const usageSetConfig = vi.fn(async () => ({ ok: true as const }));
     window.kimiSwitch = {

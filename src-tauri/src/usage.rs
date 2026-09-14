@@ -7,11 +7,10 @@
 //! 包含表：usage 相关表、config_history、panel_settings
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rusqlite::types::{Value, ValueRef};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Map, Number, Value as Json};
 
 /// 全局应用数据库路径（~/ 前缀由 resolve_home 展开）。
@@ -29,15 +28,6 @@ impl Default for UsageState {
             conn: Mutex::new(None),
         }
     }
-}
-
-fn resolve_home(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-    PathBuf::from(path)
 }
 
 /// 把前端传来的 JSON 参数值转成 rusqlite 可绑定的值。
@@ -92,7 +82,7 @@ pub fn usage_open(
     schema_sql: String,
     state: tauri::State<UsageState>,
 ) -> Result<(), String> {
-    let resolved = resolve_home(&db_path);
+    let resolved = crate::fs_access::resolve_home(&db_path);
     if let Some(parent) = resolved.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("ensure db dir: {e}"))?;
     }
@@ -131,17 +121,15 @@ pub fn usage_query(
 
     let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
     let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-    let col_count = col_names.len();
-
     bind_named(&mut stmt, &params)?;
     let mut rows = stmt.raw_query();
 
     let mut out = Vec::new();
     while let Some(row) = rows.next().map_err(|e| format!("row: {e}"))? {
         let mut obj = Map::new();
-        for i in 0..col_count {
+        for (i, column_name) in col_names.iter().enumerate() {
             let v = row.get_ref(i).map_err(|e| format!("get col {i}: {e}"))?;
-            obj.insert(col_names[i].clone(), sql_to_json(v));
+            obj.insert(column_name.clone(), sql_to_json(v));
         }
         out.push(obj);
     }
@@ -240,16 +228,17 @@ mod tests {
     fn resolve_home_expands_tilde_prefix() {
         let home = dirs::home_dir().expect("home dir required");
         assert_eq!(
-            resolve_home("~/.kimi/usage.db"),
+            crate::fs_access::resolve_home("~/.kimi/usage.db"),
             home.join(".kimi/usage.db")
         );
+        assert_eq!(crate::fs_access::resolve_home("~"), home);
     }
 
     #[test]
     fn resolve_home_keeps_plain_path() {
         assert_eq!(
-            resolve_home("/tmp/usage.db"),
-            PathBuf::from("/tmp/usage.db")
+            crate::fs_access::resolve_home("/tmp/usage.db"),
+            std::path::PathBuf::from("/tmp/usage.db")
         );
     }
 
@@ -332,119 +321,280 @@ mod tests {
             Json::String("hello".into())
         );
     }
+
+    #[test]
+    fn merge_legacy_database_keeps_current_rows_and_recovers_non_conflicting_rows() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-legacy-db-merge-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let current_path = base.join("current.db");
+        let legacy_path = base.join("legacy.db");
+        let current = Connection::open(&current_path).unwrap();
+        current
+            .execute_batch(
+                "
+                CREATE TABLE events (request_id TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE config_history (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  snapshot_at TEXT NOT NULL,
+                  kimi_code_environment_id TEXT NOT NULL DEFAULT '',
+                  file_id TEXT NOT NULL,
+                  sha256 TEXT NOT NULL,
+                  size_bytes INTEGER NOT NULL,
+                  snapshot_path TEXT NOT NULL,
+                  target_path TEXT NOT NULL DEFAULT '',
+                  description TEXT,
+                  UNIQUE(kimi_code_environment_id, file_id, sha256)
+                );
+                INSERT INTO events VALUES ('shared', 'current');
+                INSERT INTO config_history (
+                  snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes, snapshot_path, target_path
+                ) VALUES ('2026-01-01', 'default', 'config', 'current', 1, '/current.gz', '/cfg');
+                ",
+            )
+            .unwrap();
+        let legacy = Connection::open(&legacy_path).unwrap();
+        legacy
+            .execute_batch(
+                "
+                CREATE TABLE events (request_id TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE config_history (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  snapshot_at TEXT NOT NULL,
+                  kimi_code_environment_id TEXT NOT NULL DEFAULT '',
+                  file_id TEXT NOT NULL,
+                  sha256 TEXT NOT NULL,
+                  size_bytes INTEGER NOT NULL,
+                  snapshot_path TEXT NOT NULL,
+                  target_path TEXT NOT NULL DEFAULT '',
+                  description TEXT,
+                  UNIQUE(kimi_code_environment_id, file_id, sha256)
+                );
+                INSERT INTO events VALUES ('shared', 'legacy'), ('legacy-only', 'recovered');
+                INSERT INTO config_history (
+                  snapshot_at, kimi_code_environment_id, file_id, sha256, size_bytes, snapshot_path, target_path
+                ) VALUES ('2026-01-02', 'default', 'config', 'legacy', 2, '/legacy.gz', '/cfg');
+                ",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let (inserted, incomplete) = merge_legacy_database_file(&current, &legacy_path).unwrap();
+
+        assert!(inserted >= 2);
+        assert!(incomplete.is_empty());
+        assert_eq!(
+            current
+                .query_row(
+                    "SELECT value FROM events WHERE request_id = 'shared'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "current"
+        );
+        assert_eq!(
+            current
+                .query_row(
+                    "SELECT value FROM events WHERE request_id = 'legacy-only'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "recovered"
+        );
+        let history_count: i64 = current
+            .query_row("SELECT COUNT(*) FROM config_history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(history_count, 2);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
-/// 迁移旧数据库到新路径。
-///
-/// 将旧面板数据库的所有表和数据复制到当前连接的数据库。
-/// 迁移完成后，重命名旧数据库为 index.db.migrated。
+fn is_safe_sql_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn legacy_table_names(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut statement = conn
+      .prepare("SELECT name FROM legacy.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .map_err(|error| format!("query legacy tables: {error}"))?;
+    let result = statement
+        .query_map([], |row| row.get(0))
+        .map_err(|error| format!("read legacy tables: {error}"))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|error| format!("collect legacy tables: {error}"));
+    result
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        [table],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|value| value.is_some())
+    .map_err(|error| format!("check current table {table}: {error}"))
+}
+
+fn table_columns(conn: &Connection, schema: &str, table: &str) -> Result<Vec<String>, String> {
+    let query = format!("PRAGMA {schema}.table_info({table})");
+    let mut statement = conn
+        .prepare(&query)
+        .map_err(|error| format!("inspect {schema}.{table}: {error}"))?;
+    let result = statement
+        .query_map([], |row| row.get(1))
+        .map_err(|error| format!("read {schema}.{table} columns: {error}"))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|error| format!("collect {schema}.{table} columns: {error}"));
+    result
+}
+
+fn merge_legacy_table(conn: &Connection, table: &str) -> Result<(usize, bool), String> {
+    if !is_safe_sql_identifier(table) {
+        log::warn!("Skipping legacy table with unsafe identifier: {table}");
+        return Ok((0, true));
+    }
+    if !table_exists(conn, table)? {
+        let create_sql: String = conn
+            .query_row(
+                "SELECT sql FROM legacy.sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("read legacy schema for {table}: {error}"))?;
+        conn.execute_batch(&create_sql)
+            .map_err(|error| format!("create legacy table {table}: {error}"))?;
+        let inserted = conn
+            .execute(
+                &format!("INSERT INTO main.{table} SELECT * FROM legacy.{table}"),
+                [],
+            )
+            .map_err(|error| format!("copy legacy table {table}: {error}"))?;
+        return Ok((inserted, false));
+    }
+
+    let source_columns = table_columns(conn, "legacy", table)?;
+    let target_columns = table_columns(conn, "main", table)?;
+    let source_set = source_columns
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let columns = target_columns
+        .into_iter()
+        .filter(|column| source_set.contains(column))
+        // config_history has an auto-assigned integer id and a semantic unique
+        // key. Omitting id avoids dropping unrelated old snapshots when the two
+        // databases independently allocated the same row id.
+        .filter(|column| !(table == "config_history" && column == "id"))
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Ok((0, true));
+    }
+    let column_list = columns.join(", ");
+    let inserted = conn
+        .execute(
+            &format!(
+                "INSERT OR IGNORE INTO main.{table} ({column_list}) SELECT {column_list} FROM legacy.{table}"
+            ),
+            [],
+        )
+        .map_err(|error| format!("merge legacy table {table}: {error}"))?;
+    Ok((inserted, false))
+}
+
+fn merge_legacy_database_file(
+    conn: &Connection,
+    old_db_path: &std::path::Path,
+) -> Result<(usize, Vec<String>), String> {
+    let old_db_path_text = old_db_path.to_string_lossy().to_string();
+    conn.execute("ATTACH DATABASE ?1 AS legacy", [old_db_path_text])
+        .map_err(|error| format!("attach legacy database {}: {error}", old_db_path.display()))?;
+    let migration = (|| -> Result<(usize, Vec<String>), String> {
+        let tables = legacy_table_names(conn)?;
+        let mut inserted_rows = 0usize;
+        let mut incomplete_tables = Vec::new();
+        for table in tables {
+            let (inserted, incomplete) = merge_legacy_table(conn, &table)?;
+            inserted_rows += inserted;
+            if incomplete {
+                incomplete_tables.push(table);
+            }
+        }
+        Ok((inserted_rows, incomplete_tables))
+    })();
+    let detach = conn.execute("DETACH DATABASE legacy", []);
+    match (migration, detach) {
+        (Ok(result), Ok(_)) => Ok(result),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(format!("detach legacy database: {error}")),
+        (Err(error), Err(detach_error)) => {
+            Err(format!("{error}; detach legacy database: {detach_error}"))
+        }
+    }
+}
+
+/// Merge all known legacy GUI databases into the current database. Existing
+/// current rows win on key conflicts; old rows are otherwise inserted and the
+/// source database is renamed only after a complete successful merge.
 #[tauri::command]
 pub fn migrate_legacy_database(state: tauri::State<UsageState>) -> Result<String, String> {
     let legacy_candidates = [
         "~/.kimi-code/.panel/app.db",
+        "~/.kimi/app.db",
         "~/.kimi/.panel/usage/index.db",
     ];
-    let Some(old_db_path) = legacy_candidates
+    let old_databases = legacy_candidates
         .iter()
-        .map(|path| resolve_home(path))
-        .find(|path| path.exists())
-    else {
+        .map(|path| crate::fs_access::resolve_home(path))
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+    if old_databases.is_empty() {
         return Ok("No legacy database found, migration skipped".to_string());
-    };
+    }
 
     let guard = lock_conn(&state)?;
     let conn = guard.as_ref().ok_or("usage db not open")?;
-
-    // ATTACH 旧数据库
-    conn.execute(
-        &format!("ATTACH DATABASE '{}' AS legacy", old_db_path.display()),
-        [],
-    )
-    .map_err(|e| format!("attach legacy db: {e}"))?;
-
-    // 获取旧数据库中的所有表
-    let tables: Vec<String> = {
-        let mut stmt = conn
-            .prepare("SELECT name FROM legacy.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-            .map_err(|e| format!("query tables: {e}"))?;
-
-        let rows = stmt
-            .query_map([], |row| row.get(0))
-            .map_err(|e| format!("map tables: {e}"))?;
-
-        rows.collect::<Result<Vec<String>, _>>()
-            .map_err(|e| format!("collect tables: {e}"))?
-    };
-
-    let mut migrated_tables = Vec::new();
-
-    // 复制每个表
-    for table in &tables {
-        // 表名将被拼接进 SQL，校验其为合法标识符（仅字母数字下划线），
-        // 防御异常/构造的旧库中含引号等字符的表名破坏语句。
-        if table.is_empty() || !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            log::warn!("Skipping table with non-identifier name: {}", table);
-            continue;
+    let mut migrated_rows = 0usize;
+    let mut migrated_paths = Vec::new();
+    for old_db_path in &old_databases {
+        let (inserted, incomplete_tables) = merge_legacy_database_file(conn, old_db_path)?;
+        if !incomplete_tables.is_empty() {
+            return Err(format!(
+                "legacy database {} has no compatible columns for: {}; source was retained",
+                old_db_path.display(),
+                incomplete_tables.join(", "),
+            ));
         }
-
-        // 跳过已存在的表（避免覆盖）
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?1",
-                [table],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-
-        if exists {
-            log::info!("Table {} already exists, skipping", table);
-            continue;
-        }
-
-        // 复制表结构
-        let create_sql: String = conn
-            .query_row(
-                &format!(
-                    "SELECT sql FROM legacy.sqlite_master WHERE type='table' AND name = '{}'",
-                    table
-                ),
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("get create sql for {}: {e}", table))?;
-
-        conn.execute_batch(&create_sql)
-            .map_err(|e| format!("create table {}: {e}", table))?;
-
-        // 复制数据
-        conn.execute(
-            &format!("INSERT INTO main.{} SELECT * FROM legacy.{}", table, table),
-            [],
-        )
-        .map_err(|e| format!("copy data for {}: {e}", table))?;
-
-        migrated_tables.push(table.clone());
-        log::info!("Migrated table: {}", table);
+        migrated_rows += inserted;
+        migrated_paths.push(old_db_path.clone());
     }
-
-    // DETACH 旧数据库
-    conn.execute("DETACH DATABASE legacy", [])
-        .map_err(|e| format!("detach legacy db: {e}"))?;
-
     drop(guard);
 
-    // 重命名旧数据库
-    let migrated_path = old_db_path.with_extension("db.migrated");
-    std::fs::rename(&old_db_path, &migrated_path).map_err(|e| format!("rename legacy db: {e}"))?;
-
-    log::info!(
-        "Legacy database migrated and renamed to {:?}",
-        migrated_path
-    );
+    for old_db_path in &migrated_paths {
+        let migrated_path = old_db_path.with_extension("db.migrated");
+        if migrated_path.exists() {
+            return Err(format!(
+                "legacy database {} was merged but could not be renamed because {} already exists",
+                old_db_path.display(),
+                migrated_path.display(),
+            ));
+        }
+        std::fs::rename(old_db_path, &migrated_path).map_err(|error| {
+            format!("rename legacy database {}: {error}", old_db_path.display())
+        })?;
+    }
 
     Ok(format!(
-        "Migrated {} tables: {}. Old database renamed to index.db.migrated",
-        migrated_tables.len(),
-        migrated_tables.join(", ")
+        "Migrated {migrated_rows} rows from {} legacy database(s); sources renamed after merge",
+        migrated_paths.len(),
     ))
 }

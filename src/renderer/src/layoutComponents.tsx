@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Copy, Inbox, Star } from "lucide-react";
 
 import type { Locale } from "@shared/types";
 
 import { t } from "./i18n";
 
-export function SplitLayout(props: {
+export function ResourceWorkspace(props: {
   listTitle: string;
   listItems: string[];
   itemLabel?: (item: string) => string;
@@ -34,6 +34,7 @@ export function SplitLayout(props: {
   children: JSX.Element;
 }): JSX.Element {
   const [query, setQuery] = useState("");
+  const itemButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleItems = normalizedQuery
     ? props.listItems.filter((item) => {
@@ -42,6 +43,20 @@ export function SplitLayout(props: {
         return `${label} ${title}`.toLocaleLowerCase().includes(normalizedQuery);
       })
     : props.listItems;
+  const moveSelection = (event: React.KeyboardEvent<HTMLButtonElement>, item: string): void => {
+    const currentIndex = visibleItems.indexOf(item);
+    if (currentIndex < 0 || visibleItems.length === 0) return;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown") nextIndex = Math.min(currentIndex + 1, visibleItems.length - 1);
+    else if (event.key === "ArrowUp") nextIndex = Math.max(currentIndex - 1, 0);
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = visibleItems.length - 1;
+    if (nextIndex === null || nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextItem = visibleItems[nextIndex]!;
+    props.onSelect(nextItem);
+    requestAnimationFrame(() => itemButtonsRef.current[nextIndex]?.focus());
+  };
   return (
     <section
       className={[
@@ -76,10 +91,11 @@ export function SplitLayout(props: {
             <input type="search" value={query} placeholder={props.searchPlaceholder} onChange={(event) => setQuery(event.target.value)} />
           </label>
         ) : null}
-        <div className="list-scroll">
-          {visibleItems.map((item) => (
+        <div className="list-scroll" role="list" aria-label={props.listTitle || props.addLabel}>
+          {visibleItems.map((item, index) => (
             <div
               key={item}
+              role="listitem"
               className={[
                 "list-row",
                 item === props.selectedItem ? "active" : "",
@@ -90,12 +106,17 @@ export function SplitLayout(props: {
                 .join(" ")}
             >
               <button
+                ref={(element) => { itemButtonsRef.current[index] = element; }}
                 className="list-item"
+                type="button"
                 title={props.itemTitle ? props.itemTitle(item) : props.itemLabel ? props.itemLabel(item) : item}
+                aria-pressed={item === props.selectedItem}
+                aria-current={item === props.highlightedItem ? "true" : undefined}
                 onClick={() => {
                   if (item === props.selectedItem) return;
                   props.onSelect(item);
                 }}
+                onKeyDown={(event) => moveSelection(event, item)}
               >
                 {props.renderItemLabel ? props.renderItemLabel(item) : props.itemLabel ? props.itemLabel(item) : item}
               </button>
@@ -127,6 +148,9 @@ export function SplitLayout(props: {
     </section>
   );
 }
+
+/** @deprecated Use ResourceWorkspace for new resource-management surfaces. */
+export const SplitLayout = ResourceWorkspace;
 
 export function EmptyState(props: { locale: Locale; hasItems?: boolean }): JSX.Element {
   return (

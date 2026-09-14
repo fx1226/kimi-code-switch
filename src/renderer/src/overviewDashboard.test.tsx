@@ -59,15 +59,20 @@ function createState(): AppState {
   return state;
 }
 
-function renderOverview(options: { onNavigate?: (tab: "profiles" | "providers" | "models" | "mcp" | "skills", item?: string) => void } = {}) {
+function renderOverview(options: {
+  onNavigate?: (tab: "profiles" | "providers" | "models" | "mcp" | "skills", item?: string) => void;
+  onOpenDoctor?: () => void;
+  diagnostics?: { preload: "ok" | "failed" | "pending" | "unavailable"; loadState: "ok" | "failed" | "pending" | "unavailable"; previewState: "ok" | "failed" | "pending" | "unavailable"; lastError: string };
+} = {}) {
   return render(
     <OverviewDashboard
       state={createState()}
       locale="zh-CN"
-      diagnostics={{ preload: "ok", loadState: "ok", previewState: "ok", lastError: "" }}
+      diagnostics={options.diagnostics ?? { preload: "ok", loadState: "ok", previewState: "ok", lastError: "" }}
       skillsReport={null}
       mcpEntries={[]}
       onNavigate={options.onNavigate ?? (() => {})}
+      onOpenDoctor={options.onOpenDoctor ?? (() => {})}
     />,
   );
 }
@@ -113,5 +118,16 @@ describe("OverviewDashboard", () => {
     expect(queryByText("YOLO")).toBeNull();
     expect(getByText("配置状态正常")).toBeDefined();
     expect(getByTestId("overview-technical-details").tagName).toBe("DETAILS");
+  });
+
+  it("offers one-click navigation to configuration doctor when startup health is degraded", () => {
+    const onOpenDoctor = vi.fn();
+    const { getByTestId } = renderOverview({
+      onOpenDoctor,
+      diagnostics: { preload: "ok", loadState: "failed", previewState: "unavailable", lastError: "Preview failed" },
+    });
+
+    fireEvent.click(getByTestId("overview-open-doctor"));
+    expect(onOpenDoctor).toHaveBeenCalledOnce();
   });
 });

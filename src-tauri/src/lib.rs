@@ -6,9 +6,8 @@
 //! 继续跑在前端 renderer，后端只暴露 I/O 和系统集成的原子能力。
 
 mod config_history;
-mod env_config_store;
 mod fs_access;
-mod mcp_servers_store;
+mod legacy_native_config;
 mod official_accounts;
 mod panel_settings_store;
 mod shortcuts;
@@ -21,7 +20,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(shortcuts::ShortcutRuntimeState::default())
@@ -43,6 +41,7 @@ pub fn run() {
             fs_access::remove_file_cas,
             fs_access::move_file,
             fs_access::copy_dir,
+            fs_access::merge_directory_missing,
             fs_access::path_exists,
             fs_access::resolve_home_path,
             fs_access::real_path,
@@ -52,15 +51,9 @@ pub fn run() {
             fs_access::replace_portable_directory,
             fs_access::remove_dir,
             fs_access::save_file_with_dialog,
-            fs_access::pick_backup_folder,
-            fs_access::pick_project_local_config_root,
             fs_access::write_project_local_config,
-            fs_access::revoke_grant,
             fs_access::reconcile_durable_grants,
-            fs_access::list_durable_grants,
             fs_access::quarantine_journal,
-            fs_access::list_quarantine,
-            fs_access::delete_quarantined_journal,
             fs_access::hostname,
             fs_access::list_subdirs,
             // 系统集成
@@ -83,6 +76,8 @@ pub fn run() {
             usage::usage_exec_script,
             usage::usage_close,
             usage::migrate_legacy_database,
+            legacy_native_config::export_legacy_native_config,
+            legacy_native_config::clear_recovered_legacy_native_config,
             // 配置历史
             config_history::init_config_history,
             config_history::capture_snapshot,
@@ -98,17 +93,6 @@ pub fn run() {
             panel_settings_store::export_panel_settings,
             panel_settings_store::import_panel_settings,
             panel_settings_store::migrate_panel_settings_from_toml,
-            // MCP 服务器存储
-            mcp_servers_store::init_mcp_servers_store,
-            mcp_servers_store::migrate_mcp_from_json,
-            // 环境级配置存储（Provider / Model）
-            env_config_store::init_env_config_store,
-            env_config_store::get_env_config,
-            env_config_store::save_env_config,
-            env_config_store::delete_env_config,
-            env_config_store::export_all_env_configs,
-            env_config_store::import_all_env_configs,
-            env_config_store::migrate_env_config_from_toml,
             // Kimi 官方账号槽位
             official_accounts::init_official_accounts_store,
             official_accounts::list_official_accounts,

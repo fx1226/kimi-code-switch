@@ -86,6 +86,13 @@ export function useStateMutations(ctx: StateMutationsContext) {
       updater(persistedDraft);
       const normalizedVisibleDraft = normalizeStatePaths(visibleDraft);
       const normalizedPersistedDraft = normalizeStatePaths(persistedDraft);
+      // Immediate UI preferences can be changed several times in one event
+      // handler (for example a settings sub-page followed by the Settings tab).
+      // Advance the refs synchronously so the next patch merges with this one
+      // instead of cloning a stale React render snapshot.
+      if (stateRef) stateRef.current = normalizedVisibleDraft;
+      if (savedStateRef) savedStateRef.current = normalizedPersistedDraft;
+      setState(normalizedVisibleDraft);
       if (options.recordHistory === true) {
         pushChangeSnapshot(currentState, normalizedVisibleDraft, options.historySummary ?? t(locale, "historyGenericChange"));
       }

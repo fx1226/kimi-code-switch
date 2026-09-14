@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 安全地获取数据库连接，处理 poisoned lock。
 fn lock_conn<'a>(
@@ -68,43 +68,6 @@ fn ensure_history_dir() -> Result<PathBuf, String> {
     let target = history_dir()?;
     std::fs::create_dir_all(&target).map_err(|e| format!("create history dir: {e}"))?;
     set_private_directory_permissions(&target)?;
-
-    if let Ok(legacy_dirs) = legacy_history_dirs() {
-        for legacy in legacy_dirs {
-            if legacy.exists() && legacy != target {
-                if let Ok(entries) = std::fs::read_dir(&legacy) {
-                    for entry in entries.flatten() {
-                        let source = entry.path();
-                        if !source.is_file() {
-                            continue;
-                        }
-                        let Some(file_name) = source.file_name() else {
-                            continue;
-                        };
-                        let destination = target.join(file_name);
-                        if !destination.exists() {
-                            // 优先 rename；跨设备失败时退回 copy 并删源（避免旧文件残留，
-                            // 否则每次启动都会重复尝试迁移）。失败仅告警，不中断启动。
-                            if std::fs::rename(&source, &destination).is_err() {
-                                match std::fs::copy(&source, &destination) {
-                                    Ok(_) => {
-                                        let _ = std::fs::remove_file(&source);
-                                    }
-                                    Err(e) => {
-                                        log::warn!(
-                                            "migrate history snapshot {} failed: {e}",
-                                            source.display()
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     Ok(target)
 }
 
@@ -139,7 +102,7 @@ fn write_private_snapshot(path: &std::path::Path, content: &[u8]) -> Result<(), 
 fn migrate_history_snapshot_paths(
     conn: &rusqlite::Connection,
     legacy: &PathBuf,
-    target: &PathBuf,
+    target: &Path,
 ) -> Result<(), String> {
     let mut stmt = conn
         .prepare("SELECT id, snapshot_path FROM config_history")
@@ -161,6 +124,38 @@ fn migrate_history_snapshot_paths(
             continue;
         };
         let next = target.join(file_name);
+        let migrated = if current.exists() {
+            if next.exists() {
+                match history_snapshot_files_match(&current, &next) {
+                    Ok(true) => std::fs::remove_file(&current).is_ok(),
+                    Ok(false) => {
+                        log::warn!(
+                            "keep legacy snapshot {}: {} already exists with different content",
+                            current.display(),
+                            next.display(),
+                        );
+                        false
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "compare legacy snapshot {} failed: {error}",
+                            current.display(),
+                        );
+                        false
+                    }
+                }
+            } else {
+                move_history_snapshot(&current, &next).is_ok()
+            }
+        } else {
+            // A previous run may have moved the file just before it could
+            // persist the metadata update. Only repair that known target when
+            // the legacy path is now absent.
+            next.exists()
+        };
+        if !migrated {
+            continue;
+        }
         conn.execute(
             "UPDATE config_history SET snapshot_path = ?1 WHERE id = ?2",
             rusqlite::params![next.to_string_lossy().to_string(), id],
@@ -169,6 +164,60 @@ fn migrate_history_snapshot_paths(
     }
 
     Ok(())
+}
+
+fn history_snapshot_files_match(left: &Path, right: &Path) -> Result<bool, String> {
+    let left_metadata =
+        fs::metadata(left).map_err(|error| format!("stat {}: {error}", left.display()))?;
+    let right_metadata =
+        fs::metadata(right).map_err(|error| format!("stat {}: {error}", right.display()))?;
+    if left_metadata.len() != right_metadata.len() {
+        return Ok(false);
+    }
+    Ok(
+        fs::read(left).map_err(|error| format!("read {}: {error}", left.display()))?
+            == fs::read(right).map_err(|error| format!("read {}: {error}", right.display()))?,
+    )
+}
+
+fn move_history_snapshot(source: &Path, destination: &Path) -> Result<(), String> {
+    if std::fs::rename(source, destination).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(source, destination).map_err(|error| {
+        format!(
+            "copy {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    std::fs::remove_file(source)
+        .map_err(|error| format!("remove migrated snapshot {}: {error}", source.display()))
+}
+
+fn migrate_unindexed_history_snapshots(legacy: &Path, target: &Path) {
+    let Ok(entries) = std::fs::read_dir(legacy) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let source = entry.path();
+        if !source.is_file() {
+            continue;
+        }
+        let Some(file_name) = source.file_name() else {
+            continue;
+        };
+        let destination = target.join(file_name);
+        if destination.exists() {
+            continue;
+        }
+        if let Err(error) = move_history_snapshot(&source, &destination) {
+            log::warn!(
+                "migrate unindexed legacy snapshot {} failed: {error}",
+                source.display()
+            );
+        }
+    }
 }
 
 fn ensure_config_history_environment_column(conn: &rusqlite::Connection) -> Result<(), String> {
@@ -348,6 +397,31 @@ fn backfill_history_target_paths(conn: &rusqlite::Connection) -> Result<(), Stri
     Ok(())
 }
 
+fn normalize_legacy_default_history_targets(conn: &rusqlite::Connection) -> Result<(), String> {
+    // Old GUI releases used the app data directory as the `default`
+    // KIMI_CODE_HOME. A history row must never restore back into that retired
+    // location once the default environment is canonicalized to ~/.kimi-code.
+    let retired_prefix = "%/.kimi-code-switch-gui/.env/default/%";
+    for (file_id, target_path) in [
+        ("config", "~/.kimi-code/config.toml"),
+        ("mcp", "~/.kimi-code/mcp.json"),
+        ("tui", "~/.kimi-code/tui.toml"),
+        ("agents", "~/.kimi-code/AGENTS.md"),
+        ("skills", "~/.kimi-code/skills"),
+    ] {
+        conn.execute(
+            "UPDATE config_history SET target_path = ?1
+             WHERE kimi_code_environment_id = 'default' AND file_id = ?2
+               AND target_path LIKE ?3",
+            rusqlite::params![target_path, file_id, retired_prefix],
+        )
+        .map_err(|error| {
+            format!("normalize legacy default history target for {file_id}: {error}")
+        })?;
+    }
+    Ok(())
+}
+
 /// 初始化配置历史表。
 ///
 /// 调用时机：应用启动时，在 usage_open 之后执行。
@@ -361,12 +435,14 @@ pub fn init_config_history(state: tauri::State<crate::usage::UsageState>) -> Res
         .map_err(|e| format!("init config_history schema: {e}"))?;
     ensure_config_history_environment_column(conn)?;
     backfill_history_target_paths(conn)?;
+    normalize_legacy_default_history_targets(conn)?;
 
     // 确保 history 目录存在，并把旧目录中的快照路径迁移到 Kimi Code 标准目录。
     let target_history_dir = ensure_history_dir()?;
     if let Ok(legacy_dirs) = legacy_history_dirs() {
         for legacy in legacy_dirs {
             migrate_history_snapshot_paths(conn, &legacy, &target_history_dir)?;
+            migrate_unindexed_history_snapshots(&legacy, &target_history_dir);
         }
     }
 
@@ -1479,6 +1555,44 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_retired_default_environment_history_targets_to_the_native_home() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-01', 'default', 'config', 'config-hash', 1, '/tmp/config.gz',
+                '~/.kimi-code-switch-gui/.env/default/config.toml')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-02', 'default', 'skills', 'skills-hash', 1, '/tmp/skills.gz',
+                '/Users/example/.kimi-code-switch-gui/.env/default/skills')",
+            [],
+        )
+        .unwrap();
+
+        normalize_legacy_default_history_targets(&conn).unwrap();
+
+        let targets = conn
+            .prepare("SELECT target_path FROM config_history ORDER BY file_id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            targets,
+            vec!["~/.kimi-code/config.toml", "~/.kimi-code/skills"]
+        );
+    }
+
+    #[test]
     fn assigns_legacy_snapshot_to_a_registered_environment_target() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_SQL).unwrap();
@@ -1518,5 +1632,53 @@ mod tests {
         assert_eq!(assigned.0, "work");
         assert_eq!(assigned.1, "/tmp/kimi-work/mcp.json");
         assert!(assign_legacy_snapshot(&conn, snapshot_id, "work").is_err());
+    }
+
+    #[test]
+    fn snapshot_path_migration_keeps_the_legacy_path_when_a_conflicting_destination_differs() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-history-path-migration-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let legacy = base.join("legacy-history");
+        let target = base.join("target-history");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        let source = legacy.join("snapshot.gz");
+        let destination = target.join("snapshot.gz");
+        std::fs::write(&source, b"legacy snapshot").unwrap();
+        std::fs::write(&destination, b"different target snapshot").unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute(
+            "INSERT INTO config_history (
+               snapshot_at, kimi_code_environment_id, file_id, sha256,
+               size_bytes, snapshot_path, target_path
+             ) VALUES ('2026-01-01', 'default', 'config', 'legacy', 1, ?1, '~/.kimi-code/config.toml')",
+            [source.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        migrate_history_snapshot_paths(&conn, &legacy, &target).unwrap();
+
+        let stored_path: String = conn
+            .query_row(
+                "SELECT snapshot_path FROM config_history WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_path, source.to_string_lossy());
+        assert_eq!(std::fs::read(&source).unwrap(), b"legacy snapshot");
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"different target snapshot"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

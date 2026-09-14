@@ -18,7 +18,7 @@ const snapshotMocks = vi.hoisted(() => ({
 }));
 vi.mock("./fileSnapshots", () => snapshotMocks);
 
-import { kimiSwitchTauri, loadPluginInventory, loadProjectLocalConfig, loadProjectMcpScope, remapPluginDirectoryForRestore, resolveProjectAdditionalDirs } from "./kimiSwitch";
+import { kimiSwitchTauri, loadPluginInventory, loadProjectLocalConfig, loadProjectMcpScope, recoverLegacyNativeConfig, remapPluginDirectoryForRestore, resolveProjectAdditionalDirs } from "./kimiSwitch";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -39,6 +39,118 @@ beforeEach(() => {
 });
 
 describe("kimiSwitchTauri API surface", () => {
+  it("recovers only missing legacy SQLite definitions into the registered native home", async () => {
+    const settings = await kimiSwitchTauri.defaultSettings();
+    const state = {
+      configPath: "~/.kimi-code/config.toml",
+      mcpConfigPath: "~/.kimi-code/mcp.json",
+      panelSettings: settings,
+      mainConfig: {
+        default_model: "",
+        default_plan_mode: false,
+        default_permission_mode: "manual",
+        merge_all_available_skills: true,
+        hooks: [], providers: {}, models: {}, loop_control: {}, background: {}, notifications: {}, services: {}, mcp: {},
+      },
+      mcpConfig: { mcpServers: {} },
+    } as unknown as AppState;
+    const writes: Array<{ path: string; content: string }> = [];
+    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      const path = (args as { path?: string } | undefined)?.path;
+      if (command === "export_legacy_native_config") {
+        return JSON.stringify({
+          environments: {
+            default: {
+              providers: {
+                native: { type: "openai", base_url: "https://legacy.example/native", api_key: "legacy-wins-never" },
+                recovered: { type: "openai", base_url: "https://legacy.example/recovered", api_key: "legacy-secret" },
+              },
+              models: {
+                "recovered/model": { provider: "recovered", model: "model", max_context_size: 8192, capabilities: [] },
+              },
+              mcpServers: {
+                recovered: { transport: "stdio", command: "npx", args: ["server"], headers: {}, env: {} },
+              },
+            },
+          },
+        }) as never;
+      }
+      if (command === "read_text" && path === "~/.kimi-code/config.toml") {
+        return `[providers.native]\ntype = "openai"\nbase_url = "https://native.example"\napi_key = "native-secret"\n` as never;
+      }
+      if (command === "read_text" && path === "~/.kimi-code/mcp.json") return '{"mcpServers":{}}' as never;
+      if (command === "write_text") {
+        writes.push(args as { path: string; content: string });
+        return undefined as never;
+      }
+      if (command === "ensure_dir" || command === "clear_recovered_legacy_native_config") return undefined as never;
+      return null as never;
+    });
+
+    await recoverLegacyNativeConfig(state);
+
+    const config = writes.find((write) => write.path.endsWith("config.toml"))?.content ?? "";
+    const mcp = writes.find((write) => write.path.endsWith("mcp.json"))?.content ?? "";
+    expect(config).toContain("[providers.recovered]");
+    expect(config).toContain('base_url = "https://native.example"');
+    expect(config).not.toContain("https://legacy.example/native");
+    expect(mcp).toContain('"recovered"');
+    expect(mockedInvoke).toHaveBeenCalledWith("clear_recovered_legacy_native_config", {
+      environmentIds: ["default"],
+    });
+  });
+
+  it("does not restore or discard legacy resources that were explicitly disabled", async () => {
+    const settings = await kimiSwitchTauri.defaultSettings();
+    const state = {
+      configPath: "~/.kimi-code/config.toml",
+      mcpConfigPath: "~/.kimi-code/mcp.json",
+      panelSettings: settings,
+      mainConfig: {
+        default_model: "",
+        default_plan_mode: false,
+        default_permission_mode: "manual",
+        merge_all_available_skills: true,
+        hooks: [], providers: {}, models: {}, loop_control: {}, background: {}, notifications: {}, services: {}, mcp: {},
+      },
+      mcpConfig: { mcpServers: {} },
+    } as unknown as AppState;
+    const writes: Array<{ path: string; content: string }> = [];
+    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      const path = (args as { path?: string } | undefined)?.path;
+      if (command === "export_legacy_native_config") {
+        return JSON.stringify({
+          environments: {
+            default: {
+              providers: {
+                disabled: { type: "openai", base_url: "https://legacy.example/disabled", api_key: "secret", enabled: false },
+              },
+              models: {
+                "disabled/model": { provider: "disabled", model: "model", max_context_size: 8192, capabilities: [], enabled: false },
+              },
+              mcpServers: {},
+            },
+          },
+        }) as never;
+      }
+      if (command === "read_text" && path === "~/.kimi-code/config.toml") return "" as never;
+      if (command === "read_text" && path === "~/.kimi-code/mcp.json") return '{"mcpServers":{}}' as never;
+      if (command === "write_text") {
+        writes.push(args as { path: string; content: string });
+        return undefined as never;
+      }
+      if (command === "ensure_dir" || command === "clear_recovered_legacy_native_config") return undefined as never;
+      return null as never;
+    });
+
+    await recoverLegacyNativeConfig(state);
+
+    expect(writes).toEqual([]);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("clear_recovered_legacy_native_config", {
+      environmentIds: ["default"],
+    });
+  });
+
   it("exposes the aligned state, backup, history, usage, and native integration methods", () => {
     expect(kimiSwitchTauri).toMatchObject({
       loadState: expect.any(Function),

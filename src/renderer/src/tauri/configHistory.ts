@@ -37,7 +37,7 @@ export async function initConfigHistory(): Promise<void> {
 /**
  * 捕获配置快照。
  *
- * @param fileId - 配置文件 ID（'config' | 'profiles' | 'panel' | 'mcp'）
+ * @param fileId - 配置文件 ID（'config' | 'panel' | 'mcp' | 'tui' | 'agents' | 'skills'）
  * @param filePath - 配置文件路径（支持 ~/）
  * @param description - 可选的快照描述
  * @returns 快照 ID，如果去重或失败则返回 null

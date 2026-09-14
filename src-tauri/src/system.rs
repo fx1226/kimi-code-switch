@@ -188,15 +188,6 @@ struct OAuthLoginCommand {
     args: Vec<String>,
 }
 
-fn resolve_home(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-    PathBuf::from(path)
-}
-
 fn executable_path_if_exists(path: PathBuf) -> Option<PathBuf> {
     if path.is_file() {
         Some(path)
@@ -1017,7 +1008,7 @@ pub async fn start_kimi_oauth_login(
 /// 写文件并赋可执行权限（terminal.ts 的 iTerm 启动脚本用）。
 #[tauri::command]
 pub fn write_executable(path: String, content: String) -> Result<(), String> {
-    let resolved = resolve_home(&path);
+    let resolved = crate::fs_access::resolve_home(&path);
 
     // 只允许写入临时脚本目录
     let temp_dir = std::env::temp_dir();
@@ -1060,7 +1051,7 @@ pub struct FileStat {
 /// 文件元信息：供 usage 日志增量摄取检测轮转用。文件不存在返回 None。
 #[tauri::command]
 pub fn file_stat(path: String) -> Result<Option<FileStat>, String> {
-    let resolved = resolve_home(&path);
+    let resolved = crate::fs_access::resolve_home(&path);
     let meta = match std::fs::metadata(&resolved) {
         Ok(m) => m,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1141,7 +1132,7 @@ pub fn resolve_workspace_directory(
 pub fn read_file_slice(path: String, offset: u64, length: u64) -> Result<String, String> {
     const MAX_CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
-    let resolved = resolve_home(&path);
+    let resolved = crate::fs_access::resolve_home(&path);
     let mut file = std::fs::File::open(&resolved).map_err(|e| format!("open: {e}"))?;
     file.seek(SeekFrom::Start(offset))
         .map_err(|e| format!("seek: {e}"))?;
@@ -1457,7 +1448,8 @@ mod tests {
     #[test]
     fn resolve_home_expands_tilde_prefix() {
         let home = dirs::home_dir().expect("home dir required");
-        assert_eq!(resolve_home("~/run.sh"), home.join("run.sh"));
+        assert_eq!(crate::fs_access::resolve_home("~/run.sh"), home.join("run.sh"));
+        assert_eq!(crate::fs_access::resolve_home("~"), home);
     }
 
     #[test]
@@ -1500,7 +1492,7 @@ mod tests {
 
     #[test]
     fn resolve_home_keeps_plain_path() {
-        assert_eq!(resolve_home("/tmp/run.sh"), PathBuf::from("/tmp/run.sh"));
+        assert_eq!(crate::fs_access::resolve_home("/tmp/run.sh"), PathBuf::from("/tmp/run.sh"));
     }
 
     #[test]

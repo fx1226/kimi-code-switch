@@ -22,7 +22,7 @@ kimi-code-switch-gui/
 |   |   |-- usage.rs           # SQLite bridge for usage/config_history/panel_settings
 |   |   |-- panel_settings_store.rs
 |   |   |-- config_history.rs
-|   |   |-- mcp_servers_store.rs
+|   |   |-- legacy_native_config.rs # one-time recovery from retired SQLite mirrors
 |   |   |-- tray.rs
 |   |   `-- shortcuts.rs       # Rust-side global shortcut registration/window toggle
 |   `-- tauri.conf.json
@@ -61,10 +61,10 @@ kimi-code-switch-gui/
 | App shell/state orchestration | `src/renderer/src/App.tsx`, `src/renderer/src/useAppHandlers.tsx` | Central UI state and action composition. |
 | Tab content | `src/renderer/src/tabs/TabPanels.tsx` plus feature files in `src/renderer/src/` | `tabs/` is not a per-feature folder tree. |
 | Config parsing/serialization | `src/shared/configStore.ts` | TOML documents, profiles, panel settings, mutations. |
-| MCP JSON parsing | `src/shared/mcpStore.ts`, `src-tauri/src/mcp_servers_store.rs` | JSON parser plus SQLite-backed MCP store. |
+| MCP JSON parsing | `src/shared/mcpStore.ts` | JSON parser and serializer for the native `mcp.json` file. |
 | Preview redaction/doctor | `src/shared/configSafety.ts` | Secrets must stay masked before preview/report display. |
 | i18n | `src/renderer/src/i18n.ts` | Simple key-value lookup, no external i18n library. |
-| CSS/theme | `src/renderer/src/tokens.css` + `components.css` | Design tokens (colors/radius/shadows/type scale) and `data-theme`; appearance themes use custom tokens. Bundled fonts via `fonts.css` + `assets/fonts/`. |
+| CSS/theme | `src/renderer/src/styles.css` | Layered entry point for tokens, legacy components, primitives, patterns, feature styles, overrides, and shell layout. |
 | Release workflow | `.github/workflows/release.yml` | Builds installers and publishes release on `v*` tags. |
 
 ## Key Symbols

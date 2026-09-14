@@ -69,7 +69,6 @@ function createState(): AppState {
       backup_webdav_password: "",
       backup_webdav_path: "",
       shortcuts: {} as AppState["panelSettings"]["shortcuts"],
-      mcp_servers: {},
     },
     mcpConfig: {
       mcpServers: {},
@@ -99,7 +98,7 @@ describe("historyManager", () => {
         }),
       ]),
     );
-    expect(entry?.details.find((detail) => detail.id === "panel")?.diff).toContain('locale = "en-US"');
+    expect(entry?.details.find((detail) => detail.id === "panel")?.diff).toContain('"locale": "en-US"');
   });
 
   it("restores the selected entry and keeps only older history entries", () => {

@@ -13,6 +13,8 @@
     "preview": "vite preview",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:a11y": "vitest run src/renderer/src/dialogs.test.tsx src/renderer/src/commandPalette.test.tsx src/renderer/src/quickProfileSwitcher.test.tsx src/renderer/src/resourceWorkspace.test.tsx src/renderer/src/tabList.test.tsx src/renderer/src/tabComponents.test.tsx src/renderer/src/insightsComponents.test.tsx",
+    "lint:css": "node scripts/check-css-architecture.mjs",
     "tauri": "tauri",
     "tauri:dev:web": "vite",
     "tauri:build:web": "vite build",
@@ -24,7 +26,6 @@
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-global-shortcut": "^2.3.2",
     "@tauri-apps/plugin-opener": "^2.5.4",

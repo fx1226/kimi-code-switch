@@ -1,8 +1,12 @@
 /* Application geometry. Loaded last; this is the sole shell/layout authority. */
 .shell {
+  --shell-sidebar-expanded-width: clamp(264px, 19vw, 288px);
+  --shell-sidebar-collapsed-width: 72px;
+  --shell-sidebar-inline-padding: 12px;
+  --shell-sidebar-top-offset: 14px;
   position: relative;
   display: grid;
-  grid-template-columns: clamp(264px, 19vw, 288px) minmax(0, 1fr);
+  grid-template-columns: var(--shell-sidebar-expanded-width) minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
   overflow: hidden;
@@ -10,16 +14,15 @@
 }
 
 .shell.sidebar-collapsed {
-  grid-template-columns: 72px minmax(0, 1fr);
+  --shell-sidebar-inline-padding: 4px;
+  grid-template-columns: var(--shell-sidebar-collapsed-width) minmax(0, 1fr);
 }
 
-.sidebar,
-.shell.sidebar-collapsed .sidebar {
-  width: auto;
-}
-
-.shell.sidebar-collapsed .sidebar {
-  padding-inline: 10px;
+.sidebar {
+  width: 100%;
+  box-sizing: border-box;
+  padding-block: calc(var(--titlebar-height) + var(--shell-sidebar-top-offset)) 14px;
+  padding-inline: var(--shell-sidebar-inline-padding);
 }
 
 .main {
@@ -162,21 +165,24 @@
 }
 
 @media (max-width: 1240px) {
-  .shell { grid-template-columns: 240px minmax(0, 1fr); }
-  .shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+  .shell { --shell-sidebar-expanded-width: 240px; }
   .split-layout { grid-template-columns: minmax(280px, 310px) minmax(0, 1fr); }
   .overview-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-resource-grid > :first-child { grid-column: 1 / -1; }
 }
 
 @media (max-width: 1140px) {
-  .shell { grid-template-columns: 224px minmax(0, 1fr); }
-  .shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+  .shell { --shell-sidebar-expanded-width: 224px; }
   .main { padding-inline: var(--space-3); }
   .split-layout { grid-template-columns: minmax(260px, 286px) minmax(0, 1fr); gap: var(--space-3); }
   .overview-context-card { grid-template-columns: minmax(0, 1fr); }
 }
 
+@media (max-width: 1100px) {
+  .split-layout { grid-template-columns: minmax(240px, 270px) minmax(0, 1fr); }
+  .split-layout-reverse { grid-template-columns: minmax(0, 1fr) minmax(240px, 270px); }
+}
+
 @media (pointer: coarse) {
-  .shell.sidebar-collapsed { grid-template-columns: 80px minmax(0, 1fr); }
+  .shell.sidebar-collapsed { --shell-sidebar-collapsed-width: 80px; }
 }

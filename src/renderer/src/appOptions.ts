@@ -10,6 +10,7 @@ import type {
   Locale,
   McpTransport,
   PreviewBundle,
+  ShortcutAction,
   TerminalApp,
   UiFontSize,
 } from "@shared/types";
@@ -20,21 +21,59 @@ import {
 
 export type TabId = "overview" | "profiles" | "providers" | "models" | "mcp" | "skills" | "insights" | "settings" | "about";
 export type PreviewFileId = "config" | "panel" | "mcp";
+export type SettingsSubTab = "general" | "kimi-code" | "shortcuts" | "backup" | "doctor" | "insights" | "history";
+export type KimiCodeSubTab = "instance" | "accounts" | "environment" | "plugins";
 
-export const TAB_ITEMS: Array<{ id: TabId; icon: typeof Layers3; labelKey: string }> = [
-  { id: "overview", icon: Sparkles, labelKey: "overview" },
-  { id: "profiles", icon: Layers3, labelKey: "profiles" },
-  { id: "mcp", icon: Zap, labelKey: "mcp" },
-  { id: "skills", icon: FileText, labelKey: "skillsNav" },
-  { id: "insights", icon: TrendingUp, labelKey: "insights" },
-  { id: "settings", icon: Settings2, labelKey: "settings" },
-  { id: "about", icon: Star, labelKey: "about" },
+export const SETTINGS_SUB_TAB_IDS: SettingsSubTab[] = ["kimi-code", "general", "shortcuts", "backup", "doctor", "insights", "history"];
+export const KIMI_CODE_SUB_TAB_IDS: KimiCodeSubTab[] = ["instance", "accounts", "environment", "plugins"];
+
+export function isSettingsSubTab(value: unknown): value is SettingsSubTab {
+  return typeof value === "string" && SETTINGS_SUB_TAB_IDS.includes(value as SettingsSubTab);
+}
+
+export function isKimiCodeSubTab(value: unknown): value is KimiCodeSubTab {
+  return typeof value === "string" && KIMI_CODE_SUB_TAB_IDS.includes(value as KimiCodeSubTab);
+}
+
+export type NavigationSection = "primary" | "configuration" | "footer";
+
+export interface NavigationItem {
+  id: TabId;
+  icon: typeof Layers3;
+  labelKey: string;
+  section: NavigationSection;
+  shortcutAction?: ShortcutAction;
+}
+
+/** Single source for side navigation, page metadata, shortcut validation, and deep links. */
+export const NAVIGATION_ITEMS: NavigationItem[] = [
+  { id: "overview", icon: Sparkles, labelKey: "overview", section: "primary", shortcutAction: "tab.overview" },
+  { id: "profiles", icon: Layers3, labelKey: "profiles", section: "configuration", shortcutAction: "tab.profiles" },
+  { id: "providers", icon: Globe, labelKey: "providers", section: "configuration", shortcutAction: "tab.providers" },
+  { id: "models", icon: Boxes, labelKey: "models", section: "configuration", shortcutAction: "tab.models" },
+  { id: "mcp", icon: Zap, labelKey: "mcp", section: "primary", shortcutAction: "tab.mcp" },
+  { id: "skills", icon: FileText, labelKey: "skillsNav", section: "primary", shortcutAction: "tab.skills" },
+  { id: "insights", icon: TrendingUp, labelKey: "insights", section: "primary", shortcutAction: "tab.insights" },
+  { id: "settings", icon: Settings2, labelKey: "settings", section: "primary", shortcutAction: "tab.settings" },
+  { id: "about", icon: Star, labelKey: "about", section: "footer" },
 ];
 
-export const ASSISTANT_SUB_ITEMS: Array<{ id: TabId; icon: typeof Layers3; labelKey: string }> = [
-  { id: "providers", icon: Globe, labelKey: "providers" },
-  { id: "models", icon: Boxes, labelKey: "models" },
-];
+export function isTabId(value: unknown): value is TabId {
+  return typeof value === "string" && NAVIGATION_ITEMS.some((item) => item.id === value);
+}
+
+export function getNavigationItem(id: TabId): NavigationItem {
+  return NAVIGATION_ITEMS.find((item) => item.id === id) ?? NAVIGATION_ITEMS[0]!;
+}
+
+export function getTabForShortcut(action: ShortcutAction): TabId | null {
+  return NAVIGATION_ITEMS.find((item) => item.shortcutAction === action)?.id ?? null;
+}
+
+/** @deprecated Use NAVIGATION_ITEMS with its section property. */
+export const TAB_ITEMS = NAVIGATION_ITEMS.filter((item) => item.id !== "providers" && item.id !== "models");
+/** @deprecated Use NAVIGATION_ITEMS with its section property. */
+export const ASSISTANT_SUB_ITEMS = NAVIGATION_ITEMS.filter((item) => item.section === "configuration" && item.id !== "profiles");
 
 export const emptyPreview: PreviewBundle = {
   configDocument: "",

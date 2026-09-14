@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import type { Locale } from "@shared/types";
 import type { CascadeImpact } from "@shared/configRelations";
-import { useDialogEscape, useFocusTrap } from "../dialogs";
+import { DialogShell } from "../dialogs";
 import { t } from "../i18n";
 import { formatMessage } from "../tabComponents";
 
@@ -20,15 +20,16 @@ interface CascadeDeleteDialogProps {
 export function CascadeDeleteDialog(props: CascadeDeleteDialogProps): JSX.Element {
   const { locale, targetType, targetName, impact, onConfirm, onCancel } = props;
   const [strategy, setStrategy] = useState<CascadeStrategy>("cascade");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onCancel);
-  useFocusTrap(dialogRef);
-
   const totalAffected = impact.affectedModels.length + impact.affectedProfiles.length;
 
   return (
-    <div className="dialog-overlay" role="presentation">
-      <div className="dialog cascade-delete-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="cascade-delete-title">
+    <DialogShell
+      backdropClassName="dialog-overlay"
+      dialogClassName="dialog cascade-delete-dialog"
+      ariaLabelledBy="cascade-delete-title"
+      closeOnBackdrop={false}
+      onClose={onCancel}
+    >
         <div className="dialog-header">
           <h3 id="cascade-delete-title">
             <AlertTriangle size={18} />
@@ -99,7 +100,6 @@ export function CascadeDeleteDialog(props: CascadeDeleteDialogProps): JSX.Elemen
             {t(locale, "cascadeConfirmDelete")}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

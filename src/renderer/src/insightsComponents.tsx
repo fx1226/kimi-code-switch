@@ -4,7 +4,7 @@ import type { DisplayCurrency, Locale } from "@shared/types";
 import type { InsightsSettings, TokenUsageTotals, TrendSeries } from "@shared/usageTypes";
 import { CURRENCY_SYMBOLS, convertCost, formatCostWithCurrency, DEFAULT_CURRENCY_RATES, SUPPORTED_CURRENCIES } from "@shared/currency";
 import { shouldShowFirstRunDialog } from "@shared/usageStore";
-import { useDialogEscape, useFocusTrap } from "./dialogs";
+import { DialogShell } from "./dialogs";
 import { t } from "./i18n";
 import { SettingsGroup, SelectField } from "./formControls";
 import { ToastContainer } from "./Toast";
@@ -12,7 +12,7 @@ import { useToast } from "./useToast";
 import { UsageHero } from "./usageHero";
 import { UsageAreaChart } from "./usageAreaChart";
 import { PieChart, type PieDatum } from "./insightsPieChart";
-import "./insights.css";
+import { TabList } from "./tabList";
 
 const UI_PREFS_KEY = "kimi-insights-ui-prefs-v1";
 const CUSTOM_RANGE_MAX_DAYS = 365;
@@ -98,12 +98,14 @@ interface FirstRunDialogProps {
 }
 
 export function FirstRunDialog({ locale, onConfirm, onCancel }: FirstRunDialogProps): JSX.Element {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogEscape(onCancel);
-  useFocusTrap(dialogRef);
   return (
-    <div className="insights-first-run-backdrop">
-      <div ref={dialogRef} className="glass-panel insights-first-run-dialog" role="dialog" aria-modal="true" aria-labelledby="insights-first-run-title">
+    <DialogShell
+      backdropClassName="insights-first-run-backdrop"
+      dialogClassName="glass-panel insights-first-run-dialog"
+      ariaLabelledBy="insights-first-run-title"
+      closeOnBackdrop={false}
+      onClose={onCancel}
+    >
         <div className="insights-first-run-header">
           <div className="insights-first-run-icon">
             <TrendingUp size={24} />
@@ -126,15 +128,14 @@ export function FirstRunDialog({ locale, onConfirm, onCancel }: FirstRunDialogPr
           ))}
         </div>
         <div className="insights-first-run-actions">
-          <button onClick={onCancel} className="insights-button-secondary">
+          <button type="button" onClick={onCancel} className="action-button secondary">
             {t(locale, "insightsFirstRunCancel")}
           </button>
-          <button onClick={onConfirm} className="insights-button-primary">
+          <button type="button" onClick={onConfirm} className="action-button action-button-primary">
             {t(locale, "insightsFirstRunConfirm")}
           </button>
         </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 
@@ -315,13 +316,13 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
               </div>
               <div className="insights-buttons-group">
                 {!isEnabled && (
-                  <button onClick={handleEnable} disabled={loading} className="insights-button-primary">
+                  <button type="button" onClick={handleEnable} disabled={loading} className="action-button action-button-primary">
                     <Power size={16} />
                     {t(locale, "insightsEnable")}
                   </button>
                 )}
                 {isEnabled && (
-                  <button onClick={handleDisable} disabled={loading} className="insights-button-danger">
+                  <button type="button" onClick={handleDisable} disabled={loading} className="action-button danger">
                     <Power size={16} />
                     {t(locale, "insightsDisable")}
                   </button>
@@ -503,12 +504,12 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
 
         {/* 数据管理 */}
         <SettingsGroup title={t(locale, "insightsDataManageGroup")}>
-          <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="insights-data-manage-row">
             <div>
-              <div style={{ fontWeight: 500, marginBottom: "4px" }}>{t(locale, "insightsResetDataTitle")}</div>
-              <div style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>{t(locale, "insightsResetDataDesc")}</div>
+              <div className="insights-data-manage-title">{t(locale, "insightsResetDataTitle")}</div>
+              <div className="insights-data-manage-description">{t(locale, "insightsResetDataDesc")}</div>
             </div>
-            <button onClick={() => setShowResetDialog(true)} disabled={loading} className="insights-button-danger">
+            <button type="button" onClick={() => setShowResetDialog(true)} disabled={loading} className="action-button danger">
               <AlertCircle size={14} />
               {t(locale, "insightsResetDataButton")}
             </button>
@@ -518,49 +519,55 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
 
       {/* 确认清除对话框 */}
       {showResetDialog && (
-        <div className="dialog-overlay" onClick={() => setShowResetDialog(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+        <DialogShell
+          backdropClassName="dialog-overlay"
+          dialogClassName="dialog insights-reset-dialog"
+          ariaLabelledBy="insights-reset-dialog-title"
+          closeOnBackdrop={false}
+          onClose={() => setShowResetDialog(false)}
+        >
             <div className="dialog-header">
-              <h3>
+              <h3 id="insights-reset-dialog-title">
                 <AlertCircle size={20} />
                 {t(locale, "insightsResetDialogTitle")}
               </h3>
             </div>
             <div className="dialog-body">
-              <p style={{ color: "var(--text)", marginBottom: "12px" }}>
+              <p className="insights-reset-intro">
                 {t(locale, "insightsResetDialogIntro")}<strong>{t(locale, "insightsResetDialogIrreversible")}</strong>：
               </p>
-              <ul style={{ color: "var(--muted)", fontSize: "0.875rem", lineHeight: "1.6", paddingLeft: "20px" }}>
+              <ul className="insights-reset-list">
                 <li>{t(locale, "insightsResetDialogItem1")}</li>
                 <li>{t(locale, "insightsResetDialogItem2")}</li>
                 <li>{t(locale, "insightsResetDialogItem3")}</li>
               </ul>
-              <p style={{ color: "var(--muted)", fontSize: "0.875rem", marginTop: "12px" }}>
+              <p className="insights-reset-note">
                 {t(locale, "insightsResetDialogRebuild")}
               </p>
-              <p style={{ color: "var(--danger)", fontSize: "0.875rem", marginTop: "12px", fontWeight: 500 }}>
+              <p className="insights-reset-warning">
                 {t(locale, "insightsResetDialogKeepLogs")}
               </p>
             </div>
             <div className="dialog-footer">
               <button
+                type="button"
                 onClick={() => setShowResetDialog(false)}
                 disabled={loading}
-                className="insights-button-secondary"
+                className="action-button secondary"
               >
                 {t(locale, "insightsResetDialogCancel")}
               </button>
               <button
+                type="button"
                 onClick={handleResetData}
                 disabled={loading}
-                className="insights-button-danger"
+                className="action-button danger"
               >
                 <AlertCircle size={14} />
                 {t(locale, "insightsResetDialogConfirm")}
               </button>
             </div>
-          </div>
-        </div>
+        </DialogShell>
       )}
     </>
   );
@@ -778,7 +785,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
     return <div className="insights-dashboard-empty" role="status"><LoaderCircle size={32} className="button-spinner" /><h2 className="insights-empty-title">{t(locale, "loading")}</h2></div>;
   }
   if (statusError) {
-    return <div className="insights-dashboard-empty" role="alert"><AlertCircle size={40} /><h2 className="insights-empty-title">{t(locale, "insightsToastLoadError")}</h2><p className="insights-empty-description">{statusError}</p><button type="button" className="insights-button-primary" onClick={() => void loadStatus()}>{t(locale, "reload")}</button></div>;
+    return <div className="insights-dashboard-empty" role="alert"><AlertCircle size={40} /><h2 className="insights-empty-title">{t(locale, "insightsToastLoadError")}</h2><p className="insights-empty-description">{statusError}</p><button type="button" className="action-button action-button-primary" onClick={() => void loadStatus()}>{t(locale, "reload")}</button></div>;
   }
   if (!isEnabled) {
     return (
@@ -790,7 +797,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
           <br />{t(locale, "insightsDashboardDisabledHint")}
         </p>
         {onOpenSettings ? (
-          <button onClick={onOpenSettings} className="insights-button-primary" style={{ marginTop: "16px" }}>
+          <button type="button" onClick={onOpenSettings} className="action-button action-button-primary insights-empty-action">
             {t(locale, "insightsDashboardOpenSettings")}
           </button>
         ) : null}
@@ -822,25 +829,34 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
           <h2>{t(locale, "insights")}</h2>
         </div>
         <div className="insights-dashboard-actions">
-          <button onClick={() => void loadData({ ingestLatest: true, showRefreshState: true })} className="insights-button-secondary" disabled={loading}>
+          <button type="button" onClick={() => void loadData({ ingestLatest: true, showRefreshState: true })} className="action-button secondary" disabled={loading}>
             <Activity size={14} />
             {loading ? t(locale, "insightsRefreshLoading") : t(locale, "insightsRefresh")}
           </button>
         </div>
       </div>
 
-      <div className="insights-tabs-nav">
-        {([["overview", "insightsOverview"], ["breakdown", "insightsBreakdown"], ["sessions", "insightsSessions"]] as const).map(([tab, key]) => (
-          <button key={tab} disabled={loading} onClick={() => setActiveTab(tab)} className={`insights-tab-button ${activeTab === tab ? "active" : ""}`}>
-            {tab === "overview" && <Activity size={16} />}
-            {tab === "breakdown" && <Database size={16} />}
-            {tab === "sessions" && <Zap size={16} />}
-            {t(locale, key)}
-          </button>
-        ))}
-      </div>
+      <TabList
+        label={t(locale, "insights")}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        className="insights-tabs-nav"
+        tabClassName="insights-tab-button"
+        panelIdPrefix="insights-main"
+        items={[
+          { id: "overview", label: t(locale, "insightsOverview"), icon: <Activity size={16} />, disabled: loading },
+          { id: "breakdown", label: t(locale, "insightsBreakdown"), icon: <Database size={16} />, disabled: loading },
+          { id: "sessions", label: t(locale, "insightsSessions"), icon: <Zap size={16} />, disabled: loading },
+        ]}
+      />
 
-      <div className="insights-dashboard-content">
+      <div
+        className="insights-dashboard-content"
+        id={`insights-main-panel-${activeTab}`}
+        role="tabpanel"
+        aria-labelledby={`insights-main-tab-${activeTab}`}
+        tabIndex={0}
+      >
         {activeTab === "overview" && (
           <div className="insights-overview">
             {overview && tokenTotals ? (
@@ -977,7 +993,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
                           setCustomEditorOpen(false);
                           customRangeButtonRef.current?.focus();
                         }}
-                        className="insights-button-primary"
+                        className="action-button action-button-primary"
                       >
                         {t(locale, "insightsTimeRangeApply")}
                       </button>
@@ -990,7 +1006,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
                           setCustomEditorOpen(false);
                           customRangeButtonRef.current?.focus();
                         }}
-                        className="insights-button-secondary"
+                        className="action-button secondary"
                       >
                         {t(locale, "cancel")}
                       </button>
@@ -1024,6 +1040,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
             <p className="insights-tab-desc">{t(locale, "insightsBreakdownDesc")}</p>
             <div className="insights-breakdown-dual">
               <BreakdownCard
+                idPrefix="insights-breakdown-model"
                 title={t(locale, "insightsBreakdownByModel")}
                 data={breakdownDataModel}
                 view={breakdownModelView}
@@ -1034,6 +1051,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
                 currencyRates={currencyRates}
               />
               <BreakdownCard
+                idPrefix="insights-breakdown-profile"
                 title={t(locale, "insightsBreakdownByProfile")}
                 data={breakdownDataProfile}
                 view={breakdownProfileView}
@@ -1123,6 +1141,7 @@ export function InsightsDashboard({ locale, onStateChange, onOpenSettings }: Ins
 }
 
 interface BreakdownCardProps {
+  idPrefix: string;
   title: string;
   data: Array<{ name: string; calls: number; tokens: number; avgLatency: number }>;
   view: BreakdownView;
@@ -1133,7 +1152,7 @@ interface BreakdownCardProps {
   currencyRates?: Partial<Record<DisplayCurrency, number>>;
 }
 
-function BreakdownCard({ title, data, view, onViewChange, locale, costByName, currency = "USD", currencyRates }: BreakdownCardProps): JSX.Element {
+function BreakdownCard({ idPrefix, title, data, view, onViewChange, locale, costByName, currency = "USD", currencyRates }: BreakdownCardProps): JSX.Element {
   const pieData: PieDatum[] = data.map((r) => ({ name: r.name || t(locale, "insightsUnknownName"), value: r.tokens }));
   const showCost = costByName !== undefined;
 
@@ -1141,31 +1160,20 @@ function BreakdownCard({ title, data, view, onViewChange, locale, costByName, cu
     <div className="insights-breakdown-card">
       <div className="insights-breakdown-card-header">
         <h4 className="insights-breakdown-card-title">{title}</h4>
-        <div className="insights-chart-type-toggle" role="tablist" aria-label={t(locale, "insightsViewToggleLabel")}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "table"}
-            className={`insights-chart-type-btn ${view === "table" ? "active" : ""}`}
-            onClick={() => onViewChange("table")}
-            title={t(locale, "insightsViewTable")}
-          >
-            <TableIcon size={14} />
-            <span>{t(locale, "insightsViewTable")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "pie"}
-            className={`insights-chart-type-btn ${view === "pie" ? "active" : ""}`}
-            onClick={() => onViewChange("pie")}
-            title={t(locale, "insightsViewPie")}
-          >
-            <PieIcon size={14} />
-            <span>{t(locale, "insightsViewPie")}</span>
-          </button>
-        </div>
+        <TabList
+          label={`${title} ${t(locale, "insightsViewToggleLabel")}`}
+          activeId={view}
+          onChange={onViewChange}
+          className="insights-chart-type-toggle"
+          tabClassName="insights-chart-type-btn"
+          panelIdPrefix={idPrefix}
+          items={[
+            { id: "table", label: t(locale, "insightsViewTable"), icon: <TableIcon size={14} /> },
+            { id: "pie", label: t(locale, "insightsViewPie"), icon: <PieIcon size={14} /> },
+          ]}
+        />
       </div>
+      <div id={`${idPrefix}-panel-${view}`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-${view}`} tabIndex={0}>
       {data.length === 0 ? (
         <div className="insights-coming-soon">
           <Database size={36} />
@@ -1202,6 +1210,7 @@ function BreakdownCard({ title, data, view, onViewChange, locale, costByName, cu
       ) : (
         <PieChart data={pieData} locale={locale} unitLabel="tokens" />
       )}
+      </div>
     </div>
   );
 }

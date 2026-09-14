@@ -1,13 +1,49 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ConfirmDialog, useFocusTrap } from "./dialogs";
+import { ConfirmDialog, DialogShell, useFocusTrap } from "./dialogs";
 
 function InlineDialog(): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   useFocusTrap(ref);
   return <><button type="button">Background</button><div ref={ref} role="dialog"><button type="button">Inside</button></div></>;
+}
+
+function DialogShellHarness(): JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setIsOpen(true)}>Open dialog</button>
+      {isOpen ? (
+        <DialogShell
+          backdropClassName="test-backdrop"
+          dialogClassName="test-dialog"
+          ariaLabelledBy="test-dialog-title"
+          onClose={() => setIsOpen(false)}
+        >
+          <h2 id="test-dialog-title">Dialog title</h2>
+          <button type="button" data-dialog-initial-focus>Keep editing</button>
+          <button type="button">Close later</button>
+        </DialogShell>
+      ) : null}
+    </>
+  );
+}
+
+function NestedDialogHarness(): JSX.Element {
+  const [outerOpen, setOuterOpen] = useState(true);
+  const [innerOpen, setInnerOpen] = useState(false);
+  return outerOpen ? (
+    <DialogShell backdropClassName="test-backdrop" dialogClassName="test-dialog" ariaLabel="Outer dialog" onClose={() => setOuterOpen(false)}>
+      <button type="button" onClick={() => setInnerOpen(true)}>Open nested dialog</button>
+      {innerOpen ? (
+        <DialogShell backdropClassName="test-backdrop" dialogClassName="test-dialog" ariaLabel="Inner dialog" onClose={() => setInnerOpen(false)}>
+          <button type="button" data-dialog-initial-focus>Dismiss nested dialog</button>
+        </DialogShell>
+      ) : null}
+    </DialogShell>
+  ) : null;
 }
 
 describe("dialog accessibility", () => {
@@ -25,5 +61,31 @@ describe("dialog accessibility", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("closes a dialog shell with Escape and restores focus to its trigger", async () => {
+    const { getByRole, queryByRole } = render(<DialogShellHarness />);
+    const trigger = getByRole("button", { name: "Open dialog" });
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = getByRole("dialog", { name: "Dialog title" });
+    await waitFor(() => expect(document.activeElement).toBe(getByRole("button", { name: "Keep editing" })));
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes only the topmost dialog when dialogs are nested", async () => {
+    const { getByRole, queryByRole } = render(<NestedDialogHarness />);
+    fireEvent.click(getByRole("button", { name: "Open nested dialog" }));
+    expect(getByRole("dialog", { name: "Inner dialog" })).toBeDefined();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(queryByRole("dialog", { name: "Inner dialog" })).toBeNull());
+    expect(getByRole("dialog", { name: "Outer dialog" })).toBeDefined();
   });
 });

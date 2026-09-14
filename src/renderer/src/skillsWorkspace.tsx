@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { Code2, Eye, LayoutGrid, List, X } from "lucide-react";
 
 import type { SkillEntry, SkillsScanReport } from "@shared/skillsStore";
@@ -8,6 +7,7 @@ import type { Locale } from "@shared/types";
 import { CodePanel } from "./codePanel";
 import { MarkdownView } from "./markdownView";
 import { t } from "./i18n";
+import { DialogShell } from "./dialogs";
 
 export type SkillsViewMode = "grid" | "list";
 
@@ -23,11 +23,7 @@ export function SkillsWorkspace(props: {
   isLoading: boolean;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
-  const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
-  const [dynamicPageSize, setDynamicPageSize] = useState(9);
-  const overviewPanelRef = useRef<HTMLElement | null>(null);
-  const skillsListRef = useRef<HTMLDivElement | null>(null);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredSkills = normalizedQuery
@@ -37,120 +33,6 @@ export function SkillsWorkspace(props: {
         return name.includes(normalizedQuery) || description.includes(normalizedQuery);
       })
     : props.visibleSkills;
-
-  const pageSize = dynamicPageSize;
-  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / pageSize));
-  const pagedSkills = filteredSkills.slice((page - 1) * pageSize, page * pageSize);
-  const gridStyle =
-    props.viewMode === "grid" && pagedSkills.length > 0 && pagedSkills.length < 4
-      ? {
-          gridTemplateColumns: `repeat(${pagedSkills.length}, 240px)`,
-          justifyContent: "start" as const,
-        }
-      : undefined;
-
-  useEffect(() => {
-    setPage(1);
-  }, [props.selectedPath?.id, props.viewMode, searchQuery]);
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
-
-  useEffect(() => {
-    const updateDynamicPageSize = (): void => {
-      const panelElement = overviewPanelRef.current;
-      const listElement = skillsListRef.current;
-      if (!panelElement || !listElement) {
-        return;
-      }
-
-      const panelRect = panelElement.getBoundingClientRect();
-      const listRect = listElement.getBoundingClientRect();
-      const panelStyles = window.getComputedStyle(panelElement);
-      const listStyles = window.getComputedStyle(listElement);
-      const panelPaddingBottom = Number.parseFloat(panelStyles.paddingBottom || "0");
-      const availableHeight = Math.max(
-        0,
-        panelRect.bottom - listRect.top - panelPaddingBottom,
-      );
-      let nextPageSize = 1;
-
-      if (props.viewMode === "list") {
-        const rowGap = Number.parseFloat(listStyles.rowGap || listStyles.gap || "0");
-        const sampleRow = listElement.querySelector<HTMLElement>(".skills-read-row");
-        const rowHeight = sampleRow?.getBoundingClientRect().height ?? 134;
-
-        nextPageSize = Math.max(
-          1,
-          Math.floor((availableHeight + rowGap) / (rowHeight + rowGap)),
-        );
-
-        while (
-          nextPageSize > 1 &&
-          nextPageSize * rowHeight + (nextPageSize - 1) * rowGap > availableHeight + 0.5
-        ) {
-          nextPageSize -= 1;
-        }
-      } else {
-        const columnGap = Number.parseFloat(listStyles.columnGap || listStyles.gap || "0");
-        const rowGap = Number.parseFloat(listStyles.rowGap || listStyles.gap || "0");
-        const sampleCard = listElement.querySelector<HTMLElement>(".skills-read-card");
-        const cardHeight = sampleCard?.getBoundingClientRect().height ?? 188;
-        const cardWidth = sampleCard?.getBoundingClientRect().width ?? 240;
-        const availableWidth = Math.max(0, listRect.width);
-
-        let columns = Math.max(
-          1,
-          Math.floor((availableWidth + columnGap) / (cardWidth + columnGap)),
-        );
-
-        while (
-          columns > 1 &&
-          columns * cardWidth + (columns - 1) * columnGap > availableWidth + 0.5
-        ) {
-          columns -= 1;
-        }
-
-        let rows = Math.max(
-          1,
-          Math.floor((availableHeight + rowGap) / (cardHeight + rowGap)),
-        );
-
-        while (
-          rows > 1 &&
-          rows * cardHeight + (rows - 1) * rowGap > availableHeight + 0.5
-        ) {
-          rows -= 1;
-        }
-
-        nextPageSize = Math.max(1, rows * columns);
-      }
-
-      setDynamicPageSize((current) => (current === nextPageSize ? current : nextPageSize));
-    };
-
-    updateDynamicPageSize();
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateDynamicPageSize();
-    });
-
-    if (overviewPanelRef.current) {
-      resizeObserver.observe(overviewPanelRef.current);
-    }
-    if (skillsListRef.current) {
-      resizeObserver.observe(skillsListRef.current);
-    }
-
-    window.addEventListener("resize", updateDynamicPageSize);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", updateDynamicPageSize);
-    };
-  }, [props.viewMode, filteredSkills.length, page]);
 
   const handleCopy = (): void => {
     if (!props.selectedSkill) {
@@ -182,7 +64,7 @@ export function SkillsWorkspace(props: {
 
   return (
     <section className="skills-workspace">
-      <section className="glass-panel form-panel skills-overview-panel" ref={overviewPanelRef}>
+      <section className="glass-panel form-panel skills-overview-panel">
         <div className="skills-detail-header">
           <div className="skills-header-main">
             <div className="section-title">{t(props.locale, "skills")}</div>
@@ -229,43 +111,13 @@ export function SkillsWorkspace(props: {
         ) : null}
 
         {filteredSkills.length ? (
-          <>
-            <div className="skills-pagination">
-              <span className="skills-pagination-info">
-                {formatMessage(t(props.locale, "skillsPagination"), {
-                  current: page,
-                  total: totalPages,
-                  count: filteredSkills.length,
-                })}
-              </span>
-              <div className="skills-pagination-actions">
-                <button
-                  className="action-button compact"
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                >
-                  {t(props.locale, "previousPage")}
-                </button>
-                <button
-                  className="action-button compact"
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                >
-                  {t(props.locale, "nextPage")}
-                </button>
-              </div>
-            </div>
             <div
               className={props.viewMode === "grid" ? "skills-read-grid" : "skills-read-list"}
               role="list"
-              style={gridStyle}
-              ref={skillsListRef}
             >
-              {pagedSkills.map((skill) => (
-                <button
-                  key={skill.id}
+              {filteredSkills.map((skill) => (
+                <div key={skill.id} role="listitem" className="skills-read-list-item">
+                  <button
                   className={[
                     props.viewMode === "grid" ? "skills-read-card" : "skills-read-row",
                     skill.id === props.selectedSkill?.id ? "active" : "",
@@ -291,9 +143,9 @@ export function SkillsWorkspace(props: {
                     </div>
                   ) : null}
                 </button>
+                </div>
               ))}
             </div>
-          </>
         ) : props.visibleSkills.length ? (
           <div className="skills-empty-issues">{t(props.locale, "skillsEmptySearch")}</div>
         ) : (
@@ -320,7 +172,6 @@ function SkillsDetailDialog(props: {
   onCopy: () => void;
   onClose: () => void;
 }): JSX.Element {
-  useDialogEscape(props.onClose);
   const [viewSource, setViewSource] = useState(false);
   const detailItems = [
     { label: t(props.locale, "skillsSource"), value: props.skill.sourceLabel },
@@ -345,17 +196,13 @@ function SkillsDetailDialog(props: {
       : []),
   ];
 
-  return createPortal(
-    <div
-      className="skills-detail-dialog-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="skills-detail-dialog-backdrop"
+      dialogClassName="skills-detail-dialog glass-panel"
+      ariaLabelledBy="skills-detail-dialog-title"
+      onClose={props.onClose}
     >
-      <section className="skills-detail-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="skills-detail-dialog-title">
         <div className="skills-detail-dialog-header">
           <div className="skills-detail-dialog-copy">
             <div className="skills-detail-dialog-title-row">
@@ -422,27 +269,8 @@ function SkillsDetailDialog(props: {
             />
           );
         })()}
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
-}
-
-function useDialogEscape(onClose: () => void): void {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-}
-
-function formatMessage(template: string, values: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ""));
 }
 
 function formatSkillAssets(locale: Locale, skill: SkillEntry): string {

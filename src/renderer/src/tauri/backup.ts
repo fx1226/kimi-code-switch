@@ -134,10 +134,10 @@ async function buildMetadata(state: AppState, backupName: string, trigger: strin
 }
 
 // ── 创建备份 ──
-async function reconcileBackupPath(backupRoot: string): Promise<void> {
-  // B1：把当前备份目录重登记为 durable grant，覆盖"用户改备份路径后立即备份"的场景。
+async function reconcileBackupPath(): Promise<void> {
+  // B1：Rust 只使用已保存的 backup_local_path 重登记 durable grant。
   try {
-    await invoke("reconcile_durable_grants", { paths: [backupRoot] });
+    await invoke("reconcile_durable_grants");
   } catch (error) {
     // 授权登记失败不应静默：返回给调用方会导致备份建目录失败，这里显式抛错。
     throw new Error(`Cannot authorize backup directory: ${error instanceof Error ? error.message : String(error)}`);
@@ -147,7 +147,7 @@ async function reconcileBackupPath(backupRoot: string): Promise<void> {
 async function createLocalBackup(state: AppState, backupName: string, trigger: string): Promise<BackupResult> {
   const s = normalizeStatePaths(state);
   const backupRoot = s.panelSettings.backup_local_path;
-  await reconcileBackupPath(backupRoot);
+  await reconcileBackupPath();
   const dir = `${backupRoot}/${backupName}`;
   const files = await buildBackupFiles(s);
   await invoke("ensure_private_dir", { path: dir });

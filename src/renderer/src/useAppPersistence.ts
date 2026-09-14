@@ -17,17 +17,9 @@ import type { PendingSave } from "./saveCoordinator";
 
 /** B1：把已持久化的用户偏好目录重登记为 Rust 侧 durable grant（跨重启可用）。 */
 function reconcileUserDirectories(
-  normalized: AppState,
   api: NonNullable<ReturnType<typeof getApi>>,
 ): Promise<void> {
-  const directories = new Set<string>();
-  const backupPath = normalized.panelSettings.backup_local_path?.trim();
-  if (backupPath) directories.add(backupPath);
-  for (const environment of normalized.panelSettings.kimi_code_environments ?? []) {
-    const home = environment.homePath?.trim();
-    if (home) directories.add(home);
-  }
-  return api.reconcileDurableGrants?.([...directories]) ?? Promise.resolve();
+  return api.reconcileDurableGrants?.() ?? Promise.resolve();
 }
 
 interface AppPersistenceContext {
@@ -167,12 +159,12 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     const api = getApi();
     if (!api) {
       setState(createFallbackState());
-      setError("Electron preload API is unavailable. Check the preload script and packaged entry paths.");
+      setError("Tauri runtime API is unavailable. Check the packaged application entry paths.");
       setDiagnostics({
         preload: "unavailable",
         loadState: "failed",
         previewState: "unavailable",
-        lastError: "Electron preload API is unavailable.",
+        lastError: "Tauri runtime API is unavailable.",
       });
       return;
     }
@@ -229,7 +221,7 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
       // B1：把已持久化的用户偏好目录（备份目录、注册环境 home、项目根）重登记为
       // Rust 侧 durable grant，确保非受管根的备份/项目写入在重启后仍可用。
       if (api.reconcileDurableGrants) {
-        void reconcileUserDirectories(normalized, api);
+        void reconcileUserDirectories(api);
       }
       runPostLoadTasks(normalized, api);
       recordStartupTiming("useAppPersistence.loadState.total", loadStartedAt);
@@ -267,7 +259,7 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
   const persistState = useCallback(async (nextState: AppState): Promise<boolean> => {
     const api = getApi();
     if (!api) {
-      const message = "Electron preload API is unavailable. Save operation cannot continue.";
+      const message = "Tauri runtime API is unavailable. Save operation cannot continue.";
       setError(message);
       setDiagnostics((current) => ({ ...current, preload: "unavailable", lastError: message }));
       return false;
@@ -375,15 +367,22 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
   ): Promise<void> => {
     const api = getApi();
     if (!api) {
-      const message = "Electron preload API is unavailable. Save operation cannot continue.";
+      const message = "Tauri runtime API is unavailable. Save operation cannot continue.";
       setError(message);
       setDiagnostics((current) => ({ ...current, preload: "unavailable", lastError: message }));
       return;
     }
 
     const previousSavedState = savedState;
+    const normalizedPreviousSavedState = previousSavedState
+      ? normalizeStatePaths(previousSavedState)
+      : null;
     const normalizedVisibleState = normalizeStatePaths(nextVisibleState);
     const normalizedSavedState = normalizeStatePaths(nextSavedStateOverride ?? nextVisibleState);
+    const panelOnlyUpdate = Boolean(normalizedPreviousSavedState) && isEqualValue(
+      { ...normalizedPreviousSavedState!, panelSettings: normalizedSavedState.panelSettings },
+      normalizedSavedState,
+    );
 
     setState(normalizedVisibleState);
     setSavedState(normalizedSavedState);
@@ -395,6 +394,29 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
     setNotice("");
 
     try {
+      // Navigation, appearance, shortcuts, and backup preferences are GUI
+      // state. Persist them directly to app.db instead of rewriting native
+      // config.toml/mcp.json and unnecessarily invoking file-conflict checks.
+      if (panelOnlyUpdate && api.usageSetConfig) {
+        const result = await api.usageSetConfig(normalizedSavedState.panelSettings);
+        if (!result.ok) throw new Error("Failed to save GUI settings.");
+        if (api.captureSnapshot) {
+          setFileSnapshot(await api.captureSnapshot(normalizedSavedState));
+        }
+        if (previousSavedState?.panelSettings.tray_icon !== normalizedSavedState.panelSettings.tray_icon) {
+          await api.setTray(normalizedSavedState.panelSettings.tray_icon);
+        }
+        if (
+          previousSavedState?.panelSettings.locale !== normalizedSavedState.panelSettings.locale ||
+          previousSavedState?.panelSettings.theme !== normalizedSavedState.panelSettings.theme
+        ) {
+          await api.refreshTrayMenu?.();
+        }
+        const nextPreview = await api.previewState(normalizedVisibleState);
+        setPreview(nextPreview);
+        void refreshSkills(normalizedVisibleState, { silent: true });
+        return;
+      }
       const expectedSnapshot = fileSnapshotRef?.current ?? fileSnapshot ?? undefined;
       const saveResult = api.saveStateSafe
         ? await api.saveStateSafe(normalizedSavedState, { expectedSnapshot })

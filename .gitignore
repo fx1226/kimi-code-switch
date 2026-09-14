@@ -27,9 +27,5 @@ src-tauri/gen
 src/.workflow/spec-analytics.jsonl
 src/.workflow/wiki-index.json
 
-# Workflow runtime files in src/
-src/.workflow/spec-analytics.jsonl
-src/.workflow/wiki-index.json
-
 # 本地调试/演示文件（kimi-hook 遥测管道调试，不入库）
 demo/

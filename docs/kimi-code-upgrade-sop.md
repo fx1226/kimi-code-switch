@@ -14,7 +14,7 @@
 3. **更新 manifest/fixtures**：
    - 在 `tests/fixtures/kimi-code/<version>/` 新建受审计 fixture（config.toml / mcp.json / tui.toml / skills / plugins 等）。
    - 更新 `contract-manifest.json`：`release_tag`、`release_commit`（不可变 commit URL）、`release_date`、官方源文件列表。
-   - 保持 matplotlib：fixture 只能来自固定 commit，绝不来自 `main`。
+   - 保持可追溯性：fixture 只能来自固定 commit，绝不来自 `main`。
 4. **运行差分**：执行 `npx vitest run src/shared/kimiCodeContract.test.ts` 与相关契约测试，对比 GUI 生产解析器/序列化器与官方 fixture 的一致性，记录差异。
 5. **更新本计划**：将 `plan_kimi_code_alignment_remaining.md` 第 1.1 节基线与各 Batch 的完成证据更新为新版本结论。
 6. **实施**：按差异改造 structured management / parser / serializer / UI，逐项带测试。

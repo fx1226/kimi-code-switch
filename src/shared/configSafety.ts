@@ -1,6 +1,6 @@
 import {
   buildConfigDocument,
-  buildPanelSettingsDocument,
+  buildPanelSettingsSnapshot,
   createLineDiff,
   extractSecondaryModel,
   normalizeStatePaths,
@@ -31,7 +31,7 @@ export function buildManagedDocuments(state: AppState): Record<ManagedFileId, st
   const normalizedState = normalizeStatePaths(state);
   return {
     config: buildConfigDocument(normalizedState),
-    panel: buildPanelSettingsDocument(normalizedState.panelSettings),
+    panel: buildPanelSettingsSnapshot(normalizedState.panelSettings),
     mcp: buildMcpConfigDocument(normalizedState.mcpConfig),
   };
 }
@@ -557,7 +557,7 @@ function labelManagedFile(id: ManagedFileId): string {
     return "Config";
   }
   if (id === "panel") {
-    return "Panel settings";
+    return "GUI settings (app.db)";
   }
   return "MCP";
 }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import type { AppState, Locale, Profile } from "@shared/types";
 
 import { t } from "./i18n";
+import { DialogShell } from "./dialogs";
 
 interface QuickProfileSwitcherProps {
   state: AppState;
@@ -23,17 +23,21 @@ export function QuickProfileSwitcher({ state, locale, onActivate, onClose }: Qui
 
   useEffect(() => {
     const item = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-    item?.scrollIntoView({ block: "nearest" });
+    if (typeof item?.scrollIntoView === "function") {
+      item.scrollIntoView({ block: "nearest" });
+    }
   }, [selectedIndex]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent): void => {
       switch (event.key) {
         case "ArrowDown":
+          if (entries.length === 0) return;
           event.preventDefault();
           setSelectedIndex((i) => Math.min(i + 1, entries.length - 1));
           break;
         case "ArrowUp":
+          if (entries.length === 0) return;
           event.preventDefault();
           setSelectedIndex((i) => Math.max(i - 1, 0));
           break;
@@ -41,31 +45,34 @@ export function QuickProfileSwitcher({ state, locale, onActivate, onClose }: Qui
           event.preventDefault();
           if (entries[selectedIndex]) onActivate(entries[selectedIndex][0]);
           break;
-        case "Escape":
-          event.preventDefault();
-          onClose();
-          break;
       }
     },
     [entries, selectedIndex, onActivate, onClose],
   );
 
-  return createPortal(
-    <div className="command-palette-backdrop" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="command-palette" role="dialog" aria-modal="true" aria-label={t(locale, "quickSwitchTitle")} onKeyDown={handleKeyDown} tabIndex={-1} ref={(el) => el?.focus()}>
+  return (
+    <DialogShell
+      backdropClassName="command-palette-backdrop"
+      dialogClassName="command-palette"
+      ariaLabel={t(locale, "quickSwitchTitle")}
+      onClose={onClose}
+      onKeyDown={handleKeyDown}
+    >
         <div className="command-palette-input-row">
-          <span className="command-palette-title">{t(locale, "quickSwitchTitle")}</span>
+          <h2 className="command-palette-title">{t(locale, "quickSwitchTitle")}</h2>
           <button type="button" className="command-palette-close" onClick={onClose} aria-label={t(locale, "close")}>
             <X size={14} />
           </button>
         </div>
-        <div className="command-palette-results" ref={listRef} role="listbox">
+        <div className="command-palette-results" ref={listRef} role="listbox" aria-activedescendant={entries[selectedIndex] ? `quick-profile-option-${selectedIndex}` : undefined}>
           {entries.map(([name, profile], index) => (
             <button
               key={name}
+              id={`quick-profile-option-${index}`}
               type="button"
               role="option"
               aria-selected={index === selectedIndex}
+              data-dialog-initial-focus={index === selectedIndex ? "true" : undefined}
               className={index === selectedIndex ? "command-palette-item selected" : "command-palette-item"}
               onClick={() => onActivate(name)}
             >
@@ -74,9 +81,7 @@ export function QuickProfileSwitcher({ state, locale, onActivate, onClose }: Qui
             </button>
           ))}
         </div>
-      </div>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 

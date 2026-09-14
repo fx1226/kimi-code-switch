@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   Boxes, Check, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileText, FolderOpen, LoaderCircle,
   MoonStar, PenSquare, Play, RefreshCw, Sparkles, Wrench, X,
@@ -23,7 +22,7 @@ import {
   labelForLocale, MODEL_CAPABILITY_OPTIONS, PERMISSION_MODE_OPTIONS,
   PROVIDER_TYPE_OPTIONS, THINKING_EFFORT_OPTIONS,
 } from "./appOptions";
-import { useDialogEscape, useFocusTrap } from "./dialogs";
+import { DialogShell } from "./dialogs";
 import { parseEndpointUrl } from "./endpointUtils";
 import { t, translateError } from "./i18n";
 import {
@@ -598,7 +597,7 @@ function McpToolWorkbench(props: {
   );
 }
 
-function McpTransportRadioGroup(props: {
+export function McpTransportRadioGroup(props: {
   locale: Locale;
   value: McpTransport;
   readOnly: boolean;
@@ -617,14 +616,39 @@ function McpTransportRadioGroup(props: {
       description: t(props.locale, "mcpTransportHttpDescription"),
     },
   ];
+  const selectOptionAt = (index: number): void => {
+    if (props.readOnly) return;
+    const next = options[index];
+    if (next) props.onChange(next.value);
+  };
+  const handleOptionKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    if (props.readOnly) return;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (index + 1) % options.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (index + options.length - 1) % options.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = options.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectOptionAt(nextIndex);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`mcp-transport-${options[nextIndex!]?.value}`)?.focus();
+    });
+  };
 
   return (
     <fieldset className="mcp-transport-field">
-      <legend>{t(props.locale, "mcpTransportType")}</legend>
-      <div className="mcp-transport-options">
-        {options.map((option) => (
+      <legend id="mcp-transport-label">{t(props.locale, "mcpTransportType")}</legend>
+      <div className="mcp-transport-options" role="radiogroup" aria-labelledby="mcp-transport-label">
+        {options.map((option, index) => (
           <button
             key={option.value}
+            id={`mcp-transport-${option.value}`}
             className={[
               "mcp-transport-option",
               transportValue === option.value ? "is-active" : "",
@@ -633,7 +657,9 @@ function McpTransportRadioGroup(props: {
             type="button"
             role="radio"
             aria-checked={transportValue === option.value}
+            tabIndex={transportValue === option.value ? 0 : -1}
             disabled={props.readOnly}
+            onKeyDown={(event) => handleOptionKeyDown(event, index)}
             onClick={() => {
               if (!props.readOnly) {
                 props.onChange(option.value);
@@ -682,6 +708,7 @@ export function ProviderForm(props: {
   const endpointValue = props.value.base_url.trim();
   const endpointUrl = endpointValue.length > 0 ? parseEndpointUrl(endpointValue) : null;
   const hasEndpointFormatError = endpointValue.length > 0 && endpointUrl === null;
+  const endpointFeedbackId = `provider-endpoint-feedback-${props.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
   const updateEndpoint = (value: string): void => {
     props.onChange(props.name, { base_url: value });
@@ -746,6 +773,7 @@ export function ProviderForm(props: {
             value={props.value.base_url}
             onChange={(event) => updateEndpoint(event.target.value)}
             aria-invalid={hasEndpointFormatError}
+            aria-describedby={hasEndpointFormatError || endpointCheckState !== "idle" || endpointCheckMessage ? endpointFeedbackId : undefined}
           />
           <button
             className={`endpoint-health-button is-${endpointCheckState}`}
@@ -759,9 +787,9 @@ export function ProviderForm(props: {
           </button>
         </div>
         {hasEndpointFormatError ? (
-          <span className="field-error">{t(props.locale, "endpointInvalidUrl")}</span>
+          <span id={endpointFeedbackId} className="field-error">{t(props.locale, "endpointInvalidUrl")}</span>
         ) : endpointCheckState !== "idle" || endpointCheckMessage ? (
-          <span className={`field-status is-${endpointCheckState}`}>
+          <span id={endpointFeedbackId} className={`field-status is-${endpointCheckState}`}>
             {endpointCheckState === "checking" ? t(props.locale, "endpointHealthChecking") : endpointCheckMessage}
           </span>
         ) : null}
@@ -1478,22 +1506,13 @@ export function McpImportDialog(props: {
   onImport: () => void;
   onCancel: () => void;
 }): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
-
-  useDialogEscape(props.onCancel);
-  useFocusTrap(dialogRef);
-
   return (
-    <div
-      className="mcp-import-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onCancel();
-        }
-      }}
+    <DialogShell
+      backdropClassName="mcp-import-backdrop"
+      dialogClassName="glass-panel form-panel mcp-import-dialog"
+      ariaLabelledBy="mcp-import-title"
+      onClose={props.onCancel}
     >
-      <section ref={dialogRef} className="glass-panel form-panel mcp-import-dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-import-title">
         <div className="mcp-import-header">
           <div>
             <div className="section-title" id="mcp-import-title">{t(props.locale, "importMcpJson")}</div>
@@ -1519,8 +1538,7 @@ export function McpImportDialog(props: {
           saveLabel={t(props.locale, "mcpImportApply")}
           cancelLabel={t(props.locale, "mcpImportCancel")}
         />
-      </section>
-    </div>
+    </DialogShell>
   );
 }
 
@@ -1529,11 +1547,7 @@ export function McpJsonViewerDialog(props: {
   value: string;
   onClose: () => void;
 }): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
   const [copied, setCopied] = useState(false);
-
-  useDialogEscape(props.onClose);
-  useFocusTrap(dialogRef);
 
   const copyJson = (): void => {
     const writeClipboard = navigator.clipboard?.writeText
@@ -1547,17 +1561,13 @@ export function McpJsonViewerDialog(props: {
     });
   };
 
-  return createPortal(
-    <div
-      className="mcp-json-viewer-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="mcp-json-viewer-backdrop"
+      dialogClassName="glass-panel form-panel mcp-import-dialog"
+      ariaLabelledBy="mcp-json-viewer-title"
+      onClose={props.onClose}
     >
-      <section ref={dialogRef} className="glass-panel form-panel mcp-import-dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-json-viewer-title">
         <div className="mcp-import-header">
           <div>
             <div className="section-title" id="mcp-json-viewer-title">{t(props.locale, "mcpJsonViewerTitle")}</div>
@@ -1593,9 +1603,7 @@ export function McpJsonViewerDialog(props: {
             <span>{t(props.locale, "close")}</span>
           </button>
         </div>
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -1690,15 +1698,11 @@ function ProfileTestDialog(props: {
   onTest: (modelName: string) => Promise<ProfileConnectivityTestResult>;
   onClose: () => void;
 }): JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
   const testModel = props.profile.default_model;
   const [isTesting, setIsTesting] = useState(false);
   const [result, setResult] = useState<ProfileConnectivityTestResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [hasStarted, setHasStarted] = useState(false);
-
-  useDialogEscape(props.onClose);
-  useFocusTrap(dialogRef);
 
   const runTest = async (modelName: string): Promise<void> => {
     setHasStarted(true);
@@ -1719,17 +1723,14 @@ function ProfileTestDialog(props: {
   const prompt = result?.prompt ?? "hi";
   const displayModel = result?.modelName ?? testModel;
 
-  return createPortal(
-    <div
-      className="profile-test-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
+  return (
+    <DialogShell
+      backdropClassName="profile-test-backdrop"
+      dialogClassName="profile-test-dialog glass-panel"
+      ariaLabelledBy="profile-test-title"
+      closeOnBackdrop={!isTesting}
+      onClose={props.onClose}
     >
-      <section ref={dialogRef} className="profile-test-dialog glass-panel" role="dialog" aria-modal="true" aria-labelledby="profile-test-title">
         <div className="profile-test-header">
           <h3 id="profile-test-title">{t(props.locale, "profileTestDialogTitle")}</h3>
           <button className="profile-test-close" type="button" aria-label={t(props.locale, "close")} onClick={props.onClose}>
@@ -1777,9 +1778,7 @@ function ProfileTestDialog(props: {
             <span>{isTesting ? t(props.locale, "profileTesting") : hasStarted ? t(props.locale, "profileTestRetry") : t(props.locale, "profileTestStart")}</span>
           </button>
         </div>
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -1947,14 +1946,14 @@ export function createFallbackState(): AppState {
     backup_webdav_password: "",
     backup_webdav_path: "",
     shortcuts: createDefaultShortcuts(),
-    mcp_servers: {},
+    model_ui_metadata: {},
   };
 
   return {
     configPath: panelSettings.config_path,
     configTarget: "kimi-code",
     profilesPath: "",
-    panelSettingsPath: "~/.kimi-code-switch-gui/config.panel.toml",
+    panelSettingsPath: "~/.kimi-code-switch-gui/app.db#panel_settings",
     mcpConfigPath: "~/.kimi-code/mcp.json",
     mainConfig: {
       default_model: "",

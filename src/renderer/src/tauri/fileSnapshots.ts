@@ -12,7 +12,7 @@
 //   回滚；未知 revision 进入 C2 只读恢复模式，绝不静默覆盖。
 import { invoke } from "@tauri-apps/api/core";
 
-import { buildPanelSettingsDocument, createLineDiff, normalizeStatePaths } from "@shared/configStore";
+import { buildPanelSettingsSnapshot, createLineDiff, normalizeStatePaths } from "@shared/configStore";
 import { redactDocumentText } from "@shared/configSafety";
 import type {
   AppState,
@@ -48,7 +48,7 @@ export function resolveManagedPaths(state: AppState): Record<ManagedFileId, stri
 async function readManagedDocument(id: ManagedFileId, path: string): Promise<string | null> {
   if (id === "panel") {
     const settings = await getPanelSettings();
-    return settings ? buildPanelSettingsDocument(settings) : null;
+    return settings ? buildPanelSettingsSnapshot(settings) : null;
   }
   return tauriFileAccess.readText(path);
 }

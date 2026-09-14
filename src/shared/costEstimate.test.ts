@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { estimateMonthlyCost } from "./costEstimate";
 import type { UsageEvent } from "./usageTypes";
 import type { ModelConfig } from "./types";
 
 describe("costEstimate", () => {
+  beforeEach(() => {
+    // Keep generated midday UTC events inside the current local month and in
+    // the past, regardless of the host's timezone or the calendar date.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T15:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const mockModels: Record<string, ModelConfig> = {
     "gpt-4o": {
       provider: "openai",

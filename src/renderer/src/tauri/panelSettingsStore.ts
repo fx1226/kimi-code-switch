@@ -5,7 +5,27 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import {
+  LEGACY_GUI_PANEL_SETTINGS_PATH,
+  LEGACY_KIMI_CODE_PANEL_SETTINGS_PATH,
+  LEGACY_PANEL_SETTINGS_PATH,
+} from "@shared/configStore";
 import type { PanelSettings } from "@shared/types";
+
+const LEGACY_PANEL_SETTINGS_PATHS = [
+  LEGACY_GUI_PANEL_SETTINGS_PATH,
+  LEGACY_KIMI_CODE_PANEL_SETTINGS_PATH,
+  LEGACY_PANEL_SETTINGS_PATH,
+] as const;
+
+async function migrateLegacyPanelSettingsBeforeFirstWrite(): Promise<void> {
+  const { pathExists } = await import("./fileAccess");
+  for (const tomlPath of LEGACY_PANEL_SETTINGS_PATHS) {
+    if (await pathExists(tomlPath)) {
+      await invoke("migrate_panel_settings_from_toml", { tomlPath });
+    }
+  }
+}
 
 /**
  * 初始化面板设置表。
@@ -13,6 +33,9 @@ import type { PanelSettings } from "@shared/types";
 export async function initPanelSettingsStore(): Promise<void> {
   try {
     await invoke("init_panel_settings_store");
+    // Must run before loadState can create an initial row. Otherwise an old
+    // panel TOML is merely renamed after defaults overwrite its contents.
+    await migrateLegacyPanelSettingsBeforeFirstWrite();
   } catch (err) {
     console.error("Failed to init panel_settings_store:", err);
     throw err;
@@ -38,31 +61,12 @@ export async function getPanelSettings(): Promise<PanelSettings | null> {
 /**
  * 保存面板设置。
  *
- * 首次保存时，如果旧版 ~/.kimi/config.panel.toml 存在，会自动重命名为 .toml.migrated。
- *
  * @param settings PanelSettings 对象
  * @returns 成功返回 true，失败时抛出底层 Tauri/SQLite 错误
  */
 export async function savePanelSettings(settings: PanelSettings): Promise<boolean> {
   const json = JSON.stringify(settings);
   await invoke("save_panel_settings", { settingsJson: json });
-
-  // 首次保存后，检查是否需要重命名旧 TOML 文件
-  // （迁移逻辑：若 TOML 存在，重命名为 .migrated）
-  try {
-    const tomlPath = "~/.kimi/config.panel.toml";
-    const { pathExists } = await import("./fileAccess");
-    if (await pathExists(tomlPath)) {
-      await invoke("migrate_panel_settings_from_toml", {
-        tomlPath,
-        settingsJson: json,
-      });
-    }
-  } catch (err) {
-    // 忽略迁移错误（TOML 文件可能已被删除）
-    console.warn("TOML migration skipped:", err);
-  }
-
   return true;
 }
 

@@ -32,7 +32,7 @@ Shared TypeScript layer for typed app state, config parsing/serialization, valid
 - Do not add UI labels or renderer formatting here unless the value is a cross-process type/contract.
 - Do not expose raw secrets in preview structures. Use `configSafety` redaction helpers.
 - Do not silently drop unknown MCP server keys; `mcpStore.ts` keeps extras where possible.
-- Do not change default paths such as `~/.kimi/config.toml`, `~/.kimi/.panel`, or `~/.kimi/mcp.json` without migration tests.
+- Do not change native default paths such as `~/.kimi-code/config.toml`, `~/.kimi-code/mcp.json`, or `~/.kimi-code/tui.toml` without migration tests; `~/.kimi/` is migration-only.
 - Do not weaken shortcut conflict detection; both global and window scopes use this catalog.
 
 ## TESTS

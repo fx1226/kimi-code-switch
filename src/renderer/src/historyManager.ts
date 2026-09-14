@@ -20,20 +20,6 @@ export interface HistoryDetail {
 const MAX_ENTRIES = 10;
 const entries: HistoryEntry[] = [];
 
-export function pushSnapshot(state: AppState, summary: string): void {
-  const timestamp = Date.now();
-  entries.unshift({
-    id: `${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-    timestamp,
-    summary,
-    state: structuredClone(state) as AppState,
-    details: [],
-  });
-  if (entries.length > MAX_ENTRIES) {
-    entries.length = MAX_ENTRIES;
-  }
-}
-
 export function pushChangeSnapshot(previousState: AppState, nextState: AppState, summary: string): void {
   const details = createHistoryDetails(previousState, nextState);
   if (details.length === 0) {
@@ -50,11 +36,6 @@ export function getHistory(currentState?: AppState): HistoryEntry[] {
     ...cloneEntry(entry),
     details: entry.details.length > 0 ? entry.details : createHistoryDetails(entry.state, currentState),
   }));
-}
-
-export function undoLast(): AppState | null {
-  const entry = entries.shift();
-  return entry ? structuredClone(entry.state) as AppState : null;
 }
 
 export function restoreHistoryEntry(entryId: string): AppState | null {

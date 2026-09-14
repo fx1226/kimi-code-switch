@@ -87,7 +87,6 @@ function appState(): AppState {
       backup_webdav_password: "",
       backup_webdav_path: "",
       shortcuts: {},
-      mcp_servers: {},
       kimi_code_environments: [{ id: "work", name: "Work", homePath: "~/.kimi-code-work" }],
       active_kimi_code_environment_id: "work",
     },

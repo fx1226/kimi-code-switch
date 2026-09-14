@@ -1,11 +1,10 @@
 // Tauri 版 FileAccess：把 shared/configStore 的 FileAccess 接口接到 Rust 后端原子命令。
-// 对应 Electron 侧 src/main/modules/fileAccess.ts，但运行在 renderer 进程。
+// 运行在 renderer 进程，通过 Tauri command 调用 Rust 原子能力。
 import { invoke } from "@tauri-apps/api/core";
 
-import type { EnvConfigData, FileAccess, PanelSettings, SaveTransactionRecord } from "@shared/configStore";
+import type { FileAccess, PanelSettings, SaveTransactionRecord } from "@shared/configStore";
 import { sanitizeConfigForEnvironmentClone, sanitizeMcpForEnvironmentClone } from "@shared/environmentClone";
 import { remapInstalledPluginRoots } from "@shared/pluginStore";
-import { getEnvConfig, saveEnvConfig } from "./envConfigStore";
 import { getPanelSettings, savePanelSettings } from "./panelSettingsStore";
 
 const SAVE_TRANSACTION_PATH = "~/.kimi-code-switch-gui/pending-save-transaction.json";
@@ -45,6 +44,9 @@ export const tauriFileAccess: FileAccess = {
   async ensureDir(path: string): Promise<void> {
     await invoke("ensure_dir", { path });
   },
+  async mergeDirectoryMissing(from: string, to: string) {
+    return mergeDirectoryMissing(from, to);
+  },
   async readPanelSettings(_path: string): Promise<PanelSettings | null> {
     // 忽略 path 参数，直接从 SQLite 读取（单行存储）
     return getPanelSettings();
@@ -52,12 +54,6 @@ export const tauriFileAccess: FileAccess = {
   async writePanelSettings(_path: string, settings: PanelSettings): Promise<void> {
     // 忽略 path 参数，直接写入 SQLite
     await savePanelSettings(settings);
-  },
-  async readEnvConfig(environmentId: string): Promise<EnvConfigData | null> {
-    return getEnvConfig(environmentId);
-  },
-  async writeEnvConfig(environmentId: string, data: EnvConfigData): Promise<void> {
-    await saveEnvConfig(environmentId, data);
   },
 };
 
@@ -325,6 +321,14 @@ export async function removeDir(path: string): Promise<void> {
 
 export async function copyDir(from: string, to: string): Promise<void> {
   await invoke("copy_dir", { from, to });
+}
+
+/** Copy a legacy directory into a native home without replacing native entries. */
+export async function mergeDirectoryMissing(
+  from: string,
+  to: string,
+): Promise<{ sourceExists: boolean; copiedEntries: number; skippedConflicts: number }> {
+  return invoke("merge_directory_missing", { from, to });
 }
 
 /**

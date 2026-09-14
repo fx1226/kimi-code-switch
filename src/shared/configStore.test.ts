@@ -19,13 +19,9 @@ import {
   exportConfig,
   bundleContainsRedactedSecrets,
   buildFullBackup,
-  extractEnvConfigsFromBackup,
   fullBackupContainsRedactedSecrets,
   isFullBackupBundle,
-  projectEnabledMainConfig,
   rebuildPanelSettingsFromBackup,
-  setModelEnabled,
-  setProviderEnabled,
   validateFullBackup,
   defaultKimiCodeHomePath,
   getKimiCodeEnvironmentHomePath,
@@ -33,6 +29,7 @@ import {
   getKimiCodeMcpConfigPath,
   getKimiCodeTuiConfigPath,
   migrateLegacyKimiCliConfigToKimiCode,
+  migrateLegacyManagedDefaultEnvironmentToNativeHome,
   formatMissingModelError,
   getImportPreview,
   importConfig,
@@ -167,6 +164,21 @@ describe("configStore", () => {
       name: "Team",
       homePath: "/tmp/custom-kimi-code",
     });
+  });
+
+  it("never resolves the default environment to the retired GUI-managed root", () => {
+    expect(getKimiCodeEnvironmentHomePath("default")).toBe("~/.kimi-code");
+    expect(getKimiCodeEnvironmentHomePath("team")).toBe("~/.kimi-code-switch-gui/.env/team");
+
+    const environments = normalizeKimiCodeEnvironments([
+      { id: "default", name: "Default", homePath: "~/.kimi-code-switch-gui/.env/default", kind: "managed" },
+    ]);
+
+    expect(environments).toEqual([expect.objectContaining({
+      id: "default",
+      kind: "default",
+      homePath: "~/.kimi-code",
+    })]);
   });
 
   it("bootstraps kimi-cli profile label from main config", () => {
@@ -440,7 +452,7 @@ items = ["model", "cwd"]
     expect(loaded.backup_webdav_path).toBe("kimi/backups");
   });
 
-  it("round-trips panel MCP enabled flags without creating nested extra blocks", async () => {
+  it("drops legacy panel MCP data instead of treating it as GUI settings", async () => {
     const files = createMemoryFs({
       "/tmp/config.panel.toml": `version = 1
 config_path = "/tmp/config.toml"
@@ -458,33 +470,11 @@ url = "https://mcp.context7.com/mcp"
 `,
     });
     const loaded = await loadPanelSettings(files, "/tmp/config.panel.toml");
-    expect(loaded.mcp_servers.context7.enabled).toBe(false);
-    expect(loaded.mcp_servers.context7.extra).toEqual({ oauth_audience: "ctx" });
     const document = buildPanelSettingsDocument(loaded);
-    expect(document).toContain("[mcp_servers.context7]");
-    expect(document).toContain("enabled = false");
-    expect(document).toContain("[mcp_servers.context7.extra]");
-    expect(document).not.toContain("[mcp_servers.context7.extra.extra]");
-  });
-
-  it("writes panel MCP nested tables without leading indentation", () => {
-    const state = createState();
-    state.panelSettings.mcp_servers = {
-      context7: {
-        enabled: true,
-        transport: "streamable-http",
-        url: "https://mcp.context7.com/mcp",
-        headers: { CONTEXT7_API_KEY: "ctx-test" },
-        command: "",
-        args: [],
-        env: {},
-      },
-    };
-    const document = buildPanelSettingsDocument(state.panelSettings);
-    expect(document).toContain("[mcp_servers.context7.headers]");
-    expect(document).toContain('CONTEXT7_API_KEY = "ctx-test"');
+    expect(JSON.stringify(loaded)).not.toContain("mcp_servers");
+    expect(document).not.toContain("mcp_servers");
+    expect(document).not.toContain("CONTEXT7_API_KEY");
     expect(document).toContain('[shortcuts."window.toggle"]');
-    expect(document).not.toContain("  [mcp_servers.context7.headers]");
   });
 
   it("parses shortcut tables from panel settings documents", () => {
@@ -596,18 +586,19 @@ url = "https://mcp.context7.com/mcp"
     expect(loaded.profiles.default).toBeDefined();
   });
 
-  it("migrates legacy panel settings when the new panel settings file is absent", async () => {
+  it("reads legacy panel settings without recreating a GUI panel TOML", async () => {
     const files = createMemoryFs({
       "~/.kimi/config.toml": 'default_model = "kimi/k2"\n',
       "~/.kimi/config.profiles.toml": 'version = 1\nactive_profile = "default"\n',
       "~/.kimi/config.panel.toml": 'locale = "en-US"\ntheme = "dark"\n',
     });
     const loaded = await loadAppState(files, { configTarget: "kimi-cli" });
-    expect(loaded.panelSettingsPath).toBe("~/.kimi-code-switch-gui/config.panel.toml");
+    expect(loaded.panelSettingsPath).toBe("~/.kimi-code-switch-gui/app.db#panel_settings");
     expect(loaded.panelSettings.locale).toBe("en-US");
     expect(loaded.panelSettings.theme).toBe("dark");
-    expect(files.ensured).toContain("~/.kimi-code-switch-gui");
-    expect(files.store["~/.kimi-code-switch-gui/config.panel.toml"]).toContain('locale = "en-US"');
+    expect(files.ensured).not.toContain("~/.kimi-code-switch-gui");
+    expect(files.writes).not.toContain("~/.kimi-code-switch-gui/config.panel.toml");
+    expect(files.store["~/.kimi-code-switch-gui/config.panel.toml"]).toBeUndefined();
   });
 
   it("throws when panel settings file read fails for reasons other than missing content", async () => {
@@ -668,7 +659,7 @@ url = "https://mcp.context7.com/mcp"
     state.panelSettingsPath = "";
     const normalized = normalizeStatePaths(state);
     expect(normalized.profilesPath).toBe("");
-    expect(normalized.panelSettingsPath).toBe("~/.kimi-code-switch-gui/config.panel.toml");
+    expect(normalized.panelSettingsPath).toBe("~/.kimi-code-switch-gui/app.db#panel_settings");
     expect(normalized.mcpConfigPath).toBe("~/.kimi-code/mcp.json");
   });
 
@@ -783,23 +774,7 @@ function createMemoryFs(initial: Record<string, string>) {
   };
 }
 
-/** 带 env-config hook 的内存 FS，模拟 GUI 的禁用项归档缓存。 */
-function createMemoryFsWithEnvHooks(initial: Record<string, string>) {
-  const base = createMemoryFs(initial);
-  const envDb: Record<string, { providers: Record<string, unknown>; models: Record<string, unknown> }> = {};
-  return {
-    ...base,
-    envDb,
-    async readEnvConfig(environmentId: string) {
-      return envDb[environmentId] ?? null;
-    },
-    async writeEnvConfig(environmentId: string, data: { providers: Record<string, unknown>; models: Record<string, unknown> }) {
-      envDb[environmentId] = structuredClone(data) as typeof data;
-    },
-  };
-}
-
-describe("saveAppState with env-config hooks (disabled-resource compatibility cache)", () => {
+describe("native provider and model persistence", () => {
   it("brackets a logical multi-file save with a durable transaction journal", async () => {
     const state = createState();
     const base = createMemoryFs({});
@@ -900,7 +875,7 @@ describe("saveAppState with env-config hooks (disabled-resource compatibility ca
 
   it("rolls panel, MCP, and config back when the final TUI write fails", async () => {
     const state = createState();
-    state.profiles.default.tui_theme = "dark";
+    state.tuiConfig = { theme: "dark" };
     const normalized = normalizeStatePaths(state);
     const tuiPath = normalized.configPath.replace(/\/config\.toml$/, "/tui.toml");
     const base = createMemoryFs({
@@ -936,30 +911,51 @@ describe("saveAppState with env-config hooks (disabled-resource compatibility ca
     expect(panel).toEqual(oldPanel);
   });
 
-  it("writes full providers/models to DB and projects only enabled items to config.toml", async () => {
+  it("writes provider and model definitions only to the native config.toml", async () => {
     const state = createState();
-    state.mainConfig.providers.kimi_gateway.enabled = true;
-    state.mainConfig.providers.disabled_prov = { type: "openai", base_url: "https://d", api_key: "dk", enabled: false };
-    state.mainConfig.models["kimi_gateway/kimi-k2.5"].enabled = true;
-    state.mainConfig.models["disabled_prov/m1"] = { provider: "disabled_prov", model: "m1", max_context_size: 1000, capabilities: [], enabled: true };
+    state.mainConfig.providers.alt_gateway = {
+      type: "openai",
+      base_url: "https://alt.example.test/v1",
+      api_key: "sk-alt",
+    };
+    state.mainConfig.models["alt_gateway/gpt-4.1"] = {
+      provider: "alt_gateway",
+      model: "gpt-4.1",
+      max_context_size: 128000,
+      capabilities: ["thinking"],
+    };
+    const writeEnvConfig = vi.fn();
+    const files = {
+      ...createMemoryFs({}),
+      writeEnvConfig,
+    };
 
-    const files = createMemoryFsWithEnvHooks({});
     await saveAppState(files as never, state);
 
     const normalized = normalizeStatePaths(state);
-    const envId = state.panelSettings.active_kimi_code_environment_id;
-    // DB 保留全量（含禁用）
-    expect(Object.keys(files.envDb[envId].providers)).toContain("disabled_prov");
-    expect(Object.keys(files.envDb[envId].models)).toContain("disabled_prov/m1");
-
-    // config.toml 仅含启用项；禁用 provider 及其 model 被剔除
     const configDoc = files.store[normalized.configPath];
-    expect(configDoc).toContain("kimi_gateway");
-    expect(configDoc).not.toContain("disabled_prov");
+    expect(configDoc).toContain("alt_gateway");
+    expect(configDoc).toContain("sk-alt");
+    expect(configDoc).toContain("gpt-4.1");
+    expect(writeEnvConfig).not.toHaveBeenCalled();
   });
 
-  it("keeps config.toml active providers/models authoritative over stale DB values", async () => {
-    const files = createMemoryFsWithEnvHooks({
+  it("does not read provider or model definitions from a legacy env-config cache", async () => {
+    const readEnvConfig = vi.fn().mockResolvedValue({
+      providers: {
+        cache_only: { type: "openai", base_url: "https://cache.example.test", api_key: "cache-secret" },
+      },
+      models: {
+        "cache_only/model": {
+          provider: "cache_only",
+          model: "model",
+          max_context_size: 4096,
+          capabilities: [],
+        },
+      },
+    });
+    const files = {
+      ...createMemoryFs({
       "~/.kimi-code/config.toml": `
 default_model = "cli/model"
 [providers.cli]
@@ -971,89 +967,37 @@ provider = "cli"
 model = "model"
 max_context_size = 8192
 `,
-    });
-    files.envDb.default = {
-      providers: {
-        cli: { type: "openai", base_url: "https://db-stale.example.test", api_key: "db-stale", enabled: true },
-        stale: { type: "openai", base_url: "https://stale.example.test", api_key: "stale", enabled: true },
-        disabled: { type: "openai", base_url: "https://disabled.example.test", api_key: "disabled", enabled: false },
-      },
-      models: {
-        "cli/model": {
-          provider: "cli",
-          model: "db-stale-model",
-          max_context_size: 4096,
-          capabilities: [],
-          enabled: true,
-          auth_mode: "official-account",
-          official_account_scope: "global",
-          pricing: { input_per_mtok: 1, output_per_mtok: 2 },
-        },
-        "stale/model": { provider: "stale", model: "model", max_context_size: 4096, capabilities: [], enabled: true },
-        "disabled/model": { provider: "disabled", model: "model", max_context_size: 4096, capabilities: [], enabled: true },
-      },
+      }),
+      readEnvConfig,
     };
 
     const state = await loadAppState(files as never);
 
     expect(state.mainConfig.providers.cli.base_url).toBe("https://cli.example.test");
     expect(state.mainConfig.models["cli/model"].model).toBe("model");
-    expect(state.mainConfig.models["cli/model"].auth_mode).toBe("official-account");
-    expect(state.mainConfig.models["cli/model"].pricing?.input_per_mtok).toBe(1);
-    expect(state.mainConfig.providers.stale).toBeUndefined();
-    expect(state.mainConfig.models["stale/model"]).toBeUndefined();
-    expect(state.mainConfig.providers.disabled.enabled).toBe(false);
-    expect(state.mainConfig.models["disabled/model"]).toBeDefined();
+    expect(state.mainConfig.providers.cache_only).toBeUndefined();
+    expect(state.mainConfig.models["cache_only/model"]).toBeUndefined();
+    expect(readEnvConfig).not.toHaveBeenCalled();
   });
 
-  it("ignores orphaned disabled models whose provider no longer exists", async () => {
-    const files = createMemoryFsWithEnvHooks({
-      "~/.kimi-code/config.toml": "",
-    });
-    files.envDb.default = {
-      providers: {},
-      models: {
-        "removed/model": { provider: "removed", model: "model", max_context_size: 4096, capabilities: [], enabled: false },
-      },
-    };
-
-    const state = await loadAppState(files as never);
-
-    expect(state.mainConfig.models["removed/model"]).toBeUndefined();
-  });
-
-  it("loads the official config when the optional disabled-resource cache fails", async () => {
-    const files = {
-      ...createMemoryFs({
-        "~/.kimi-code/config.toml": `
-[providers.cli]
-type = "openai"
-base_url = "https://cli.example.test"
-`,
-      }),
-      async readEnvConfig() {
-        throw new Error("cache unavailable");
-      },
-    };
-
-    const state = await loadAppState(files as never);
-
-    expect(state.mainConfig.providers.cli.base_url).toBe("https://cli.example.test");
-  });
-
-  it("saves standard files even when the optional disabled-resource cache update fails", async () => {
+  it("writes MCP only to native mcp.json, never to GUI panel settings", async () => {
     const state = createState();
+    let savedPanelJson = "";
     const files = {
       ...createMemoryFs({}),
-      async writeEnvConfig() {
-        throw new Error("cache unavailable");
+      async readPanelSettings() {
+        return null;
+      },
+      async writePanelSettings(_path: string, settings: unknown) {
+        savedPanelJson = JSON.stringify(settings);
       },
     };
 
-    await expect(saveAppState(files as never, state)).resolves.toBeUndefined();
+    await saveAppState(files as never, state);
 
-    expect(files.store[normalizeStatePaths(state).configPath]).toContain("kimi_gateway");
-    expect(files.store[normalizeStatePaths(state).mcpConfigPath]).toContain("mcpServers");
+    expect(files.store[normalizeStatePaths(state).mcpConfigPath]).toContain("CONTEXT7_API_KEY");
+    expect(savedPanelJson).not.toContain("mcp_servers");
+    expect(savedPanelJson).not.toContain("CONTEXT7_API_KEY");
   });
 });
 
@@ -1804,7 +1748,7 @@ merge_all_available_skills = false
     expect(legacyMainConfig.default_editor).toBeUndefined();
   });
 
-  it("writes tui.toml next to the active environment config when the active profile sets tui fields", async () => {
+  it("writes tui.toml next to the active environment config when a profile is explicitly applied", async () => {
     const state = createState();
     state.configTarget = "kimi-code";
     state.configPath = "~/.kimi-code/config.toml";
@@ -1815,6 +1759,7 @@ merge_all_available_skills = false
       tui_editor_command: "nvim",
     };
     state.activeProfile = "default";
+    applyProfile(state, "default");
     const files = createMemoryFs({});
 
     await saveAppState(files, state);
@@ -1860,6 +1805,7 @@ merge_all_available_skills = false
       tui_theme: "dark",
     };
     state.activeProfile = "default";
+    applyProfile(state, "default");
     const existingTui = `disable_paste_burst = true\n\n[notifications]\nenabled = false\nnotification_condition = "always"\n\n[upgrade]\nauto_install = true\n`;
     const files = createMemoryFs({
       "~/.kimi-code/tui.toml": existingTui,
@@ -2029,75 +1975,81 @@ describe("migrateLegacyKimiCliConfigToKimiCode", () => {
   });
 });
 
-describe("projectEnabledMainConfig", () => {
-  function baseConfig(): ReturnType<typeof createState>["mainConfig"] {
-    return createState().mainConfig;
-  }
+describe("migrateLegacyManagedDefaultEnvironmentToNativeHome", () => {
+  const legacyHome = "~/.kimi-code-switch-gui/.env/default";
+  const nativeHome = defaultKimiCodeHomePath();
 
-  it("includes enabled provider and its enabled model", () => {
-    const config = baseConfig();
-    config.providers.kimi_gateway.enabled = true;
-    config.models["kimi_gateway/kimi-k2.5"].enabled = true;
-    const projected = projectEnabledMainConfig(config);
-    expect(projected.providers.kimi_gateway).toBeTruthy();
-    expect(projected.models["kimi_gateway/kimi-k2.5"]).toBeTruthy();
-    // enabled 标记被剥离
-    expect((projected.providers.kimi_gateway as { enabled?: boolean }).enabled).toBeUndefined();
-  });
+  it("moves retired default-environment configuration into the native home without overwriting native values", async () => {
+    const mergedDirectories: Array<[string, string]> = [];
+    const files = {
+      ...createMemoryFs({
+        [`${legacyHome}/config.toml`]: `
+default_model = "legacy/model"
+[providers.legacy]
+type = "openai"
+base_url = "https://legacy.example.test"
+api_key = "legacy-secret"
+[models."legacy/model"]
+provider = "legacy"
+model = "legacy-model"
+max_context_size = 8192
+[thinking]
+effort = "high"
+[unmanaged_extension]
+keep = "legacy-value"
+`,
+        [`${legacyHome}/mcp.json`]: JSON.stringify({
+          mcpServers: { legacy: { transport: "streamable-http", url: "https://legacy.example.test/mcp" } },
+        }),
+        [`${legacyHome}/tui.toml`]: 'theme = "dark"\n',
+        [`${legacyHome}/AGENTS.md`]: "legacy instructions\n",
+        [`${legacyHome}/plugins/installed.json`]: JSON.stringify({
+          plugins: [{ id: "legacy-plugin", root: `${legacyHome}/plugins/managed/legacy-plugin` }],
+        }),
+        [`${nativeHome}/config.toml`]: `
+default_model = "native/model"
+[providers.native]
+type = "openai"
+base_url = "https://native.example.test"
+api_key = "native-secret"
+[thinking]
+enabled = true
+`,
+        [`${nativeHome}/mcp.json`]: JSON.stringify({
+          mcpServers: { native: { transport: "streamable-http", url: "https://native.example.test/mcp" } },
+        }),
+      }),
+      async mergeDirectoryMissing(from: string, to: string) {
+        mergedDirectories.push([from, to]);
+        return { sourceExists: true, copiedEntries: 1, skippedConflicts: 0 };
+      },
+    };
 
-  it("drops a disabled provider", () => {
-    const config = baseConfig();
-    config.providers.kimi_gateway.enabled = false;
-    const projected = projectEnabledMainConfig(config);
-    expect(projected.providers.kimi_gateway).toBeUndefined();
-  });
+    const result = await migrateLegacyManagedDefaultEnvironmentToNativeHome(files);
 
-  it("drops a model whose provider is disabled, even if the model itself is enabled", () => {
-    const config = baseConfig();
-    config.providers.kimi_gateway.enabled = false;
-    config.models["kimi_gateway/kimi-k2.5"].enabled = true;
-    const projected = projectEnabledMainConfig(config);
-    expect(projected.models["kimi_gateway/kimi-k2.5"]).toBeUndefined();
-  });
-
-  it("drops a disabled model while keeping its enabled provider", () => {
-    const config = baseConfig();
-    config.providers.kimi_gateway.enabled = true;
-    config.models["kimi_gateway/kimi-k2.5"].enabled = false;
-    const projected = projectEnabledMainConfig(config);
-    expect(projected.providers.kimi_gateway).toBeTruthy();
-    expect(projected.models["kimi_gateway/kimi-k2.5"]).toBeUndefined();
-  });
-
-  it("treats missing enabled flag as enabled (backward compat)", () => {
-    const config = baseConfig();
-    delete (config.providers.kimi_gateway as { enabled?: boolean }).enabled;
-    delete (config.models["kimi_gateway/kimi-k2.5"] as { enabled?: boolean }).enabled;
-    const projected = projectEnabledMainConfig(config);
-    expect(projected.providers.kimi_gateway).toBeTruthy();
-    expect(projected.models["kimi_gateway/kimi-k2.5"]).toBeTruthy();
-  });
-});
-
-describe("setProviderEnabled / setModelEnabled", () => {
-  it("toggles provider enabled flag", () => {
-    const state = createState();
-    setProviderEnabled(state, "kimi_gateway", false);
-    expect(state.mainConfig.providers.kimi_gateway.enabled).toBe(false);
-    setProviderEnabled(state, "kimi_gateway", true);
-    expect(state.mainConfig.providers.kimi_gateway.enabled).toBe(true);
-  });
-
-  it("toggles model enabled flag", () => {
-    const state = createState();
-    setModelEnabled(state, "kimi_gateway/kimi-k2.5", false);
-    expect(state.mainConfig.models["kimi_gateway/kimi-k2.5"].enabled).toBe(false);
-  });
-
-  it("is a no-op for unknown names", () => {
-    const state = createState();
-    expect(() => setProviderEnabled(state, "missing", false)).not.toThrow();
-    expect(() => setModelEnabled(state, "missing", false)).not.toThrow();
+    expect(result).toMatchObject({
+      migrated: true,
+      configMerged: true,
+      mcpMerged: true,
+      tuiMerged: true,
+      agentsCopied: true,
+      skillsCopied: true,
+      pluginsMerged: true,
+    });
+    expect(files.store[`${nativeHome}/config.toml`]).toContain('default_model = "native/model"');
+    expect(files.store[`${nativeHome}/config.toml`]).toContain("[providers.legacy]");
+    expect(files.store[`${nativeHome}/config.toml`]).toContain("enabled = true");
+    expect(files.store[`${nativeHome}/config.toml`]).toContain('effort = "high"');
+    expect(files.store[`${nativeHome}/config.toml`]).toContain("[unmanaged_extension]");
+    expect(files.store[`${nativeHome}/mcp.json`]).toContain("native.example.test/mcp");
+    expect(files.store[`${nativeHome}/mcp.json`]).toContain("legacy.example.test/mcp");
+    expect(files.store[`${nativeHome}/tui.toml`]).toContain('theme = "dark"');
+    expect(files.store[`${nativeHome}/AGENTS.md`]).toBe("legacy instructions\n");
+    expect(files.store[`${nativeHome}/plugins/installed.json`]).toContain(`${nativeHome}/plugins/managed/legacy-plugin`);
+    expect(mergedDirectories).toEqual([
+      [`${legacyHome}/skills`, `${nativeHome}/skills`],
+      [`${legacyHome}/plugins`, `${nativeHome}/plugins`],
+    ]);
   });
 });
 
@@ -2111,27 +2063,19 @@ describe("full backup", () => {
     expect(active?.providers.kimi_gateway.api_key).toBe("sk-test");
   });
 
-  it("buildFullBackup uses standard files for non-active environments and only appends disabled cache entries", () => {
+  it("buildFullBackup uses each environment's native files without an env-config cache", () => {
     const state = createState();
-    const allEnvConfigs = {
-      work: {
-        providers: { disabled_prov: { type: "openai", base_url: "https://d", api_key: "dk", enabled: false } },
-        models: {},
-      },
-    };
-    // 把 work 环境加入面板设置环境列表
     state.panelSettings.kimi_code_environments = [
       ...state.panelSettings.kimi_code_environments,
       { id: "work", name: "Work", homePath: getKimiCodeEnvironmentHomePath("work") },
     ];
-    const workMainConfig = {
-      ...createState().mainConfig,
-      providers: { work_prov: { type: "openai", base_url: "https://w", api_key: "wk" } },
-      models: {},
-    };
-    const bundle = buildFullBackup(state, allEnvConfigs, {
+    const bundle = buildFullBackup(state, {
       work: {
-        mainConfig: workMainConfig,
+        mainConfig: {
+          ...createState().mainConfig,
+          providers: { work_prov: { type: "openai", base_url: "https://work.example.test", api_key: "work-secret" } },
+          models: {},
+        },
         mcpServers: {
           work_mcp: {
             enabled: true,
@@ -2143,32 +2087,12 @@ describe("full backup", () => {
             env: {},
           },
         },
-        skillsDirectory: {
-          exists: true,
-          directories: ["deploy", "deploy/assets"],
-          files: [{
-            relativePath: "deploy/SKILL.md",
-            contentBase64: "IyBEZXBsb3k=",
-            executable: false,
-          }],
-        },
-        pluginsDirectory: {
-          exists: true,
-          directories: ["managed", "managed/demo"],
-          files: [{
-            relativePath: "installed.json",
-            contentBase64: "e30=",
-            executable: false,
-          }],
-        },
       },
     });
-    const work = bundle.environments.find((e) => e.environment.id === "work");
-    expect(work?.providers.work_prov).toBeTruthy();
-    expect(work?.providers.disabled_prov.enabled).toBe(false);
+
+    const work = bundle.environments.find((environment) => environment.environment.id === "work");
+    expect(work?.providers.work_prov.api_key).toBe("work-secret");
     expect(work?.mcpServers.work_mcp.command).toBe("work-mcp");
-    expect(work?.skillsDirectory?.files[0].relativePath).toBe("deploy/SKILL.md");
-    expect(work?.pluginsDirectory?.files[0].relativePath).toBe("installed.json");
   });
 
   it("buildFullBackup does not resurrect deprecated panel config snapshots", () => {
@@ -2256,14 +2180,6 @@ describe("full backup", () => {
     expect(isFullBackupBundle(exportConfig(state))).toBe(false);
   });
 
-  it("extractEnvConfigsFromBackup yields per-env providers/models", () => {
-    const state = createState();
-    const bundle = buildFullBackup(state, {});
-    const envConfigs = extractEnvConfigsFromBackup(bundle);
-    const activeId = bundle.activeEnvironmentId;
-    expect(envConfigs[activeId].providers.kimi_gateway.api_key).toBe("sk-test");
-  });
-
   it("rebuildPanelSettingsFromBackup restores environment list + active id", () => {
     const state = createState();
     const bundle = buildFullBackup(state, {});
@@ -2284,28 +2200,17 @@ describe("full backup", () => {
   });
 });
 
-describe("buildConfigDocument projection (external-change false-positive guard)", () => {
-  it("never writes the GUI-only enabled flag to config.toml", () => {
+describe("buildConfigDocument native source of truth", () => {
+  it("writes every provider and model definition directly without GUI-only enabled state", () => {
     const state = createState();
-    state.mainConfig.providers.kimi_gateway.enabled = true;
-    state.mainConfig.models["kimi_gateway/kimi-k2.5"].enabled = true;
     const doc = buildConfigDocument(state);
-    expect(doc).not.toContain("enabled");
-  });
-
-  it("omits disabled providers and their models from config.toml", () => {
-    const state = createState();
-    state.mainConfig.providers.kimi_gateway.enabled = false;
-    const doc = buildConfigDocument(state);
-    // 投影后 providers/models 表应为空（default_model 标量引用不算条目定义）
-    expect(doc).not.toContain("[providers.");
-    expect(doc).not.toContain("[models.");
-    expect(doc).not.toMatch(/api_key/);
+    expect(doc).toContain("[providers.kimi_gateway]");
+    expect(doc).toContain('[models."kimi_gateway/kimi-k2.5"]');
+    expect(doc).not.toMatch(/^enabled\s*=/m);
   });
 
   it("draft document matches what saveAppState writes to disk (no spurious diff)", async () => {
     const state = createState();
-    state.mainConfig.providers.disabled_prov = { type: "openai", base_url: "https://d", api_key: "dk", enabled: false };
     const files = createMemoryFs({});
     await saveAppState(files as never, state);
     const normalized = normalizeStatePaths(state);

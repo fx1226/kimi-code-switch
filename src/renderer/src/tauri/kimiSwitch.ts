@@ -11,6 +11,7 @@ import stringifyToml from "@iarna/toml/stringify.js";
 
 import {
   createDefaultPanelSettings,
+  PANEL_APP_DIRECTORY,
   getKimiCodeConfigPath,
   getKimiCodeMcpConfigPath,
   getKimiCodeEnvironmentHomePath,
@@ -19,6 +20,7 @@ import {
   getDefaultMcpConfigPath,
   loadAppState,
   migrateLegacyKimiCliConfigToKimiCode,
+  migrateLegacyManagedDefaultEnvironmentToNativeHome,
   normalizeStatePaths,
   saveAppState,
   cloneState,
@@ -26,7 +28,6 @@ import {
   buildFullBackup,
   buildConfigDocument,
   parseMainConfigDocument,
-  extractEnvConfigsFromBackup,
   rebuildPanelSettingsFromBackup,
 } from "@shared/configStore";
 import { buildMcpConfigDocument, parseMcpConfig } from "@shared/mcpStore";
@@ -60,7 +61,7 @@ const skillFileAccess = {
 
 // ── 使用统计运行时（log watcher + db 生命周期）──
 // 全局应用数据库：包含 usage 数据、config_history、panel_settings
-const PANEL_APP_DIR = "~/.kimi-code-switch-gui";
+const PANEL_APP_DIR = PANEL_APP_DIRECTORY;
 const USAGE_DB_PATH = `${PANEL_APP_DIR}/app.db`;
 const USAGE_JSONL_DIR = `${PANEL_APP_DIR}/usage`;
 let logWatcher: UsageLogWatcher | null = null;
@@ -154,6 +155,7 @@ function activeKimiCodeEnvironmentHome(): string {
 }
 
 function supportsCredentialSlots(settings: PanelSettings): boolean {
+  if (!settings.official_account_vault_enabled) return false;
   const activeId = settings.active_kimi_code_environment_id ?? "default";
   const environment = normalizeKimiCodeEnvironments(settings.kimi_code_environments)
     .find((candidate) => candidate.id === activeId);
@@ -442,20 +444,139 @@ function refreshStartupKimiCodeDetection(
   });
 }
 
-async function runPostLoadMaintenance(
-  state: AppState,
-  effectivePaths: LoadStatePaths,
-  migrateMcpFromJson: (path: string) => Promise<unknown>,
-): Promise<void> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function nativeModelUiMetadata(value: unknown): Pick<ModelConfig, "auth_mode" | "official_account_scope" | "pricing"> {
+  if (!isRecord(value)) return {};
+  return {
+    ...(value.auth_mode === "api-key" || value.auth_mode === "official-account"
+      ? { auth_mode: value.auth_mode }
+      : {}),
+    ...(value.official_account_scope === "global" ? { official_account_scope: "global" as const } : {}),
+    ...(isRecord(value.pricing) ? { pricing: value.pricing as ModelConfig["pricing"] } : {}),
+  };
+}
+
+function isExplicitlyDisabledLegacyResource(value: unknown): boolean {
+  return isRecord(value) && value.enabled === false;
+}
+
+/** Recover missing native entries from deprecated SQLite mirrors. */
+export async function recoverLegacyNativeConfig(state: AppState): Promise<void> {
+  const { clearRecoveredLegacyNativeConfig, exportLegacyNativeConfig } = await import("./legacyNativeConfig");
+  const legacy = await exportLegacyNativeConfig();
+  const environments = normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments);
+  let metadataChanged = false;
+  const recoveredEnvironmentIds: string[] = [];
+  const nextMetadata = structuredClone(state.panelSettings.model_ui_metadata ?? {});
+
+  for (const environment of environments) {
+    const cached = legacy.environments[environment.id];
+    if (!cached) continue;
+
+    const configPath = getKimiCodeConfigPath(environment.homePath);
+    const mcpPath = getKimiCodeMcpConfigPath(environment.homePath);
+    const currentMain = parseMainConfigDocument(await tauriFileAccess.readText(configPath));
+    const legacyMain = parseMainConfigDocument(stringifyToml({
+      providers: cached.providers,
+      models: cached.models,
+    }));
+    const disabledProviderNames = new Set(Object.entries(cached.providers)
+      .filter(([, provider]) => isExplicitlyDisabledLegacyResource(provider))
+      .map(([name]) => name));
+    const preservesDisabledResources = disabledProviderNames.size > 0
+      || Object.values(cached.models).some(isExplicitlyDisabledLegacyResource);
+    let configChanged = false;
+    for (const [name, provider] of Object.entries(legacyMain.providers)) {
+      if (currentMain.providers[name] !== undefined || disabledProviderNames.has(name)) continue;
+      currentMain.providers[name] = provider;
+      configChanged = true;
+    }
+    for (const [name, model] of Object.entries(legacyMain.models)) {
+      if (
+        currentMain.models[name] !== undefined
+        || currentMain.providers[model.provider] === undefined
+        || disabledProviderNames.has(model.provider)
+        || isExplicitlyDisabledLegacyResource(cached.models[name])
+      ) continue;
+      currentMain.models[name] = model;
+      configChanged = true;
+    }
+
+    const metadata: Record<string, Pick<ModelConfig, "auth_mode" | "official_account_scope" | "pricing">> = {};
+    for (const [name, rawModel] of Object.entries(cached.models)) {
+      if (currentMain.models[name] === undefined || isExplicitlyDisabledLegacyResource(rawModel)) continue;
+      const ui = nativeModelUiMetadata(rawModel);
+      if (Object.keys(ui).length > 0) metadata[name] = ui;
+    }
+    if (JSON.stringify(nextMetadata[environment.id] ?? {}) !== JSON.stringify(metadata)) {
+      if (Object.keys(metadata).length > 0) nextMetadata[environment.id] = metadata;
+      else delete nextMetadata[environment.id];
+      metadataChanged = true;
+    }
+
+    const currentMcp = parseMcpConfig(await tauriFileAccess.readText(mcpPath), { sourcePath: mcpPath });
+    let mcpChanged = false;
+    let mcpRecoverable = true;
+    try {
+      const legacyMcp = parseMcpConfig(JSON.stringify({ mcpServers: cached.mcpServers }), { sourcePath: "legacy SQLite" });
+      for (const [name, server] of Object.entries(legacyMcp.mcpServers)) {
+        if (currentMcp.mcpServers[name] !== undefined) continue;
+        currentMcp.mcpServers[name] = server;
+        mcpChanged = true;
+      }
+    } catch (error) {
+      mcpRecoverable = false;
+      console.warn(`Skipped invalid legacy MCP mirror for ${environment.id}:`, error);
+    }
+
+    if (configChanged) {
+      await tauriFileAccess.ensureDir(environment.homePath);
+      await tauriFileAccess.writeText(configPath, buildConfigDocument({ ...state, configPath, mainConfig: currentMain }));
+    }
+    if (mcpChanged) {
+      await tauriFileAccess.ensureDir(environment.homePath);
+      await tauriFileAccess.writeText(mcpPath, buildMcpConfigDocument(currentMcp));
+    }
+    if (environment.id === state.panelSettings.active_kimi_code_environment_id) {
+      state.mainConfig = currentMain;
+      state.mcpConfig = currentMcp;
+    }
+    if (mcpRecoverable && !preservesDisabledResources) recoveredEnvironmentIds.push(environment.id);
+  }
+
+  if (metadataChanged) {
+    state.panelSettings.model_ui_metadata = nextMetadata;
+    await savePanelSettings(state.panelSettings);
+  }
+  await clearRecoveredLegacyNativeConfig(recoveredEnvironmentIds);
+}
+
+async function runPostLoadMaintenance(): Promise<void> {
   const startedAt = startupTimingNow();
   try {
     try {
       const result = await invoke<string>("migrate_legacy_database");
       if (result.includes("Migrated")) {
         console.log("Legacy database migration:", result);
+        // A merged legacy DB may contribute historical snapshots whose files
+        // still live in an old GUI directory. Re-run the idempotent history
+        // initializer so it relocates those files and repairs their metadata.
+        await initConfigHistory();
       }
     } catch (err) {
       console.warn("Legacy database migration skipped:", err);
+    }
+
+    try {
+      const migration = await migrateLegacyManagedDefaultEnvironmentToNativeHome(tauriFileAccess);
+      if (migration.migrated) {
+        console.log("Legacy managed default environment migrated to the native Kimi Code home:", migration);
+      }
+    } catch (err) {
+      console.warn("Legacy managed default environment migration skipped:", err);
     }
 
     try {
@@ -467,17 +588,6 @@ async function runPostLoadMaintenance(
       console.warn("Legacy Kimi CLI config migration skipped:", err);
     }
 
-    try {
-      const migrationPaths = new Set([
-        "~/.kimi/mcp.json",
-        "~/.kimi/config.mcp.json",
-      ].filter((path): path is string => Boolean(path)));
-      for (const path of migrationPaths) {
-        await migrateMcpFromJson(path);
-      }
-    } catch (err) {
-      console.warn("MCP migration skipped:", err);
-    }
   } finally {
     recordStartupTiming("kimiSwitch.runPostLoadMaintenance", startedAt);
   }
@@ -499,7 +609,6 @@ async function syncPanelSettingsAfterLoad(state: AppState): Promise<void> {
       config_path: state.panelSettings.config_path,
       profiles: state.profiles,
       active_profile: state.activeProfile,
-      mcp_servers: state.mcpConfig.mcpServers,
       kimi_code_environments: state.panelSettings.kimi_code_environments,
       active_kimi_code_environment_id: state.panelSettings.active_kimi_code_environment_id,
       active_official_account_id: state.panelSettings.active_official_account_id ?? "",
@@ -513,7 +622,6 @@ async function syncPanelSettingsAfterLoad(state: AppState): Promise<void> {
     currentSettings.config_path !== state.panelSettings.config_path ||
     currentSettings.active_profile !== state.activeProfile ||
     JSON.stringify(currentSettings.profiles ?? {}) !== JSON.stringify(state.profiles ?? {}) ||
-    JSON.stringify(currentSettings.mcp_servers ?? {}) !== JSON.stringify(state.mcpConfig.mcpServers ?? {}) ||
     JSON.stringify(currentSettings.kimi_code_environments ?? []) !== JSON.stringify(state.panelSettings.kimi_code_environments ?? []) ||
     (currentSettings.active_kimi_code_environment_id ?? "") !== (state.panelSettings.active_kimi_code_environment_id ?? "") ||
     (currentSettings.active_official_account_id ?? "") !== (state.panelSettings.active_official_account_id ?? "");
@@ -524,7 +632,6 @@ async function syncPanelSettingsAfterLoad(state: AppState): Promise<void> {
       config_path: state.panelSettings.config_path,
       profiles: state.profiles,
       active_profile: state.activeProfile,
-      mcp_servers: state.mcpConfig.mcpServers,
       kimi_code_environments: state.panelSettings.kimi_code_environments,
       active_kimi_code_environment_id: state.panelSettings.active_kimi_code_environment_id,
       active_official_account_id: state.panelSettings.active_official_account_id ?? "",
@@ -611,22 +718,11 @@ async function ensureUsageRuntime(): Promise<void> {
 function ensureStoresInitialized(): Promise<void> {
   if (!storesInitTask) {
     storesInitTask = (async () => {
-      // 迁移旧数据库文件到独立 GUI 目录，避免和 Kimi Code 运行时数据混在一起。
-      const oldDbPaths = ["~/.kimi-code/.panel/app.db", "~/.kimi/app.db"];
-      const newDbPath = USAGE_DB_PATH;
-      const { pathExists, ensureDir, moveFile, removeFile } = await import("./fileAccess");
+      // 旧库由后端在打开新库后逐表合并。这里不能移动或删除任何候选
+      // 文件，否则多份旧数据库共存时会丢失尚未合并的数据。
+      const { ensureDir } = await import("./fileAccess");
       try {
         await ensureDir(PANEL_APP_DIR);
-        for (const oldDbPath of oldDbPaths) {
-          if (await pathExists(oldDbPath)) {
-            console.log(`Migrating app.db from ${oldDbPath} to ${newDbPath}...`);
-            if (!(await pathExists(newDbPath))) {
-              await moveFile(oldDbPath, newDbPath);
-            } else {
-              await removeFile(oldDbPath);
-            }
-          }
-        }
       } catch (err) {
         console.warn("Database file migration skipped:", err);
       }
@@ -638,10 +734,6 @@ function ensureStoresInitialized(): Promise<void> {
 
       await initPanelSettingsStore();
       await initConfigHistory();
-      const { initMcpServersStore } = await import("./mcpServersStore");
-      await initMcpServersStore();
-      const { initEnvConfigStore } = await import("./envConfigStore");
-      await initEnvConfigStore();
       await officialAccounts.initOfficialAccountsStore();
     })();
     // 失败时清空 task，允许下次 loadState 重试初始化。
@@ -711,7 +803,6 @@ export const kimiSwitchTauri = {
         quarantinedPath: restoreRecovery.quarantinedPath,
       };
     }
-    const { migrateMcpFromJson } = await import("./mcpServersStore");
     recordStartupTiming("kimiSwitch.loadState.stores", storeStartedAt);
 
     const currentSettings = await getPanelSettings();
@@ -737,8 +828,18 @@ export const kimiSwitchTauri = {
       configTarget: effectiveTarget,
     };
 
+    // Configuration migrations may write native files. They must complete
+    // before loadAppState returns so the renderer's first snapshot captures
+    // their final revision rather than reporting our own write as external.
+    await runPostLoadMaintenance();
+
     const stateStartedAt = startupTimingNow();
     const state = await loadAppState(tauriFileAccess, effectivePaths);
+    try {
+      await recoverLegacyNativeConfig(state);
+    } catch (err) {
+      console.warn("Legacy GUI configuration recovery skipped:", err);
+    }
     await loadPluginInventory(state);
     await loadProjectMcpScope(state);
     await loadProjectLocalConfig(state);
@@ -767,8 +868,6 @@ export const kimiSwitchTauri = {
       console.warn("Panel settings sync after load skipped:", err);
     }
 
-    void runPostLoadMaintenance(state, effectivePaths, migrateMcpFromJson)
-      .catch((err) => console.warn("Post-load maintenance skipped:", err));
     void refreshStartupKimiCodeDetection()
       .catch((err) => console.warn("Kimi Code detection skipped:", err));
 
@@ -1003,7 +1102,6 @@ export const kimiSwitchTauri = {
       config_path: nextState.configPath,
       profiles: nextState.profiles,
       active_profile: nextState.activeProfile,
-      mcp_servers: nextState.mcpConfig.mcpServers,
       profiles_path: "",
       follow_config_profiles: true,
       kimi_code_environments: nextState.panelSettings.kimi_code_environments,
@@ -1046,7 +1144,7 @@ export const kimiSwitchTauri = {
     };
     const rawDocs: Partial<Record<ManagedFileId, unknown>> = {
       config: safeToml(disk.config),
-      panel: safeToml(disk.panel),
+      panel: safeJson(disk.panel),
       mcp: safeJson(disk.mcp),
     };
     return buildConfigDoctorReport(state, rawDocs);
@@ -1095,8 +1193,8 @@ export const kimiSwitchTauri = {
     const content = await tauriFileAccess.readText(filePath);
     return content === null ? { ok: false, error: "File not found." } : { ok: true, content };
   },
-  // B1：启动时把用户已保存的偏好目录（备份目录/注册环境 home）重登记为 Rust durable grant。
-  reconcileDurableGrants: (paths: string[]) => invoke<void>("reconcile_durable_grants", { paths }),
+  // B1：Rust 仅从已保存的偏好目录重建 durable grant，renderer 不传可写路径。
+  reconcileDurableGrants: () => invoke<void>("reconcile_durable_grants"),
   openExternal: async (url: string): Promise<{ ok: true }> => {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "mailto:") {
@@ -1494,8 +1592,6 @@ export const kimiSwitchTauri = {
 
   // ── 全量导出/导入（所有环境的 Provider/Model/MCP/Profile + 全局面板设置）──
   exportFullBackup: async (state: AppState): Promise<FullBackupBundle> => {
-    const { exportAllEnvConfigs } = await import("./envConfigStore");
-    const allEnvConfigs = await exportAllEnvConfigs();
     const standardEntries = await Promise.all(
       normalizeKimiCodeEnvironments(state.panelSettings.kimi_code_environments).map(async (environment) => {
         const configPath = getKimiCodeConfigPath(environment.homePath);
@@ -1522,11 +1618,9 @@ export const kimiSwitchTauri = {
         }
       }),
     );
-    return buildFullBackup(state, allEnvConfigs, Object.fromEntries(standardEntries));
+    return buildFullBackup(state, Object.fromEntries(standardEntries));
   },
   importFullBackup: async (bundle: FullBackupBundle): Promise<AppState> => {
-    const { exportAllEnvConfigs, importAllEnvConfigs } = await import("./envConfigStore");
-    const previousEnvConfigs = await exportAllEnvConfigs();
     const rebuiltPanelSettings = rebuildPanelSettingsFromBackup(bundle);
     const previousPanelSettings = currentAppState?.panelSettings ?? await getPanelSettings();
     rebuiltPanelSettings.backup_webdav_password = previousPanelSettings?.backup_webdav_password ?? "";
@@ -1620,8 +1714,6 @@ export const kimiSwitchTauri = {
           });
         }
       }
-      // Keep disabled resources and GUI-only model metadata in the compatibility cache.
-      await importAllEnvConfigs(extractEnvConfigsFromBackup(bundle));
       await savePanelSettings(rebuiltPanelSettings);
     } catch (error) {
       const rollbackErrors: string[] = [];
@@ -1660,11 +1752,6 @@ export const kimiSwitchTauri = {
         } catch (rollbackError) {
           rollbackErrors.push(`${original.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
         }
-      }
-      try {
-        await importAllEnvConfigs(previousEnvConfigs);
-      } catch (rollbackError) {
-        rollbackErrors.push(`environment cache: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
       if (previousPanelSettings) {
         try {

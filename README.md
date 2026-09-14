@@ -4,6 +4,8 @@
 
 ![总览](docs/images/overview.png)
 
+> 文档截图使用内置的本地开发 fixture 生成，只展示脱敏的示例 Profile、端点与用量数据。
+
 ## 为什么需要它
 
 `kimi-code-cli` 的能力很强，但长期维护多套 Provider、模型和 Profile 时，配置文件会逐渐变复杂。这个工具的目标是把“改配置文件”变成明确、可预览、可回滚的桌面操作。
@@ -46,7 +48,6 @@
 
 - 配置 Provider 类型、Base URL 和 API Key。
 - 支持新增、克隆、删除和重命名。
-- 支持启用 / 禁用：禁用的 Provider 不会写入 Kimi Code 配置文件，但仍保留在应用中。
 - 删除前检查是否仍被 Model 引用。
 
 ### 模型配置 · 模型
@@ -59,7 +60,6 @@
 
 - 配置 Provider、模型 ID、上下文长度、能力标签和定价。
 - 自动维护模型命名规则。
-- 支持启用 / 禁用：仅「自身启用且其 Provider 也启用」的模型才会写入配置文件。
 - 删除前检查是否仍被 Profile 或当前默认模型引用。
 
 ### MCP
@@ -86,12 +86,12 @@
 
 - 支持技能名称、描述检索。
 - 支持网格 / 列表视图。
-- 列表模式会根据可视区域自动分页。
+- 所有匹配 Skills 在自适应网格或列表中自然滚动；窗口、语言与字体大小变化不会改变数据可达性。
 - 可查看 Skill 内容、路径来源和覆盖关系。
 
 ### 洞察
 
-按 Kimi Code 环境采集并展示用量数据，包含总览、趋势、分组统计和会话四个维度。
+按 Kimi Code 环境采集并展示用量数据，包含总览、趋势、分组统计和会话三个工作区。
 
 ![洞察](docs/images/insights.png)
 
@@ -139,7 +139,7 @@
 - `tui.toml`：Kimi Code 终端界面设置。
 - `AGENTS.md`：Kimi Code 用户级代理指令。
 - `skills/`：Kimi Code 标准 Skills 目录。
-- `~/.kimi-code-switch-gui/app.db`：GUI 自身 SQLite 数据库，只保存 Profile、语言、主题、快捷键、备份策略、禁用项归档和用量/历史索引等面板私有数据；活动 Provider、Model 和 MCP 以 Kimi 标准文件为准。
+- `~/.kimi-code-switch-gui/app.db`：GUI 自身 SQLite 数据库，只保存 Profile、语言、主题、快捷键、备份策略、禁用项归档和用量/历史索引等面板私有数据；活动 Provider、Model 和 MCP 以 Kimi 标准文件为准。默认环境固定使用 `~/.kimi-code`；只有额外命名环境才使用 `~/.kimi-code-switch-gui/.env/<id>`。
 
 每个环境还可配置独立“项目工作目录”。GUI 从该目录启动 Kimi，并向上查找最近的 `.git` 根，以展示项目级 `.kimi-code/skills`、`.agents/skills`、项目根 `.mcp.json` 与 cwd 本地 `.kimi-code/mcp.json`。MCP 按“用户 < 项目根 < cwd 本地”覆盖；只有存在可解析的官方 workspace-trust marker 时项目 MCP 才标为有效，未信任时仅显示声明且不会写回用户 `mcp.json`。
 

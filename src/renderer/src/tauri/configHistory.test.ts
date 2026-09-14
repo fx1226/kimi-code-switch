@@ -56,7 +56,7 @@ describe("configHistory", () => {
     it("去重时返回 null", async () => {
       mockInvoke.mockResolvedValueOnce(null);
 
-      const result = await captureSnapshot("profiles", "~/.kimi/config.profiles.toml");
+      const result = await captureSnapshot("tui", "~/.kimi-code/tui.toml");
 
       expect(result).toBeNull();
     });
@@ -88,11 +88,11 @@ describe("configHistory", () => {
           id: 2,
           snapshot_at: "2026-06-08T11:00:00Z",
           kimi_code_environment_id: "work",
-          file_id: "profiles",
+          file_id: "tui",
           sha256: "def456",
           size_bytes: 2048,
           snapshot_path: "/path/2.gz",
-          target_path: "/work/config.profiles.toml",
+          target_path: "/work/tui.toml",
           description: null,
         },
       ];

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { Bug, Check, ExternalLink, FileText, Github, LoaderCircle, Mail, RefreshCw, ShieldCheck, TriangleAlert } from "lucide-react";
 
 import { compareReleaseVersions, normalizeReleaseVersion } from "@shared/versionUtils";
 import type { Locale } from "@shared/types";
 
 import { t } from "./i18n";
+import { DialogShell } from "./dialogs";
 import { toTraditionalChinese } from "./localeText";
 import { MarkdownView } from "./markdownView";
 import { extractReleaseNotes, getBundledChangelog } from "./releaseNotes";
@@ -613,19 +613,6 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function useDialogEscape(onClose: () => void): void {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-}
-
 function formatInstallSource(locale: Locale, source: InstallSource | "unknown"): string {
   if (source === "homebrew") {
     return "Homebrew";
@@ -717,8 +704,6 @@ function UpdateDialog(props: {
   onOpenRelease: () => void;
   onClose: () => void;
 }): JSX.Element {
-  useDialogEscape(props.onClose);
-
   const hasError = Boolean(props.result.errorMessage);
   const hasUpdate = props.result.hasUpdate || compareReleaseVersions(props.result.latestVersion, props.result.currentVersion) > 0;
   const isUpToDate = !hasError && !hasUpdate;
@@ -730,29 +715,20 @@ function UpdateDialog(props: {
   const description = getUpdateDescription(props.locale, props.result, hasUpdate, hasError);
   const showHomebrewCommand = hasUpdate && props.result.installSource === "homebrew";
 
-  return createPortal(
-    <div
-      className="confirm-dialog-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
-    >
-      <section
-        className={[
+  return (
+    <DialogShell
+      backdropClassName="confirm-dialog-backdrop"
+      dialogClassName={[
           "confirm-dialog",
           "update-dialog",
           "glass-panel",
           isUpToDate ? "update-dialog-compact update-dialog-current" : "",
           hasError ? "update-dialog-error" : "",
           hasUpdate ? "update-dialog-available" : "",
-        ].filter(Boolean).join(" ")}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="update-dialog-title"
-      >
+      ].filter(Boolean).join(" ")}
+      ariaLabelledBy="update-dialog-title"
+      onClose={props.onClose}
+    >
         <div className="update-dialog-topline" aria-hidden="true">
           <span className="update-dialog-topline-label">
             {hasError
@@ -854,9 +830,7 @@ function UpdateDialog(props: {
             {t(props.locale, "close")}
           </button>
         </div>
-      </section>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 

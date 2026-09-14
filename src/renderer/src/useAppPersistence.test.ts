@@ -79,7 +79,6 @@ function createState(): AppState {
       backup_webdav_password: "",
       backup_webdav_path: "",
       shortcuts: createDefaultShortcuts(),
-      mcp_servers: {},
     },
     mcpConfig: {
       mcpServers: {},
@@ -221,6 +220,57 @@ describe("useAppPersistence", () => {
     expect(saveStateSafe).toHaveBeenCalledWith(expect.any(Object), {
       expectedSnapshot: latestSnapshot,
     });
+  });
+
+  it("persists an immediate GUI-only update without rewriting native configuration files", async () => {
+    const state = createState();
+    const nextState = structuredClone(state);
+    nextState.panelSettings.uiState = { activeTab: "settings" };
+    const panelSnapshot = createSnapshot("panel-only");
+    const usageSetConfig = vi.fn().mockResolvedValue({ ok: true, settings: {} });
+    const saveStateSafe = vi.fn();
+    const captureSnapshot = vi.fn().mockResolvedValue(panelSnapshot);
+    vi.stubGlobal("kimiSwitch", {
+      usageSetConfig,
+      saveStateSafe,
+      captureSnapshot,
+      previewState: vi.fn().mockResolvedValue({}),
+    });
+
+    const { result } = renderHook(() => useAppPersistence({
+      state,
+      savedState: state,
+      locale: "zh-CN",
+      setState: vi.fn(),
+      setSavedState: vi.fn(),
+      setPreview: vi.fn(),
+      setError: vi.fn(),
+      setNotice: vi.fn(),
+      setDiagnostics: vi.fn(),
+      fileSnapshot: createSnapshot("baseline"),
+      setFileSnapshot: vi.fn(),
+      setDoctorReport: vi.fn(),
+      confirmExternalOverwrite: vi.fn(),
+      refreshPreview: vi.fn(),
+      refreshSkills: vi.fn(),
+      currentSelections: { provider: "", model: "", profile: "", mcpServer: "" },
+      setSelectedProvider: vi.fn(),
+      setSelectedModel: vi.fn(),
+      setSelectedProfile: vi.fn(),
+      setSelectedMcpServer: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.persistImmediateState(nextState);
+    });
+
+    expect(usageSetConfig).toHaveBeenCalledWith(expect.objectContaining({
+      uiState: { activeTab: "settings" },
+    }));
+    expect(saveStateSafe).not.toHaveBeenCalled();
+    expect(captureSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      configPath: "~/.kimi-code/config.toml",
+    }));
   });
 
   it("does not overwrite a newer manual draft when an older save finishes", async () => {

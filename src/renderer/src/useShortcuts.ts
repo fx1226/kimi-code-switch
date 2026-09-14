@@ -3,18 +3,8 @@ import { useEffect } from "react";
 import { getBrowserShortcutPlatform, normalizeAccelerator } from "@shared/shortcutStore";
 import type { ShortcutAction, ShortcutBinding } from "@shared/types";
 
+import { getTabForShortcut } from "./appOptions";
 import type { TabId } from "./appOptions";
-
-const TAB_ACTIONS: Partial<Record<ShortcutAction, TabId>> = {
-  "tab.overview": "overview",
-  "tab.profiles": "profiles",
-  "tab.providers": "providers",
-  "tab.models": "models",
-  "tab.mcp": "mcp",
-  "tab.skills": "skills",
-  "tab.insights": "insights",
-  "tab.settings": "settings",
-};
 
 const ALLOW_IN_EDITABLE: Set<ShortcutAction> = new Set([
   "app.globalSearch",
@@ -124,7 +114,7 @@ function executeShortcutAction(
     return;
   }
 
-  const tab = TAB_ACTIONS[action];
+  const tab = getTabForShortcut(action);
   if (tab) {
     options.onNavigate(tab);
   }

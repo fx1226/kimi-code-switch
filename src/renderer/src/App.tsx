@@ -11,7 +11,6 @@ import { CommandPalette } from "./commandPalette";
 import { QuickProfileSwitcher } from "./quickProfileSwitcher";
 import type { SaveRecoveryInfo } from "./tauri/kimiSwitch";
 import { TabPanels } from "./tabs/TabPanels";
-import { ProfileCentricView } from "./views/ProfileCentricView";
 import { AddAssistantWizard } from "./wizards/AddAssistantWizard";
 import { CascadeDeleteDialog } from "./dialogs/CascadeDeleteDialog";
 import { getCascadePreview } from "@shared/configRelations";
@@ -20,8 +19,8 @@ import { deleteProvider, deleteModel, deleteProfile } from "@shared/configStore"
 import { useAppHandlers } from "./useAppHandlers";
 import { maybeRunScheduledBackup } from "./backupAuto";
 import { useShortcuts } from "./useShortcuts";
-import { TAB_ITEMS, LOCALE_OPTIONS, THEME_OPTIONS, ASSISTANT_SUB_ITEMS } from "./appOptions";
-import type { TabId } from "./appOptions";
+import { getNavigationItem, isTabId, LOCALE_OPTIONS, NAVIGATION_ITEMS, THEME_OPTIONS } from "./appOptions";
+import type { NavigationItem, TabId } from "./appOptions";
 import {
   BackupRecordsDialog,
   ConfirmDialog,
@@ -42,6 +41,8 @@ export function App(): JSX.Element {
   const {
     state,
     activeTab, setActiveTab,
+    activeSettingsSubTab, setActiveSettingsSubTab,
+    kimiCodeSubTab, setKimiCodeSubTab,
     locale, title, diagnostics,
     loadState,
     closeConfirmDialog,
@@ -251,9 +252,12 @@ export function App(): JSX.Element {
   }, []);
 
   const handleCommandPaletteSelect = useCallback((result: SearchResult): void => {
+    if (!isTabId(result.tabId)) {
+      return;
+    }
     setCommandPaletteOpen(false);
     runAfterUnsavedHandled(() => {
-      setActiveTab(result.tabId as TabId);
+      setActiveTab(result.tabId);
       if (result.type === "provider") setSelectedProvider(result.name);
       else if (result.type === "model") setSelectedModel(result.name);
       else if (result.type === "profile") setSelectedProfile(result.name);
@@ -270,17 +274,13 @@ export function App(): JSX.Element {
       }));
   }, [locale, runAfterUnsavedHandled, updateState]);
 
-  const visibleTabItems = TAB_ITEMS.filter((item) => item.id !== "about");
-  const bottomTabItems = TAB_ITEMS.filter((item) => item.id === "about");
-  const configTabItems = [
-    TAB_ITEMS.find((item) => item.id === "profiles")!,
-    ...ASSISTANT_SUB_ITEMS,
-  ];
-  const primaryTabItems = visibleTabItems.filter((item) => !["profiles", "providers", "models"].includes(item.id));
+  const primaryTabItems = NAVIGATION_ITEMS.filter((item) => item.section === "primary");
+  const configTabItems = NAVIGATION_ITEMS.filter((item) => item.section === "configuration");
+  const bottomTabItems = NAVIGATION_ITEMS.filter((item) => item.section === "footer");
 
   const activeProfileDisplayName = state.profiles[state.activeProfile]?.label?.trim() || state.activeProfile || "-";
-  const activePageItem = [...TAB_ITEMS, ...ASSISTANT_SUB_ITEMS].find((item) => item.id === activeTab);
-  const activePageTitle = activePageItem ? t(locale, activePageItem.labelKey) : t(locale, "overview");
+  const activePageItem = getNavigationItem(activeTab);
+  const activePageTitle = t(locale, activePageItem.labelKey);
   const activePageDescription = t(locale, `${activeTab}PageDescription`);
 
   return (
@@ -447,28 +447,14 @@ export function App(): JSX.Element {
         </header>
 
         <div className="content-scroll" id={`panel-${activeTab}`} aria-label={activePageTitle}>
-          {activeTab === "profiles" ? (
-            <ProfileCentricView
-              state={state}
-              locale={locale}
-              selectedProfile={selectedProfileName}
-              dirtyProfiles={dirtyProfiles}
-              onSelect={(name) => runAfterUnsavedHandled(() => setSelectedProfile(name))}
-              onSwitch={(profileName) =>
-                runAfterUnsavedHandled(() => updateState((draft) => {
-                  applyProfile(draft, profileName);
-                }, {
-                  historySummary: formatMessage(t(locale, "historyActivateProfile"), { name: profileName }),
-                }))
-              }
-              onAddNew={() => setShowWizard(true)}
-              onOpenTerminal={(profileName) => void openKimiInTerminal(profileName)}
-            />
-          ) : null}
           <TabPanels
             state={state}
             shortcuts={shortcuts}
             activeTab={activeTab}
+            activeSettingsSubTab={activeSettingsSubTab}
+            setActiveSettingsSubTab={setActiveSettingsSubTab}
+            kimiCodeSubTab={kimiCodeSubTab}
+            setKimiCodeSubTab={setKimiCodeSubTab}
             locale={locale}
             diagnostics={diagnostics}
             selectedProvider={selectedProvider}
@@ -483,6 +469,7 @@ export function App(): JSX.Element {
             setSelectedSkill={setSelectedSkill}
             setSelectedSkillPath={setSelectedSkillPath}
             skillsViewMode={skillsViewMode}
+            onOpenProfileWizard={() => setShowWizard(true)}
             setSkillsViewMode={setSkillsViewMode}
             skillsReport={skillsReport}
             isSkillsLoading={isSkillsLoading}
@@ -711,7 +698,7 @@ export function App(): JSX.Element {
 
 function NavigationButton(props: {
   id: TabId;
-  icon: typeof Search;
+  icon: NavigationItem["icon"];
   label: string;
   activeTab: TabId;
   shortcut?: string;
@@ -747,23 +734,13 @@ function createTabShortcutLabels(
   platform: string,
 ): Partial<Record<string, string>> {
   const labels: Partial<Record<string, string>> = {};
-  for (const [action, tab] of Object.entries(TAB_SHORTCUT_ACTIONS)) {
-    const binding = shortcuts[action as ShortcutAction];
+  for (const item of NAVIGATION_ITEMS) {
+    if (!item.shortcutAction) continue;
+    const binding = shortcuts[item.shortcutAction];
     if (!binding?.enabled || !binding.accelerator.trim()) {
       continue;
     }
-    labels[tab] = formatAcceleratorForPlatform(binding.accelerator, platform);
+    labels[item.id] = formatAcceleratorForPlatform(binding.accelerator, platform);
   }
   return labels;
 }
-
-const TAB_SHORTCUT_ACTIONS: Record<string, string> = {
-  "tab.overview": "overview",
-  "tab.profiles": "profiles",
-  "tab.providers": "providers",
-  "tab.models": "models",
-  "tab.mcp": "mcp",
-  "tab.skills": "skills",
-  "tab.insights": "insights",
-  "tab.settings": "settings",
-};

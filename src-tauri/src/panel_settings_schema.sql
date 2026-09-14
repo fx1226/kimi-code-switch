@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS panel_settings (
   ui_state TEXT, -- {activeTab?, providerSortBy?, profileSortBy?}
   favorites TEXT, -- {providers?: string[], profiles?: string[]}
   active_official_account_id TEXT NOT NULL DEFAULT '',
+  official_account_vault_enabled INTEGER NOT NULL DEFAULT 0, -- Explicit GUI-only credential vault opt-in
 
   -- 备份配置
   backup_strategy TEXT NOT NULL DEFAULT 'manual',
@@ -45,8 +46,8 @@ CREATE TABLE IF NOT EXISTS panel_settings (
   -- 快捷键（JSON）
   shortcuts TEXT NOT NULL, -- Record<ShortcutAction, ShortcutBinding>
 
-  -- MCP 服务器（JSON）
-  mcp_servers TEXT NOT NULL, -- Record<string, McpServerConfig>
+  -- 仅 GUI 展示所需的模型元数据（JSON）；Provider / Model 定义及密钥只存原生 config.toml
+  model_ui_metadata TEXT NOT NULL DEFAULT '{}', -- Record<environmentId, Record<modelId, ModelUiMetadata>>
 
   -- Kimi Code 环境（JSON）
   kimi_code_environments TEXT, -- KimiCodeEnvironment[]

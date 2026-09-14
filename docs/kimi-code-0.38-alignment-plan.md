@@ -106,15 +106,13 @@
 
 验收：在每个写入步骤注入崩溃，重启后只能得到一致的旧版本或新版本；未知外部修改不得被覆盖。
 
-#### R0.4 默认环境 legacy 迁移路径
+#### R0.4 默认环境 legacy 迁移路径（已完成）
 
-现状：迁移逻辑仍可能把默认环境写到 `~/.kimi-code-switch-gui/.env/default`，而官方和 GUI 默认环境实际读取 `~/.kimi-code`；marker 落盘后会形成不可重试的孤儿迁移。
+默认环境现在固定使用 `~/.kimi-code`；只有命名的 managed 环境使用 `.env/<id>`。启动时会把旧 `~/.kimi-code-switch-gui/.env/default` 中的配置、MCP、TUI、AGENTS、Skills 与 Plugins 以“原生目录优先、仅补缺失项”的方式迁入，并在全部资源成功处理后记录结果 marker。
 
-改造：默认环境目标固定为 `~/.kimi-code`；只有命名的 managed 环境使用 `.env/<id>`。marker 必须包含目标路径和各资源结果，错误或孤儿结果不得标记成功。
+主要位置：`src/shared/configStore.ts`、`src/renderer/src/tauri/fileAccess.ts`、`src-tauri/src/fs_access.rs` 及对应迁移测试。
 
-主要位置：`src/shared/configStore.ts` 及 legacy migration 测试。
-
-验收：从仅有 `~/.kimi/` 的干净主目录升级后，官方 `kimi` 与 GUI 读取到同一迁移结果；重复启动幂等。
+验收：默认环境的 `config.toml`、`mcp.json`、`tui.toml`、`AGENTS.md`、`skills/` 与 `plugins/` 均由 `~/.kimi-code` 维护；重复启动幂等，原生目录既有内容不被覆盖。
 
 #### R0.5 Project local config 的首次创建与合法性
 

@@ -8,6 +8,7 @@ import {
   copyDir,
   copyKimiCodeConfiguration,
   listDir,
+  mergeDirectoryMissing,
   moveFile,
   pathExists,
   recoverPendingSaveTransaction,
@@ -52,6 +53,9 @@ describe("copyKimiCodeConfiguration", () => {
       if (command === "write_text_cas") return "new-hash" as never;
       if (command === "path_exists") return true as never;
       if (command === "list_dir") return ["one"] as never;
+      if (command === "merge_directory_missing") {
+        return { sourceExists: true, copiedEntries: 2, skippedConflicts: 1 } as never;
+      }
       return undefined as never;
     });
 
@@ -64,11 +68,17 @@ describe("copyKimiCodeConfiguration", () => {
     await moveFile("/a", "/b");
     await removeDir("/dir");
     await copyDir("/from", "/to");
+    await expect(mergeDirectoryMissing("/from", "/to")).resolves.toEqual({
+      sourceExists: true,
+      copiedEntries: 2,
+      skippedConflicts: 1,
+    });
     await expect(pathExists("/a")).resolves.toBe(true);
     await expect(listDir("/dir")).resolves.toEqual(["one"]);
 
     expect(mockedInvoke).toHaveBeenCalledWith("remove_file_cas", { path: "/a", expectedSha256: "new-hash" });
     expect(mockedInvoke).toHaveBeenCalledWith("move_file", { from: "/a", to: "/b" });
+    expect(mockedInvoke).toHaveBeenCalledWith("merge_directory_missing", { from: "/from", to: "/to" });
   });
 
   it("clones only portable configuration, strips secrets, and copies Skills", async () => {

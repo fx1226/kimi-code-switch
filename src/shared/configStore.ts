@@ -4,8 +4,9 @@ import stringify from "@iarna/toml/stringify.js";
 import { REDACTION_MASK } from "./configSafety";
 import { ConfigResolver, ConfigTarget, parseConfigTarget } from "./configTarget";
 import { SUPPORTED_CURRENCIES } from "./currency";
-import { buildMcpConfigDocument, DEFAULT_MCP_CONFIG_PATH, loadMcpConfig, parseMcpConfigStrict } from "./mcpStore";
+import { buildMcpConfigDocument, DEFAULT_MCP_CONFIG_PATH, loadMcpConfig } from "./mcpStore";
 import { normalizeEntryName } from "./nameRules";
+import { remapInstalledPluginRoots } from "./pluginStore";
 import { createDefaultShortcuts, normalizeShortcuts } from "./shortcutStore";
 import { TUI_CONFIG_FILENAME, buildTuiConfigDocument, hasTuiConfigValues, mergeTuiConfigDocument, parseTuiConfigDocumentWithDiagnostics, TuiConfigFromProfile } from "./tuiStore";
 import type {
@@ -22,6 +23,7 @@ import type {
   KimiCodeEnvironment,
   MainConfig,
   McpServerConfig,
+  ModelUiMetadata,
   ModelConfig,
   PanelSettings,
   PortableDirectoryBundle,
@@ -35,13 +37,13 @@ import type {
 export const PROFILE_VERSION = 1;
 export const PANEL_SETTINGS_VERSION = 1;
 export const PROFILE_FILENAME = "config.profiles.toml";
-export const PANEL_SETTINGS_FILENAME = "config.panel.toml";
 export const BACKUP_DIRECTORY_NAME = "backups";
 export const DEFAULT_PROFILE_NAME = "default";
 export const DEFAULT_KIMI_CODE_ENVIRONMENT_ID = "default";
 export const DEFAULT_KIMI_CODE_ENVIRONMENT_NAME = "默认环境";
 export const PANEL_APP_DIRECTORY = "~/.kimi-code-switch-gui";
 export const KIMI_CODE_ENVIRONMENTS_DIRECTORY = `${PANEL_APP_DIRECTORY}/.env`;
+export const LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME = `${KIMI_CODE_ENVIRONMENTS_DIRECTORY}/${DEFAULT_KIMI_CODE_ENVIRONMENT_ID}`;
 
 /**
  * 根据目标获取默认配置路径
@@ -69,7 +71,10 @@ export function defaultKimiCodeHomePath(): string {
 }
 
 export function getKimiCodeEnvironmentHomePath(environmentId: string): string {
-  return joinPath(KIMI_CODE_ENVIRONMENTS_DIRECTORY, sanitizeEnvironmentId(environmentId, DEFAULT_KIMI_CODE_ENVIRONMENT_ID));
+  const id = sanitizeEnvironmentId(environmentId, DEFAULT_KIMI_CODE_ENVIRONMENT_ID);
+  return id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+    ? defaultKimiCodeHomePath()
+    : joinPath(KIMI_CODE_ENVIRONMENTS_DIRECTORY, id);
 }
 
 export function getKimiCodeConfigPath(homePath = defaultKimiCodeHomePath()): string {
@@ -105,17 +110,17 @@ export function createDefaultKimiCodeEnvironment(): KimiCodeEnvironment {
 
 export const DEFAULT_CONFIG_PATH = getDefaultConfigPath(ConfigTarget.KimiCode);
 export const DEFAULT_PANEL_DIRECTORY = getDefaultPanelDirectory(ConfigTarget.KimiCode);
-export const DEFAULT_PANEL_SETTINGS_PATH = `${DEFAULT_PANEL_DIRECTORY}/${PANEL_SETTINGS_FILENAME}`;
+/** Logical database location used by previews/history; not a filesystem config file. */
+export const DEFAULT_PANEL_SETTINGS_PATH = `${DEFAULT_PANEL_DIRECTORY}/app.db#panel_settings`;
 export const LEGACY_PANEL_SETTINGS_PATH = "~/.kimi/config.panel.toml";
 export const LEGACY_KIMI_CODE_PANEL_SETTINGS_PATH = "~/.kimi-code/.panel/config.panel.toml";
-export const PANEL_USAGE_DIRECTORY = `${DEFAULT_PANEL_DIRECTORY}/usage`;
-export const PANEL_USAGE_DB_PATH = `${PANEL_USAGE_DIRECTORY}/index.db`;
-export const LEGACY_USAGE_DIRECTORY = "~/.kimi/usage";
+export const LEGACY_GUI_PANEL_SETTINGS_PATH = "~/.kimi-code-switch-gui/config.panel.toml";
 export const LEGACY_CONFIG_PATH = "~/.kimi/config.toml";
 const LEGACY_PROFILES_PATH = "~/.kimi/config.profiles.toml";
 const LEGACY_MCP_CONFIG_PATH = "~/.kimi/config.mcp.json";
 const LEGACY_MCP_JSON_PATH = "~/.kimi/mcp.json";
 const LEGACY_MIGRATION_MARKER_PATH = `${DEFAULT_PANEL_DIRECTORY}/legacy-kimi-cli-config.migrated.json`;
+const LEGACY_MANAGED_DEFAULT_ENVIRONMENT_MIGRATION_MARKER_PATH = `${DEFAULT_PANEL_DIRECTORY}/legacy-managed-default-environment.migrated.json`;
 const SUPPORTED_LOCALES = new Set<PanelSettings["locale"]>(["zh-CN", "zh-TW", "en-US", "ja-JP", "de-DE", "es-ES"]);
 
 /**
@@ -176,11 +181,6 @@ const DEFAULTS = {
   merge_all_available_skills: true,
 } as const;
 
-export interface EnvConfigData {
-  providers: Record<string, ProviderConfig>;
-  models: Record<string, ModelConfig>;
-}
-
 export interface SaveTransactionRecord {
   version: 1;
   kind: "save-app-state";
@@ -211,60 +211,92 @@ export interface FileAccess {
   beginSaveTransaction?(record: SaveTransactionRecord): Promise<void>;
   completeSaveTransaction?(): Promise<void>;
   ensureDir(path: string): Promise<void>;
+  /** Migrate a legacy directory without replacing files already owned by the native home. */
+  mergeDirectoryMissing?(from: string, to: string): Promise<{
+    sourceExists: boolean;
+    copiedEntries: number;
+    skippedConflicts: number;
+  }>;
   // 可选：PanelSettings 专用读写（用于 SQLite 存储）
   // 若未提供，回退到 readText/writeText + TOML
   readPanelSettings?(path: string): Promise<PanelSettings | null>;
   writePanelSettings?(path: string, settings: PanelSettings): Promise<void>;
-  // 可选：环境级 Provider/Model 读写（SQLite 为唯一真源）
-  // 若未提供（如测试环境），回退到 config.toml 解析与写入
-  readEnvConfig?(environmentId: string): Promise<EnvConfigData | null>;
-  writeEnvConfig?(environmentId: string, data: EnvConfigData): Promise<void>;
 }
 
 /**
- * 把一组配置全部标记为 enabled:true（用于从 config.toml 一次性迁移到 DB）。
- */
-function markAllEnabled<T extends { enabled?: boolean }>(
-  record: Record<string, T>,
-): Record<string, T> {
-  const out: Record<string, T> = {};
-  for (const [name, value] of Object.entries(record)) {
-    out[name] = { ...value, enabled: value.enabled ?? true };
-  }
-  return out;
-}
-
-/**
- * 投影：返回仅含「启用」Provider 与「自身启用且其 Provider 也启用」Model 的 mainConfig。
- * 用于写入 config.toml（Kimi Code 实际读取的文件）。内部的 `enabled` 标记会被剥离。
+ * Return the native Kimi Code document shape. Historical GUI-only fields are
+ * stripped, but every native Provider and Model is retained.
  */
 export function projectEnabledMainConfig(config: MainConfig): MainConfig {
   const projected = cloneMainConfig(config);
-  const enabledProviders = new Set<string>();
   const providers: Record<string, ProviderConfig> = {};
   for (const [name, provider] of Object.entries(config.providers)) {
-    if (provider.enabled === false) continue;
-    enabledProviders.add(name);
-    const { enabled: _enabled, ...rest } = provider;
+    const { enabled: _legacyEnabled, ...rest } = provider as ProviderConfig & { enabled?: boolean };
     providers[name] = rest;
   }
   const models: Record<string, ModelConfig> = {};
   for (const [name, model] of Object.entries(config.models)) {
-    if (model.enabled === false) continue;
-    if (!enabledProviders.has(model.provider)) continue;
     const {
-      enabled: _enabled,
+      enabled: _legacyEnabled,
       auth_mode: _authMode,
       official_account_scope: _officialAccountScope,
       pricing: _pricing,
       ...rest
-    } = model;
+    } = model as ModelConfig & { enabled?: boolean };
     models[name] = rest;
   }
   projected.providers = providers;
   projected.models = models;
   // extra（含 [thinking]/[permission] 等未知节透传）直接保留
   return projected;
+}
+
+function modelUiMetadataForEnvironment(
+  settings: PanelSettings,
+  environmentId: string,
+): Record<string, ModelUiMetadata> {
+  return structuredClone(settings.model_ui_metadata?.[environmentId] ?? {});
+}
+
+function overlayModelUiMetadata(
+  mainConfig: MainConfig,
+  settings: PanelSettings,
+  environmentId: string,
+): void {
+  const metadata = modelUiMetadataForEnvironment(settings, environmentId);
+  for (const [modelId, model] of Object.entries(mainConfig.models)) {
+    const ui = metadata[modelId];
+    if (!ui) continue;
+    mainConfig.models[modelId] = {
+      ...model,
+      ...(ui.auth_mode ? { auth_mode: ui.auth_mode } : {}),
+      ...(ui.official_account_scope ? { official_account_scope: ui.official_account_scope } : {}),
+      ...(ui.pricing ? { pricing: structuredClone(ui.pricing) } : {}),
+    };
+  }
+}
+
+function snapshotModelUiMetadata(
+  settings: PanelSettings,
+  environmentId: string,
+  models: Record<string, ModelConfig>,
+): PanelSettings["model_ui_metadata"] {
+  const next = structuredClone(settings.model_ui_metadata ?? {});
+  const environmentMetadata: Record<string, ModelUiMetadata> = {};
+  for (const [modelId, model] of Object.entries(models)) {
+    const metadata: ModelUiMetadata = {
+      ...(model.auth_mode ? { auth_mode: model.auth_mode } : {}),
+      ...(model.official_account_scope ? { official_account_scope: model.official_account_scope } : {}),
+      ...(model.pricing ? { pricing: structuredClone(model.pricing) } : {}),
+    };
+    if (Object.keys(metadata).length > 0) environmentMetadata[modelId] = metadata;
+  }
+  if (Object.keys(environmentMetadata).length > 0) {
+    next[environmentId] = environmentMetadata;
+  } else {
+    delete next[environmentId];
+  }
+  return next;
 }
 
 export function createDefaultPanelSettings(
@@ -298,7 +330,8 @@ export function createDefaultPanelSettings(
     backup_webdav_password: "",
     backup_webdav_path: "",
     shortcuts: createDefaultShortcuts(),
-    mcp_servers: {},
+    model_ui_metadata: {},
+    official_account_vault_enabled: false,
     kimi_code_environments: [createDefaultKimiCodeEnvironment()],
     active_kimi_code_environment_id: DEFAULT_KIMI_CODE_ENVIRONMENT_ID,
     insights_status: "disabled",
@@ -337,10 +370,6 @@ export async function loadAppState(
   const activeEnvironment = resolveActiveKimiCodeEnvironment(panelSettings);
   const environmentConfigPath = getKimiCodeConfigPath(activeEnvironment.homePath);
   const environmentMcpConfigPath = getKimiCodeMcpConfigPath(activeEnvironment.homePath);
-  if (panelSettingsResult.migratedFromLegacy) {
-    await files.ensureDir(dirnamePath(DEFAULT_PANEL_SETTINGS_PATH));
-    await files.writeText(DEFAULT_PANEL_SETTINGS_PATH, buildPanelSettingsDocument(panelSettings));
-  }
   const mcpConfigPath = sanitizePath(paths?.mcpConfigPath, environmentMcpConfigPath);
   const configPath = sanitizePath(paths?.configPath, environmentConfigPath);
   const profilesPath = "";
@@ -354,61 +383,9 @@ export async function loadAppState(
   );
   const tuiConfig = tuiResult.config;
 
-  // config.toml 是活动 Provider/Model 的唯一真源。旧 env-config DB 只作为禁用项
-  // 的兼容归档读取：不得覆盖文件中的同名项，也不得复活 DB-only 的启用项。
-  if (files.readEnvConfig) {
-    let dbConfig: EnvConfigData | null = null;
-    try {
-      dbConfig = await files.readEnvConfig(activeEnvironment.id);
-    } catch (error) {
-      console.warn(`Disabled Provider/Model cache could not be read for ${activeEnvironment.id}:`, error);
-    }
-    if (dbConfig) {
-      // Active definitions come from config.toml. Only GUI-owned metadata may be
-      // overlaid from the compatibility cache.
-      for (const [name, model] of Object.entries(mainConfig.models)) {
-        const cached = dbConfig.models[name];
-        if (!cached) continue;
-        mainConfig.models[name] = {
-          ...model,
-          ...(cached.auth_mode ? { auth_mode: cached.auth_mode } : {}),
-          ...(cached.official_account_scope ? { official_account_scope: cached.official_account_scope } : {}),
-          ...(cached.pricing ? { pricing: structuredClone(cached.pricing) } : {}),
-        };
-      }
-      const disabledProviderNames = new Set<string>();
-      for (const [name, provider] of Object.entries(dbConfig.providers)) {
-        if (provider.enabled === false && mainConfig.providers[name] === undefined) {
-          mainConfig.providers[name] = structuredClone(provider);
-          disabledProviderNames.add(name);
-        }
-      }
-      for (const [name, model] of Object.entries(dbConfig.models)) {
-        const providerExists = mainConfig.providers[model.provider] !== undefined
-          || disabledProviderNames.has(model.provider);
-        if (
-          mainConfig.models[name] === undefined
-          && providerExists
-          && (model.enabled === false || disabledProviderNames.has(model.provider))
-        ) {
-          mainConfig.models[name] = structuredClone(model);
-        }
-      }
-    } else if (files.writeEnvConfig) {
-      const migratedProviders = markAllEnabled(mainConfig.providers);
-      const migratedModels = markAllEnabled(mainConfig.models);
-      mainConfig.providers = migratedProviders;
-      mainConfig.models = migratedModels;
-      try {
-        await files.writeEnvConfig(activeEnvironment.id, {
-          providers: migratedProviders,
-          models: migratedModels,
-        });
-      } catch (error) {
-        console.warn(`Disabled Provider/Model cache could not be initialized for ${activeEnvironment.id}:`, error);
-      }
-    }
-  }
+  // Native config.toml owns all provider/model definitions. The database keeps
+  // only display metadata that cannot be represented by Kimi Code itself.
+  overlayModelUiMetadata(mainConfig, panelSettings, activeEnvironment.id);
   const fileMcpConfig = await loadMcpConfig(files, mcpConfigPath);
   const environments = parseKimiCodeEnvironments(
     panelSettings.kimi_code_environments,
@@ -452,7 +429,6 @@ export async function loadAppState(
       active_profile: activeProfile,
       profiles_path: "",
       follow_config_profiles: true,
-      mcp_servers: cloneMcpServers(mcpConfig.mcpServers),
       kimi_code_environments: scopedEnvironments,
       active_kimi_code_environment_id: activeEnvironment.id,
     },
@@ -574,7 +550,11 @@ async function loadLegacyPanelSettings(
   files: FileAccess,
   panelSettingsPath: string,
 ): Promise<{ settings: PanelSettings; migratedFromLegacy: boolean } | null> {
-  for (const legacyPath of [LEGACY_KIMI_CODE_PANEL_SETTINGS_PATH, LEGACY_PANEL_SETTINGS_PATH]) {
+  for (const legacyPath of [
+    LEGACY_GUI_PANEL_SETTINGS_PATH,
+    LEGACY_KIMI_CODE_PANEL_SETTINGS_PATH,
+    LEGACY_PANEL_SETTINGS_PATH,
+  ]) {
     try {
       const legacyData = await loadTomlFile(files, legacyPath, "legacy panel settings");
       if (Object.keys(legacyData).length) {
@@ -679,7 +659,7 @@ function panelSettingsFromUnknown(data: Record<string, unknown>, fallback: Panel
     backup_webdav_password: asString(data.backup_webdav_password, ""),
     backup_webdav_path: asString(data.backup_webdav_path, ""),
     shortcuts: normalizeShortcuts(data.shortcuts),
-    mcp_servers: parsePanelMcpServers(data.mcp_servers),
+    model_ui_metadata: parseModelUiMetadata(data.model_ui_metadata),
     kimi_code_environments: parseKimiCodeEnvironments(data.kimi_code_environments, fallback.kimi_code_environments),
     active_kimi_code_environment_id: asString(
       data.active_kimi_code_environment_id,
@@ -688,6 +668,7 @@ function panelSettingsFromUnknown(data: Record<string, unknown>, fallback: Panel
     last_display_id: typeof data.last_display_id === "number" ? data.last_display_id : undefined,
     uiState: parseUiState(data.uiState),
     favorites: parseFavorites(data.favorites),
+    official_account_vault_enabled: asBoolean(data.official_account_vault_enabled, false),
     active_official_account_id: asString(data.active_official_account_id, fallback.active_official_account_id ?? ""),
     insights_status:
       data.insights_status === "enabled" || data.insights_status === "paused" || data.insights_status === "disabled"
@@ -741,7 +722,11 @@ export async function saveAppState(
       ...normalizedState.panelSettings,
       profiles: sanitizeProfilesRecord(normalizedState.profiles),
       active_profile: normalizedState.activeProfile,
-      mcp_servers: cloneMcpServers(normalizedState.mcpConfig.mcpServers),
+      model_ui_metadata: snapshotModelUiMetadata(
+        normalizedState.panelSettings,
+        normalizedState.panelSettings.active_kimi_code_environment_id ?? DEFAULT_KIMI_CODE_ENVIRONMENT_ID,
+        normalizedState.mainConfig.models,
+      ),
       profiles_path: "",
       follow_config_profiles: true,
     },
@@ -752,8 +737,7 @@ export async function saveAppState(
   await files.ensureDir(dirnamePath(normalizedState.mcpConfigPath));
   const stateForConfig = await restoreRedactedProviderSecrets(files, stateToPersist);
 
-  // 标准文件先落盘；旧 env-config 仅是可重建的禁用项兼容缓存，缓存故障不得
-  // 阻止官方 config.toml 保存。
+  // Standard Kimi Code files are the sole source for native configuration.
   const projectedConfig: AppState = {
     ...stateForConfig,
     mainConfig: projectEnabledMainConfig(stateForConfig.mainConfig),
@@ -769,12 +753,7 @@ export async function saveAppState(
       : Promise.resolve(null),
   ]);
 
-  const activeProfileName = stateForConfig.activeProfile;
-  const profileTuiConfig = TuiConfigFromProfile(stateForConfig.profiles[activeProfileName]);
-  const tuiConfig = {
-    ...(stateForConfig.tuiConfig ?? {}),
-    ...profileTuiConfig,
-  };
+  const tuiConfig = stateForConfig.tuiConfig ?? {};
   const tuiConfigPath = getKimiCodeTuiConfigPath(dirnamePath(stateForConfig.configPath));
   const existingTuiDocument = await safeReadText(files, tuiConfigPath);
   const nextTuiDocument = hasTuiConfigValues(tuiConfig)
@@ -892,17 +871,6 @@ export async function saveAppState(
     throw error;
   }
 
-  if (files.writeEnvConfig) {
-    try {
-      await files.writeEnvConfig(normalizedState.panelSettings.active_kimi_code_environment_id, {
-        providers: stateForConfig.mainConfig.providers,
-        models: stateForConfig.mainConfig.models,
-      });
-    } catch (error) {
-      console.warn("Disabled Provider/Model cache update failed after standard files were saved:", error);
-    }
-  }
-
 }
 
 async function writeTextWithOptionalCas(
@@ -1017,6 +985,166 @@ export async function migrateLegacyKimiCliConfigToKimiCode(files: FileAccess): P
   return result;
 }
 
+export interface LegacyManagedDefaultEnvironmentMigrationResult {
+  migrated: boolean;
+  configMerged: boolean;
+  mcpMerged: boolean;
+  tuiMerged: boolean;
+  agentsCopied: boolean;
+  skillsCopied: boolean;
+  pluginsMerged: boolean;
+  reason?: string;
+}
+
+/**
+ * One-time recovery for releases that treated the GUI data directory as the
+ * default KIMI_CODE_HOME. Native files always win; this only fills missing
+ * configuration and directory entries before the default record is normalized
+ * back to ~/.kimi-code.
+ */
+export async function migrateLegacyManagedDefaultEnvironmentToNativeHome(
+  files: FileAccess,
+): Promise<LegacyManagedDefaultEnvironmentMigrationResult> {
+  const marker = await safeReadText(files, LEGACY_MANAGED_DEFAULT_ENVIRONMENT_MIGRATION_MARKER_PATH);
+  if (marker?.trim()) {
+    return {
+      migrated: false,
+      configMerged: false,
+      mcpMerged: false,
+      tuiMerged: false,
+      agentsCopied: false,
+      skillsCopied: false,
+      pluginsMerged: false,
+      reason: "already-migrated",
+    };
+  }
+
+  const sourceHome = LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME;
+  const targetHome = defaultKimiCodeHomePath();
+  const sourceConfigPath = getKimiCodeConfigPath(sourceHome);
+  const targetConfigPath = getKimiCodeConfigPath(targetHome);
+  const sourceMcpPath = getKimiCodeMcpConfigPath(sourceHome);
+  const targetMcpPath = getKimiCodeMcpConfigPath(targetHome);
+  const sourceTuiPath = getKimiCodeTuiConfigPath(sourceHome);
+  const targetTuiPath = getKimiCodeTuiConfigPath(targetHome);
+  const sourceAgentsPath = `${sourceHome}/AGENTS.md`;
+  const targetAgentsPath = `${targetHome}/AGENTS.md`;
+  const sourcePluginsPath = `${sourceHome}/plugins/installed.json`;
+  const targetPluginsPath = `${targetHome}/plugins/installed.json`;
+
+  const [
+    legacyConfigDocument,
+    legacyMcpDocument,
+    legacyTuiDocument,
+    legacyAgentsDocument,
+    legacyPluginsDocument,
+  ] = await Promise.all([
+    safeReadText(files, sourceConfigPath),
+    safeReadText(files, sourceMcpPath),
+    safeReadText(files, sourceTuiPath),
+    safeReadText(files, sourceAgentsPath),
+    safeReadText(files, sourcePluginsPath),
+  ]);
+
+  let configMerged = false;
+  let mcpMerged = false;
+  let tuiMerged = false;
+  let agentsCopied = false;
+  let skillsCopied = false;
+  let pluginsMerged = false;
+
+  try {
+    if (legacyConfigDocument?.trim()) {
+      const currentConfig = parseDocument(await safeReadText(files, targetConfigPath));
+      const legacyConfig = parseDocument(legacyConfigDocument);
+      const merged = mergeLegacyMainConfig(currentConfig, legacyConfig);
+      if (merged.changed) {
+        await files.ensureDir(targetHome);
+        await files.writeText(targetConfigPath, stringify(merged.value));
+        configMerged = true;
+      }
+    }
+
+    if (legacyMcpDocument?.trim()) {
+      const merged = mergeJsonMcpDocuments(await safeReadText(files, targetMcpPath), legacyMcpDocument);
+      if (merged.changed) {
+        await files.ensureDir(targetHome);
+        await files.writeText(targetMcpPath, JSON.stringify(merged.value, null, 2));
+        mcpMerged = true;
+      }
+    }
+
+    if (legacyTuiDocument?.trim()) {
+      const currentTui = parseDocument(await safeReadText(files, targetTuiPath));
+      const legacyTui = parseDocument(legacyTuiDocument);
+      const merged = mergeMissingRecordValues(currentTui, legacyTui);
+      if (merged.changed) {
+        await files.ensureDir(targetHome);
+        await files.writeText(targetTuiPath, stringify(merged.value));
+        tuiMerged = true;
+      }
+    }
+
+    if (legacyAgentsDocument?.trim() && !(await safeReadText(files, targetAgentsPath))?.trim()) {
+      await files.ensureDir(targetHome);
+      await files.writeText(targetAgentsPath, legacyAgentsDocument);
+      agentsCopied = true;
+    }
+
+    const skillsResult = files.mergeDirectoryMissing
+      ? await files.mergeDirectoryMissing(`${sourceHome}/skills`, `${targetHome}/skills`)
+      : { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
+    skillsCopied = skillsResult.copiedEntries > 0;
+
+    // Write the remapped installed.json before merging the directory. The
+    // directory primitive never overwrites target files, so managed plugin
+    // roots cannot retain the retired GUI default-home prefix.
+    if (legacyPluginsDocument?.trim()) {
+      const merged = mergeInstalledPluginDocuments(
+        await safeReadText(files, targetPluginsPath),
+        legacyPluginsDocument,
+        sourceHome,
+        targetHome,
+      );
+      if (merged.changed) {
+        await files.ensureDir(`${targetHome}/plugins`);
+        await files.writeText(targetPluginsPath, merged.value);
+        pluginsMerged = true;
+      }
+    }
+
+    const pluginsResult = files.mergeDirectoryMissing
+      ? await files.mergeDirectoryMissing(`${sourceHome}/plugins`, `${targetHome}/plugins`)
+      : { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
+    pluginsMerged ||= pluginsResult.copiedEntries > 0;
+  } catch (error) {
+    // A marker would suppress all future recovery attempts, so only write it
+    // after every source resource has been processed successfully.
+    throw new Error(`Failed to migrate the legacy managed default environment: ${formatErrorMessage(error)}`);
+  }
+
+  const result: LegacyManagedDefaultEnvironmentMigrationResult = {
+    migrated: configMerged || mcpMerged || tuiMerged || agentsCopied || skillsCopied || pluginsMerged,
+    configMerged,
+    mcpMerged,
+    tuiMerged,
+    agentsCopied,
+    skillsCopied,
+    pluginsMerged,
+    reason: legacyConfigDocument?.trim()
+      || legacyMcpDocument?.trim()
+      || legacyTuiDocument?.trim()
+      || legacyAgentsDocument?.trim()
+      || legacyPluginsDocument?.trim()
+      || skillsResult.sourceExists
+      || pluginsResult.sourceExists
+      ? undefined
+      : "legacy-environment-missing",
+  };
+  await writeLegacyManagedDefaultEnvironmentMigrationMarker(files, result);
+  return result;
+}
+
 export function buildConfigDocument(state: AppState): string {
   // config.toml 是 Kimi Code 实际读取的文件，只应包含「启用」项，且不写入 GUI 专用的
   // enabled 标记。这里统一投影，保证「写盘内容 / 预览 / 外部变更检测的 draft」三者一致，
@@ -1100,6 +1228,11 @@ export function buildPanelSettingsDocument(settings: PanelSettings): string {
   return normalizeTomlIndentation(stringify(cleaned));
 }
 
+/** Stable JSON representation of GUI-private settings for previews and history. */
+export function buildPanelSettingsSnapshot(settings: PanelSettings): string {
+  return `${JSON.stringify(settings, null, 2)}\n`;
+}
+
 async function restoreRedactedProviderSecrets(files: FileAccess, state: AppState): Promise<AppState> {
   const providers = state.mainConfig.providers;
   const redactedProviderNames = Object.entries(providers)
@@ -1170,7 +1303,12 @@ export function applyProfile(state: AppState, profileName: string): void {
   ]));
   // thinking 配置映射到 [thinking] extra 节
   setMainConfigThinking(state.mainConfig, profile.thinking_enabled, profile.thinking_effort);
-  // tui_theme / tui_editor_command 由 tuiStore 在写 tui.toml 时从激活 profile 读取
+  // Profile is a GUI preset: applying it explicitly updates the pending native
+  // TUI document. Ordinary saves never re-project the active profile.
+  state.tuiConfig = {
+    ...(state.tuiConfig ?? {}),
+    ...TuiConfigFromProfile(profile),
+  };
   state.activeProfile = profileName;
 }
 
@@ -1253,18 +1391,9 @@ export function setSecondaryModel(
 export function upsertProvider(
   state: AppState,
   name: string,
-  provider: { type: string; base_url: string; api_key: string; enabled?: boolean },
+  provider: { type: string; base_url: string; api_key: string },
 ): void {
-  // 保留已有的 enabled 状态；新建默认启用。
-  const existing = state.mainConfig.providers[name];
-  const enabled = provider.enabled ?? existing?.enabled ?? true;
-  state.mainConfig.providers[name] = { ...provider, enabled };
-}
-
-export function setProviderEnabled(state: AppState, name: string, enabled: boolean): void {
-  const provider = state.mainConfig.providers[name];
-  if (!provider) return;
-  provider.enabled = enabled;
+  state.mainConfig.providers[name] = { ...provider };
 }
 
 export function deleteProvider(state: AppState, name: string): void {
@@ -1284,16 +1413,7 @@ export function upsertModel(
   if (!state.mainConfig.providers[model.provider]) {
     throw new Error(`Provider not found: ${model.provider}`);
   }
-  // 保留已有的 enabled 状态；新建默认启用。
-  const existing = state.mainConfig.models[name];
-  const enabled = model.enabled ?? existing?.enabled ?? true;
-  state.mainConfig.models[name] = { ...model, enabled };
-}
-
-export function setModelEnabled(state: AppState, name: string, enabled: boolean): void {
-  const model = state.mainConfig.models[name];
-  if (!model) return;
-  model.enabled = enabled;
+  state.mainConfig.models[name] = { ...model };
 }
 
 export function deleteModel(state: AppState, name: string): void {
@@ -1387,7 +1507,7 @@ export function buildPreviewBundle(state: AppState, disk: {
 }): PreviewBundle {
   const normalizedState = normalizeStatePaths(state);
   const configDocument = buildConfigDocument(normalizedState);
-  const panelSettingsDocument = buildPanelSettingsDocument(normalizedState.panelSettings);
+  const panelSettingsDocument = buildPanelSettingsSnapshot(normalizedState.panelSettings);
   const mcpDocument = buildMcpConfigDocument(normalizedState.mcpConfig);
 
   return {
@@ -1673,6 +1793,89 @@ async function writeLegacyMigrationMarker(files: FileAccess, result: LegacyKimiC
   }, null, 2));
 }
 
+async function writeLegacyManagedDefaultEnvironmentMigrationMarker(
+  files: FileAccess,
+  result: LegacyManagedDefaultEnvironmentMigrationResult,
+): Promise<void> {
+  await files.ensureDir(dirnamePath(LEGACY_MANAGED_DEFAULT_ENVIRONMENT_MIGRATION_MARKER_PATH));
+  await files.writeText(LEGACY_MANAGED_DEFAULT_ENVIRONMENT_MIGRATION_MARKER_PATH, JSON.stringify({
+    ...result,
+    source: LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME,
+    target: defaultKimiCodeHomePath(),
+    migratedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+function mergeMissingRecordValues(
+  current: Record<string, unknown>,
+  legacy: Record<string, unknown>,
+): { value: Record<string, unknown>; changed: boolean } {
+  const next = structuredClone(current) as Record<string, unknown>;
+  let changed = false;
+  for (const [key, legacyValue] of Object.entries(legacy)) {
+    const currentValue = next[key];
+    if (currentValue === undefined) {
+      next[key] = structuredClone(legacyValue);
+      changed = true;
+      continue;
+    }
+    if (!isRecord(currentValue) || !isRecord(legacyValue)) continue;
+    const nested = mergeMissingRecordValues(currentValue, legacyValue);
+    if (nested.changed) {
+      next[key] = nested.value;
+      changed = true;
+    }
+  }
+  return { value: next, changed };
+}
+
+function mergeInstalledPluginDocuments(
+  currentDocument: string | null,
+  legacyDocument: string,
+  sourceHome: string,
+  targetHome: string,
+): { value: string; changed: boolean } {
+  const remappedLegacyDocument = remapInstalledPluginRoots(legacyDocument, sourceHome, targetHome);
+  if (!currentDocument?.trim()) {
+    return { value: remappedLegacyDocument, changed: true };
+  }
+
+  const current = JSON.parse(currentDocument) as unknown;
+  const legacy = JSON.parse(remappedLegacyDocument) as unknown;
+  if (!isRecord(current) || !Array.isArray(current.plugins)) {
+    throw new Error("native plugins/installed.json must contain a plugins array");
+  }
+  if (!isRecord(legacy) || !Array.isArray(legacy.plugins)) {
+    throw new Error("legacy plugins/installed.json must contain a plugins array");
+  }
+
+  const nextPlugins = [...current.plugins];
+  const knownIds = new Set(
+    current.plugins
+      .filter(isRecord)
+      .map((plugin) => typeof plugin.id === "string" ? plugin.id.trim().toLocaleLowerCase() : "")
+      .filter(Boolean),
+  );
+  let changed = false;
+  for (const plugin of legacy.plugins) {
+    if (!isRecord(plugin) || typeof plugin.id !== "string" || !plugin.id.trim()) continue;
+    const id = plugin.id.trim().toLocaleLowerCase();
+    if (knownIds.has(id)) continue;
+    knownIds.add(id);
+    nextPlugins.push(structuredClone(plugin));
+    changed = true;
+  }
+  return changed
+    ? { value: `${JSON.stringify({ ...current, plugins: nextPlugins }, null, 2)}\n`, changed: true }
+    : { value: currentDocument, changed: false };
+}
+
+function isLegacyManagedDefaultKimiCodeHome(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const legacySuffix = "/.kimi-code-switch-gui/.env/default";
+  return normalized === LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME || normalized.endsWith(legacySuffix);
+}
+
 function isEmptyRecordValue(value: unknown): boolean {
   return isRecord(value) && Object.keys(value).length === 0;
 }
@@ -1723,9 +1926,38 @@ function mergeLegacyMainConfig(
   }
 
   for (const key of ["hooks", "loop_control", "background", "notifications", "services", "mcp", "thinking", "permission", "image", "subagent"]) {
-    if (legacy[key] !== undefined && (next[key] === undefined || isEmptyRecordValue(next[key]) || (Array.isArray(next[key]) && next[key].length === 0))) {
-      next[key] = legacy[key];
+    const legacyValue = legacy[key];
+    if (legacyValue === undefined) continue;
+    if (isRecord(next[key]) && isRecord(legacyValue)) {
+      const nested = mergeMissingRecordValues(next[key], legacyValue);
+      if (nested.changed) {
+        next[key] = nested.value;
+        changed = true;
+      }
+      continue;
+    }
+    if (next[key] === undefined || isEmptyRecordValue(next[key]) || (Array.isArray(next[key]) && next[key].length === 0)) {
+      next[key] = legacyValue;
       changed = true;
+    }
+  }
+
+  // Preserve future Kimi Code sections that this GUI does not yet understand.
+  // Current native values still win, while nested records receive only missing
+  // keys from the retired source. Historical dead keys stay excluded.
+  for (const [key, legacyValue] of Object.entries(legacy)) {
+    if (ACTIVE_MAIN_CONFIG_KEYS.has(key)) continue;
+    if (next[key] === undefined) {
+      next[key] = structuredClone(legacyValue);
+      changed = true;
+      continue;
+    }
+    if (isRecord(next[key]) && isRecord(legacyValue)) {
+      const nested = mergeMissingRecordValues(next[key], legacyValue);
+      if (nested.changed) {
+        next[key] = nested.value;
+        changed = true;
+      }
     }
   }
 
@@ -2058,7 +2290,11 @@ export function normalizeStatePaths(state: AppState): AppState {
     kimi_code_environments: scopedEnvironments,
     active_kimi_code_environment_id: activeEnvironment.id,
     last_display_id: state.panelSettings.last_display_id,
-    mcp_servers: cloneMcpServers(state.mcpConfig.mcpServers),
+    model_ui_metadata: snapshotModelUiMetadata(
+      state.panelSettings,
+      activeEnvironment.id,
+      state.mainConfig.models,
+    ),
     profiles,
     active_profile: activeProfile,
     profiles_path: profilesPath,
@@ -2074,7 +2310,6 @@ export function normalizeStatePaths(state: AppState): AppState {
     panelSettings: {
       ...panelSettings,
       config_target: configTarget,
-      mcp_servers: cloneMcpServers(state.mcpConfig.mcpServers),
       profiles,
       active_profile: activeProfile,
       profiles_path: profilesPath,
@@ -2217,11 +2452,9 @@ export const FULL_BACKUP_VERSION = 3;
  * 兼容缓存，不再读取已退役的 panel mainConfig/MCP 快照。
  *
  * @param state 当前 AppState（提供 panelSettings 与环境列表）
- * @param allEnvConfigs 各环境的 { providers, models }，来自 DB 的 exportAllEnvConfigs
  */
 export function buildFullBackup(
   state: AppState,
-  allEnvConfigs: Record<string, EnvConfigData>,
   standardEnvironmentConfigs: Record<string, StandardEnvironmentConfig> = {},
 ): FullBackupBundle {
   const environments = parseKimiCodeEnvironments(
@@ -2232,16 +2465,14 @@ export function buildFullBackup(
 
   const bundles: EnvironmentConfigBundle[] = environments.map((environment) => {
     // 当前激活环境的 Provider/Model 以内存 state 为准（可能含未保存编辑）；
-    // 其余环境仅使用旧 DB 兼容缓存，避免复活 panel 中的过期定义。
-    const dbConfig = allEnvConfigs[environment.id];
+    // 其余环境直接使用各自原生 config.toml 的已读取内容。
     const standardConfig = standardEnvironmentConfigs[environment.id];
-    const mergedConfig = mergeStandardConfigWithGuiCache(standardConfig?.mainConfig, dbConfig);
     const providers = environment.id === activeId
       ? structuredClone(state.mainConfig.providers)
-      : mergedConfig.providers;
+      : structuredClone(standardConfig?.mainConfig.providers ?? {});
     const models = environment.id === activeId
       ? structuredClone(state.mainConfig.models)
-      : mergedConfig.models;
+      : structuredClone(standardConfig?.mainConfig.models ?? {});
     const mcpServers = environment.id === activeId
       ? cloneMcpServers(state.mcpConfig.mcpServers)
       : cloneMcpServers(standardConfig?.mcpServers ?? {});
@@ -2292,41 +2523,6 @@ export function buildFullBackup(
     activeEnvironmentId: activeId,
     panelSettings: structuredClone(state.panelSettings),
   };
-}
-
-function mergeStandardConfigWithGuiCache(
-  standard: MainConfig | undefined,
-  cache: EnvConfigData | undefined,
-): EnvConfigData {
-  const providers = structuredClone(standard?.providers ?? {});
-  const models = structuredClone(standard?.models ?? {});
-  if (!cache) return { providers, models };
-
-  const disabledProviders = new Set<string>();
-  for (const [name, provider] of Object.entries(cache.providers)) {
-    if (provider.enabled === false && providers[name] === undefined) {
-      providers[name] = structuredClone(provider);
-      disabledProviders.add(name);
-    }
-  }
-  for (const [name, model] of Object.entries(cache.models)) {
-    if (models[name]) {
-      models[name] = {
-        ...models[name],
-        ...(model.auth_mode ? { auth_mode: model.auth_mode } : {}),
-        ...(model.official_account_scope ? { official_account_scope: model.official_account_scope } : {}),
-        ...(model.pricing ? { pricing: structuredClone(model.pricing) } : {}),
-      };
-      continue;
-    }
-    if (
-      (model.enabled === false || disabledProviders.has(model.provider))
-      && providers[model.provider] !== undefined
-    ) {
-      models[name] = structuredClone(model);
-    }
-  }
-  return { providers, models };
 }
 
 export function isFullBackupBundle(data: unknown): data is FullBackupBundle {
@@ -2534,20 +2730,6 @@ function containsRedactionMask(value: unknown): boolean {
 }
 
 /**
- * 从全量备份包提取各环境的 { providers, models }，用于写回 DB（importAllEnvConfigs）。
- */
-export function extractEnvConfigsFromBackup(data: FullBackupBundle): Record<string, EnvConfigData> {
-  const out: Record<string, EnvConfigData> = {};
-  for (const env of data.environments) {
-    out[env.environment.id] = {
-      providers: structuredClone(env.providers ?? {}),
-      models: structuredClone(env.models ?? {}),
-    };
-  }
-  return out;
-}
-
-/**
  * 从全量备份包重建 GUI 私有设置。备份提供的绝对 homePath 不受信任：默认
  * 环境落到官方 root，其它环境落到 GUI 托管 root。MCP 不再存 panel 快照。
  */
@@ -2572,7 +2754,6 @@ export function rebuildPanelSettingsFromBackup(data: FullBackupBundle): PanelSet
   const active = data.environments.find((e) => e.environment.id === data.activeEnvironmentId)
     ?? data.environments[0];
   if (active) {
-    panelSettings.mcp_servers = {};
     panelSettings.profiles = sanitizeProfilesRecord(active.profiles ?? {});
     panelSettings.active_profile = active.activeProfile;
   }
@@ -2635,27 +2816,28 @@ export function searchConfig(state: AppState, query: string): SearchResult[] {
   return results;
 }
 
-function parsePanelMcpServers(value: unknown): Record<string, McpServerConfig> {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  try {
-    const config = parseMcpConfigStrict(JSON.stringify({ mcpServers: value }));
-    const disabledNames = Object.entries(value)
-      .filter(([, raw]) => isRecord(raw) && raw.enabled === false)
-      .map(([name]) => name);
-
-    for (const name of disabledNames) {
-      if (config.mcpServers[name]) {
-        config.mcpServers[name].enabled = false;
-      }
+function parseModelUiMetadata(value: unknown): PanelSettings["model_ui_metadata"] {
+  if (!isRecord(value)) return {};
+  const result: NonNullable<PanelSettings["model_ui_metadata"]> = {};
+  for (const [environmentId, rawEnvironment] of Object.entries(value)) {
+    if (!isRecord(rawEnvironment)) continue;
+    const models: Record<string, ModelUiMetadata> = {};
+    for (const [modelId, rawMetadata] of Object.entries(rawEnvironment)) {
+      if (!isRecord(rawMetadata)) continue;
+      const metadata: ModelUiMetadata = {
+        ...(rawMetadata.auth_mode === "api-key" || rawMetadata.auth_mode === "official-account"
+          ? { auth_mode: rawMetadata.auth_mode }
+          : {}),
+        ...(rawMetadata.official_account_scope === "global"
+          ? { official_account_scope: "global" as const }
+          : {}),
+        ...(isRecord(rawMetadata.pricing) ? { pricing: rawMetadata.pricing as ModelUiMetadata["pricing"] } : {}),
+      };
+      if (Object.keys(metadata).length > 0) models[modelId] = metadata;
     }
-
-    return config.mcpServers;
-  } catch {
-    return {};
+    if (Object.keys(models).length > 0) result[environmentId] = models;
   }
+  return result;
 }
 
 function cloneMcpServers(servers: Record<string, McpServerConfig>): Record<string, McpServerConfig> {
@@ -2694,6 +2876,24 @@ function parseUiState(value: unknown): PanelSettings["uiState"] {
   const result: NonNullable<PanelSettings["uiState"]> = {};
   if (typeof value.activeTab === "string") {
     result.activeTab = value.activeTab;
+  }
+  if (typeof value.settingsSubTab === "string") {
+    result.settingsSubTab = value.settingsSubTab;
+  }
+  if (typeof value.kimiCodeSubTab === "string") {
+    result.kimiCodeSubTab = value.kimiCodeSubTab;
+  }
+  if (typeof value.selectedProvider === "string") {
+    result.selectedProvider = value.selectedProvider;
+  }
+  if (typeof value.selectedModel === "string") {
+    result.selectedModel = value.selectedModel;
+  }
+  if (typeof value.selectedProfile === "string") {
+    result.selectedProfile = value.selectedProfile;
+  }
+  if (typeof value.selectedMcpServer === "string") {
+    result.selectedMcpServer = value.selectedMcpServer;
   }
   if (typeof value.providerSortBy === "string") {
     result.providerSortBy = value.providerSortBy;
@@ -2743,15 +2943,25 @@ function parseKimiCodeEnvironments(
     const fallbackHomePath = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
       ? defaultKimiCodeHomePath()
       : getKimiCodeEnvironmentHomePath(id);
-    const homePath = sanitizePath(asString(item.homePath, ""), fallbackHomePath);
+    const requestedHomePath = sanitizePath(asString(item.homePath, ""), fallbackHomePath);
+    // Older GUI releases stored the default environment inside the GUI data
+    // directory. It is never a valid active default home: the one-time file
+    // migration runs before state loading, then this prevents the stale panel
+    // record from ever routing Kimi back to the retired location.
+    const homePath = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+      && isLegacyManagedDefaultKimiCodeHome(requestedHomePath)
+      ? defaultKimiCodeHomePath()
+      : requestedHomePath;
     const inferredKind: KimiCodeEnvironment["kind"] = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
       ? "default"
       : homePath === getKimiCodeEnvironmentHomePath(id)
         ? "managed"
         : "external";
-    const kind = item.kind === "default" || item.kind === "managed" || item.kind === "external"
-      ? item.kind
-      : inferredKind;
+    const kind = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+      ? "default"
+      : item.kind === "managed" || item.kind === "external"
+        ? item.kind
+        : inferredKind;
     result.push({
       id,
       name,

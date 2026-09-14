@@ -35,15 +35,29 @@ describe("panelSettingsStore", () => {
     expect(mockedInvoke).toHaveBeenNthCalledWith(1, "init_panel_settings_store");
   });
 
+  it("migrates legacy TOML before any startup code can write default panel settings", async () => {
+    mockedPathExists.mockResolvedValue(true);
+    mockedInvoke.mockResolvedValue(undefined as never);
+
+    await initPanelSettingsStore();
+
+    expect(mockedInvoke).toHaveBeenNthCalledWith(1, "init_panel_settings_store");
+    expect(mockedInvoke).toHaveBeenNthCalledWith(2, "migrate_panel_settings_from_toml", {
+      tomlPath: "~/.kimi-code-switch-gui/config.panel.toml",
+    });
+    expect(mockedInvoke).toHaveBeenNthCalledWith(4, "migrate_panel_settings_from_toml", {
+      tomlPath: "~/.kimi/config.panel.toml",
+    });
+  });
+
   it("returns null for an empty or invalid settings row", async () => {
     mockedInvoke.mockResolvedValueOnce(null as never).mockRejectedValueOnce(new Error("db"));
     await expect(getPanelSettings()).resolves.toBeNull();
     await expect(getPanelSettings()).resolves.toBeNull();
   });
 
-  it("saves settings and performs the one-time legacy TOML migration", async () => {
+  it("saves settings without deferring startup migration until after a write", async () => {
     const settings = createDefaultPanelSettings();
-    mockedPathExists.mockResolvedValue(true);
     mockedInvoke.mockResolvedValue(undefined as never);
 
     await expect(savePanelSettings(settings)).resolves.toBe(true);
@@ -51,10 +65,7 @@ describe("panelSettingsStore", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("save_panel_settings", {
       settingsJson: JSON.stringify(settings),
     });
-    expect(mockedInvoke).toHaveBeenCalledWith("migrate_panel_settings_from_toml", {
-      tomlPath: "~/.kimi/config.panel.toml",
-      settingsJson: JSON.stringify(settings),
-    });
+    expect(mockedPathExists).not.toHaveBeenCalled();
   });
 
   it("supports export, import and explicit migration failure semantics", async () => {

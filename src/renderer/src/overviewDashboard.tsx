@@ -49,8 +49,9 @@ export function OverviewDashboard(props: {
   skillsReport: AppState["skillsReport"];
   mcpEntries: [string, McpServerConfig][];
   onNavigate: (tab: OverviewTabId, item?: string) => void;
+  onOpenDoctor: () => void;
 }): JSX.Element {
-  const { state, locale, diagnostics, skillsReport, mcpEntries, onNavigate } = props;
+  const { state, locale, diagnostics, skillsReport, mcpEntries, onNavigate, onOpenDoctor } = props;
   const activeProfile = state.profiles[state.activeProfile];
   const providerEntries = Object.entries(state.mainConfig.providers);
   const modelEntries = Object.entries(state.mainConfig.models);
@@ -245,6 +246,17 @@ export function OverviewDashboard(props: {
             <DiagnosticItem label={t(locale, "diagPreload")} level={diagnostics.preload} locale={locale} />
             <DiagnosticItem label={t(locale, "diagLoad")} level={diagnostics.loadState} locale={locale} />
             <DiagnosticItem label={t(locale, "diagPreview")} level={diagnostics.previewState} locale={locale} />
+          </div>
+          <div className="overview-diagnostics-action">
+            <button
+              className="action-button compact"
+              type="button"
+              data-testid="overview-open-doctor"
+              onClick={onOpenDoctor}
+            >
+              <FileText size={14} />
+              <span>{t(locale, "settings")}</span>
+            </button>
           </div>
           {diagnostics.lastError ? (
             <div className="diagnostics-block">

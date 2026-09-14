@@ -1,0 +1,22 @@
+/* Patterns compose primitives without owning feature geometry. */
+.tab-list-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.skills-read-list-item {
+  min-width: 0;
+}
+
+.skills-overview-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.overview-diagnostics-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}

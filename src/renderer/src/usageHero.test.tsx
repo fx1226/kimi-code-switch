@@ -83,4 +83,15 @@ describe("UsageHero", () => {
     expect(header?.querySelector(".usage-metric-icon")).not.toBeNull();
     expect(container.querySelectorAll(".usage-metric-head")).toHaveLength(5);
   });
+
+  it("groups the headline and key metrics into a visual summary with distinct metric tones", () => {
+    const { container } = renderUsageHero(1_000);
+
+    expect(container.querySelector(".usage-overview-summary")).not.toBeNull();
+    expect(container.querySelector(".usage-metric-card.metric-input")).not.toBeNull();
+    expect(container.querySelector(".usage-metric-card.metric-output")).not.toBeNull();
+    expect(container.querySelector(".usage-metric-card.metric-cache-create")).not.toBeNull();
+    expect(container.querySelector(".usage-metric-card.metric-cache-read")).not.toBeNull();
+    expect(container.querySelector(".usage-metric-card.metric-cache-rate")).not.toBeNull();
+  });
 });

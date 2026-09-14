@@ -295,5 +295,26 @@ button.overview-stat:hover { border-color: var(--line-strong); background: var(-
 
 @media (max-width: 1140px) {
   .page-heading p { display: none; }
+  .active-profile-label { display: none; }
+  .active-profile-chip { max-width: 168px; }
   .overview-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1100px) {
+  .topbar { gap: var(--space-2); }
+  .toolbar { gap: 6px; }
+  .toolbar-control-group { gap: 6px; }
+  .active-profile-chip { max-width: 132px; }
+  .toolbar-icon-copy { display: none; }
+  .toolbar-icon-button,
+  .toolbar-environment-button,
+  .toolbar-preferences-button {
+    width: var(--topbar-control-height);
+    min-width: var(--topbar-control-height);
+    padding-inline: 0;
+    justify-content: center;
+  }
+  .settings-tab-panel { grid-template-columns: minmax(0, 1fr); }
+  .settings-inner-tabs-nav { flex-wrap: wrap; }
+  .settings-inner-tab-button { flex: 1 1 calc(50% - 4px); }
 }
