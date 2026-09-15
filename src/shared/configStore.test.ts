@@ -30,6 +30,7 @@ import {
   getKimiCodeTuiConfigPath,
   migrateLegacyKimiCliConfigToKimiCode,
   migrateLegacyManagedDefaultEnvironmentToNativeHome,
+  repairLegacyManagedDefaultHomeSymlink,
   formatMissingModelError,
   getImportPreview,
   importConfig,
@@ -2077,6 +2078,67 @@ enabled = true
     const result = await migrateLegacyManagedDefaultEnvironmentToNativeHome(files);
     expect(result.migrated).toBe(false);
     expect(result.reason).toBe("legacy-environment-missing");
+  });
+});
+
+describe("repairLegacyManagedDefaultHomeSymlink", () => {
+  const legacyHome = "~/.kimi-code-switch-gui/.env/default";
+  const nativeHome = defaultKimiCodeHomePath();
+
+  it("remaps plugin roots after materializing the native home", async () => {
+    const files = {
+      ...createMemoryFs({
+        ["/Users/test/.kimi-code/plugins/installed.json"]: JSON.stringify({
+          plugins: [
+            { id: "kimi-cu", root: `${legacyHome}/plugins/managed/kimi-cu` },
+            { id: "kimi-datasource", root: `/Users/test/.kimi-code-switch-gui/.env/default/plugins/managed/kimi-datasource` },
+            { id: "foreign", root: `/other/place/plugins/managed/foreign` },
+          ],
+        }),
+      }),
+      async repairNativeHomeSymlink() {
+        return {
+          repaired: true,
+          reason: "symlink-materialized",
+          skillsMaterialized: [
+            { name: "ask-matt", copied: true, reason: "" },
+            { name: "ghost", copied: false, reason: "broken-target" },
+          ],
+        };
+      },
+    };
+
+    const result = await repairLegacyManagedDefaultHomeSymlink(files, "/Users/test/.kimi-code");
+
+    expect(result).toMatchObject({
+      repaired: true,
+      reason: "symlink-materialized",
+      skillsMaterialized: 1,
+      pluginsRemapped: true,
+    });
+    expect(result.skillIssues).toEqual(["ghost: broken-target"]);
+    const remapped = JSON.parse(files.store["/Users/test/.kimi-code/plugins/installed.json"]);
+    expect(remapped.plugins[0].root).toBe("/Users/test/.kimi-code/plugins/managed/kimi-cu");
+    expect(remapped.plugins[1].root).toBe("/Users/test/.kimi-code/plugins/managed/kimi-datasource");
+    // 其他 home 的插件根不得被误改写（严格前缀匹配，不用 inferred-suffix 兜底）。
+    expect(remapped.plugins[2].root).toBe("/other/place/plugins/managed/foreign");
+  });
+
+  it("passes through not-repaired without touching plugin roots", async () => {
+    const files = {
+      ...createMemoryFs({}),
+      async repairNativeHomeSymlink() {
+        return { repaired: false, reason: "not-a-symlink", skillsMaterialized: [] };
+      },
+    };
+    const result = await repairLegacyManagedDefaultHomeSymlink(files);
+    expect(result).toMatchObject({ repaired: false, reason: "not-a-symlink", pluginsRemapped: false });
+  });
+
+  it("is a no-op when the FileAccess does not support symlink repair", async () => {
+    const files = createMemoryFs({});
+    const result = await repairLegacyManagedDefaultHomeSymlink(files);
+    expect(result).toMatchObject({ repaired: false, reason: "unsupported", pluginsRemapped: false });
   });
 });
 

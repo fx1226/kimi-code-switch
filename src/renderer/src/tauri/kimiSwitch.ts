@@ -21,6 +21,7 @@ import {
   loadAppState,
   migrateLegacyKimiCliConfigToKimiCode,
   migrateLegacyManagedDefaultEnvironmentToNativeHome,
+  repairLegacyManagedDefaultHomeSymlink,
   normalizeStatePaths,
   saveAppState,
   cloneState,
@@ -767,6 +768,21 @@ async function runPostLoadMaintenance(): Promise<void> {
       }
     } catch (err) {
       console.warn("Legacy database migration skipped:", err);
+    }
+
+    try {
+      const absoluteNativeHome = await invoke<string>("resolve_home_path", {
+        path: "~/.kimi-code",
+      }).catch(() => "");
+      const repair = await repairLegacyManagedDefaultHomeSymlink(
+        tauriFileAccess,
+        absoluteNativeHome || undefined,
+      );
+      if (repair.repaired) {
+        console.log("Legacy managed default home symlink materialized:", repair);
+      }
+    } catch (err) {
+      console.warn("Legacy managed default home symlink repair skipped:", err);
     }
 
     try {

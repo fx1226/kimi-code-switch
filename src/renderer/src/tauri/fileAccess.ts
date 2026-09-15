@@ -2,7 +2,7 @@
 // 运行在 renderer 进程，通过 Tauri command 调用 Rust 原子能力。
 import { invoke } from "@tauri-apps/api/core";
 
-import type { FileAccess, SaveTransactionRecord } from "@shared/configStore";
+import type { FileAccess, NativeHomeSymlinkRepairResult, SaveTransactionRecord } from "@shared/configStore";
 import type { PanelSettings } from "@shared/types";
 import { sanitizeConfigForEnvironmentClone, sanitizeMcpForEnvironmentClone } from "@shared/environmentClone";
 import { remapInstalledPluginRoots } from "@shared/pluginStore";
@@ -47,6 +47,9 @@ export const tauriFileAccess: FileAccess = {
   },
   async mergeDirectoryMissing(from: string, to: string) {
     return mergeDirectoryMissing(from, to);
+  },
+  async repairNativeHomeSymlink(): Promise<NativeHomeSymlinkRepairResult> {
+    return invoke<NativeHomeSymlinkRepairResult>("repair_native_home_symlink");
   },
   async readPanelSettings(_path: string): Promise<PanelSettings | null> {
     // 忽略 path 参数，直接从 SQLite 读取（单行存储）

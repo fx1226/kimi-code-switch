@@ -835,6 +835,263 @@ pub fn merge_directory_missing(
     Ok(result)
 }
 
+#[derive(Clone, Debug, serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillMaterializationEntry {
+    name: String,
+    copied: bool,
+    reason: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeHomeSymlinkRepairResult {
+    repaired: bool,
+    reason: String,
+    skills_materialized: Vec<SkillMaterializationEntry>,
+}
+
+/// 一次性修复：`~/.kimi-code` 若是指向 GUI 数据目录内托管默认环境（.env/default）的
+/// 符号链接，则把物理目录翻转为真实的 `~/.kimi-code`（同卷 rename，零拷贝，保留
+/// credentials/cache/权限），并把 skills 顶层符号链接物化为本地副本。
+/// 自然幂等：修复后 `~/.kimi-code` 是真实目录，后续调用返回 not-a-symlink。
+/// 只处理精确指向 .env/default 的链接；其他目标、缺失源一概不动。
+pub(crate) fn repair_native_home_symlink_at(
+    home: &Path,
+) -> Result<NativeHomeSymlinkRepairResult, String> {
+    let native_home = home.join(".kimi-code");
+    let env_root = home.join(".kimi-code-switch-gui").join(".env");
+    let managed_default_home = env_root.join("default");
+
+    let link_meta = match std::fs::symlink_metadata(&native_home) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(NativeHomeSymlinkRepairResult {
+                repaired: false,
+                reason: "native-home-missing".to_string(),
+                ..Default::default()
+            });
+        }
+        Err(error) => {
+            return Err(format!("stat native home {}: {error}", native_home.display()));
+        }
+    };
+    if !link_meta.file_type().is_symlink() {
+        return Ok(NativeHomeSymlinkRepairResult {
+            repaired: false,
+            reason: "not-a-symlink".to_string(),
+            ..Default::default()
+        });
+    }
+    let link_target = std::fs::read_link(&native_home)
+        .map_err(|error| format!("read_link {}: {error}", native_home.display()))?;
+    if !managed_default_home.is_dir() {
+        return Ok(NativeHomeSymlinkRepairResult {
+            repaired: false,
+            reason: "legacy-source-missing".to_string(),
+            ..Default::default()
+        });
+    }
+    // read_link 可能返回相对目标：按链接所在目录（home）解析，避免落到进程 cwd。
+    let link_target = if link_target.is_relative() {
+        match native_home.parent() {
+            Some(parent) => parent.join(&link_target),
+            None => link_target,
+        }
+    } else {
+        link_target
+    };
+    let resolved_target = std::fs::canonicalize(&link_target).map_err(|error| {
+        format!("resolve symlink target {}: {error}", link_target.display())
+    })?;
+    let resolved_managed = std::fs::canonicalize(&managed_default_home)
+        .map_err(|error| format!("resolve managed default home {}: {error}", managed_default_home.display()))?;
+    if resolved_target != resolved_managed {
+        return Ok(NativeHomeSymlinkRepairResult {
+            repaired: false,
+            reason: "foreign-symlink-target".to_string(),
+            ..Default::default()
+        });
+    }
+
+    let staging = env_root.join(".native-home-repair-staging");
+    if staging.exists() {
+        return Err(format!(
+            "refusing to repair: staging path already exists {}",
+            staging.display()
+        ));
+    }
+    std::fs::rename(&managed_default_home, &staging).map_err(|error| {
+        format!(
+            "rename {} to {}: {error}",
+            managed_default_home.display(),
+            staging.display()
+        )
+    })?;
+    if let Err(error) = std::fs::remove_file(&native_home) {
+        let _ = std::fs::rename(&staging, &managed_default_home);
+        return Err(format!("remove symlink {}: {error}", native_home.display()));
+    }
+    if let Err(error) = std::fs::rename(&staging, &native_home) {
+        let _ = std::fs::rename(&staging, &managed_default_home);
+        let _ = create_symlink_path(&managed_default_home, &native_home);
+        return Err(format!("rename {} to {}: {error}", staging.display(), native_home.display()));
+    }
+
+    let mut skills_materialized = Vec::new();
+    let skills_dir = native_home.join("skills");
+    if skills_dir.is_dir() {
+        // skills 遍历失败不能让修复整体失败：home 翻转已完成，TS 侧还要靠
+        // repaired=true 做插件根重映射。扫描问题降级为逐项诊断。
+        let entries = match std::fs::read_dir(&skills_dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                skills_materialized.push(SkillMaterializationEntry {
+                    name: "<skills>".to_string(),
+                    copied: false,
+                    reason: format!("scan-failed: {error}"),
+                });
+                return Ok(NativeHomeSymlinkRepairResult {
+                    repaired: true,
+                    reason: "symlink-materialized".to_string(),
+                    skills_materialized,
+                });
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    skills_materialized.push(SkillMaterializationEntry {
+                        name: "<entry>".to_string(),
+                        copied: false,
+                        reason: format!("read-dir-entry-failed: {error}"),
+                    });
+                    continue;
+                }
+            };
+            let file_name = entry.file_name();
+            let source_path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) => {
+                    skills_materialized.push(SkillMaterializationEntry {
+                        name: file_name.to_string_lossy().into_owned(),
+                        copied: false,
+                        reason: format!("file-type-failed: {error}"),
+                    });
+                    continue;
+                }
+            };
+            if !file_type.is_symlink() {
+                continue;
+            }
+            let name = file_name.to_string_lossy().into_owned();
+            let raw_target = match std::fs::read_link(&source_path) {
+                Ok(target) => target,
+                Err(error) => {
+                    skills_materialized.push(SkillMaterializationEntry {
+                        name,
+                        copied: false,
+                        reason: format!("read-link-failed: {error}"),
+                    });
+                    continue;
+                }
+            };
+            // 相对目标按链接所在目录解析，避免落到进程 cwd。
+            let target = if raw_target.is_relative() {
+                match source_path.parent() {
+                    Some(parent) => parent.join(&raw_target),
+                    None => raw_target,
+                }
+            } else {
+                raw_target
+            };
+            let target_meta = match std::fs::metadata(&target) {
+                Ok(meta) => meta,
+                Err(_) => {
+                    skills_materialized.push(SkillMaterializationEntry {
+                        name,
+                        copied: false,
+                        reason: "broken-target".to_string(),
+                    });
+                    continue;
+                }
+            };
+            if !target_meta.is_dir() {
+                skills_materialized.push(SkillMaterializationEntry {
+                    name,
+                    copied: false,
+                    reason: "not-a-directory".to_string(),
+                });
+                continue;
+            }
+            // 先复制到隐藏暂存名，成功后再删链接、rename 到位；失败保留原链接不破坏数据。
+            // 暂存名 .{name}.materializing 只由本代码创建（崩溃残留也属于本流程），
+            // 因此启动时清理同名残留是安全的，不会误删用户数据。
+            let staging_copy = skills_dir.join(format!(".{name}.materializing"));
+            let _ = std::fs::remove_dir_all(&staging_copy);
+            if let Err(error) = copy_dir_recursive(&target, &staging_copy) {
+                let _ = std::fs::remove_dir_all(&staging_copy);
+                skills_materialized.push(SkillMaterializationEntry {
+                    name,
+                    copied: false,
+                    reason: format!("copy-failed: {error}"),
+                });
+                continue;
+            }
+            if let Err(error) = std::fs::remove_file(&source_path) {
+                let _ = std::fs::remove_dir_all(&staging_copy);
+                skills_materialized.push(SkillMaterializationEntry {
+                    name,
+                    copied: false,
+                    reason: format!("unlink-failed: {error}"),
+                });
+                continue;
+            }
+            if let Err(error) = std::fs::rename(&staging_copy, &skills_dir.join(&name)) {
+                let _ = create_symlink_path(&target, &source_path);
+                let _ = std::fs::remove_dir_all(&staging_copy);
+                skills_materialized.push(SkillMaterializationEntry {
+                    name,
+                    copied: false,
+                    reason: format!("rename-failed: {error}"),
+                });
+                continue;
+            }
+            skills_materialized.push(SkillMaterializationEntry {
+                name,
+                copied: true,
+                reason: String::new(),
+            });
+        }
+    }
+
+    Ok(NativeHomeSymlinkRepairResult {
+        repaired: true,
+        reason: "symlink-materialized".to_string(),
+        skills_materialized,
+    })
+}
+
+/// 命令入口：固定受管路径（~/.kimi-code 与 ~/.kimi-code-switch-gui/.env/default）
+/// 走统一授权复核后执行修复。
+#[tauri::command]
+pub fn repair_native_home_symlink(
+    state: tauri::State<'_, PathGrantState>,
+) -> Result<NativeHomeSymlinkRepairResult, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Err("home directory unavailable".to_string());
+    };
+    for path in [
+        home.join(".kimi-code"),
+        home.join(".kimi-code-switch-gui").join(".env").join("default"),
+    ] {
+        authorize_mutation(&state, &path, MutationKind::DirectoryTree)?;
+    }
+    repair_native_home_symlink_at(&home)
+}
+
 /// 主机名（备份元信息用）。
 #[tauri::command]
 pub fn hostname() -> String {
@@ -2548,6 +2805,152 @@ mod tests {
             );
         }
         // 清理测试产物
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn temp_home(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "kimi-repair-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ))
+    }
+
+    fn seed_legacy_managed_default(home: &Path) -> (PathBuf, PathBuf) {
+        let managed = home
+            .join(".kimi-code-switch-gui")
+            .join(".env")
+            .join("default");
+        std::fs::create_dir_all(managed.join("skills").join("ask-matt")).unwrap();
+        std::fs::write(managed.join("config.toml"), "default_model = \"demo\"\n").unwrap();
+        std::fs::write(managed.join("skills").join("ask-matt").join("SKILL.md"), "# ask-matt\n")
+            .unwrap();
+        let native = home.join(".kimi-code");
+        create_symlink_path(&managed, &native).unwrap();
+        (managed, native)
+    }
+
+    #[test]
+    fn repair_materializes_real_native_home_and_skill_copies() {
+        let base = temp_home("flip");
+        let home = base.join("home");
+        let external = base.join("external-skills");
+        std::fs::create_dir_all(external.join("shared-skill")).unwrap();
+        std::fs::write(external.join("shared-skill").join("SKILL.md"), "# shared\n").unwrap();
+
+        let (managed, native) = seed_legacy_managed_default(&home);
+        create_symlink_path(&external.join("shared-skill"), &managed.join("skills").join("shared-skill"))
+            .unwrap();
+
+        let result = repair_native_home_symlink_at(&home).unwrap();
+        assert!(result.repaired, "expected repair to run: {}", result.reason);
+        assert!(result.skills_materialized.iter().any(|e| e.name == "shared-skill" && e.copied));
+
+        // ~/.kimi-code 现在是真实目录，不再是指向 GUI 数据目录的符号链接。
+        let native_meta = std::fs::symlink_metadata(&native).unwrap();
+        assert!(!native_meta.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(native.join("config.toml")).unwrap(),
+            "default_model = \"demo\"\n"
+        );
+        // .env/default 已被翻转，不再存在；源数据没有丢失。
+        assert!(!managed.exists());
+        // 技能副本是真实目录，内容完整。
+        assert_eq!(
+            std::fs::read_to_string(native.join("skills").join("shared-skill").join("SKILL.md")).unwrap(),
+            "# shared\n"
+        );
+        // 技能副本目录本身是真实目录（不再是符号链接）。
+        assert!(std::fs::symlink_metadata(native.join("skills").join("shared-skill"))
+            .unwrap()
+            .file_type()
+            .is_dir());
+
+        // 幂等：第二次调用不再修复。
+        let second = repair_native_home_symlink_at(&home).unwrap();
+        assert!(!second.repaired);
+        assert_eq!(second.reason, "not-a-symlink");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn repair_leaves_real_dir_and_foreign_symlink_untouched() {
+        let base = temp_home("skip");
+        let home = base.join("home");
+        let foreign = base.join("foreign-home");
+        std::fs::create_dir_all(&foreign).unwrap();
+
+        // 真实目录（非符号链接）→ 不修复。
+        std::fs::create_dir_all(home.join(".kimi-code")).unwrap();
+        let result = repair_native_home_symlink_at(&home).unwrap();
+        assert!(!result.repaired);
+        assert_eq!(result.reason, "not-a-symlink");
+
+        // 符号链接指向 .env/default 之外的目录 → 拒绝。
+        std::fs::remove_dir_all(home.join(".kimi-code")).unwrap();
+        std::fs::create_dir_all(home.join(".kimi-code-switch-gui").join(".env").join("default")).unwrap();
+        create_symlink_path(&foreign, &home.join(".kimi-code")).unwrap();
+        let result = repair_native_home_symlink_at(&home).unwrap();
+        assert!(!result.repaired);
+        assert_eq!(result.reason, "foreign-symlink-target");
+        // 链接仍保留原样。
+        assert!(std::fs::symlink_metadata(home.join(".kimi-code")).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn repair_reports_broken_skill_target_and_keeps_link() {
+        let base = temp_home("broken");
+        let home = base.join("home");
+        let (managed, native) = seed_legacy_managed_default(&home);
+        let missing = base.join("missing-skill");
+        create_symlink_path(&missing, &managed.join("skills").join("ghost")).unwrap();
+
+        let result = repair_native_home_symlink_at(&home).unwrap();
+        assert!(result.repaired);
+        let ghost = result
+            .skills_materialized
+            .iter()
+            .find(|e| e.name == "ghost")
+            .expect("ghost entry present");
+        assert!(!ghost.copied);
+        assert_eq!(ghost.reason, "broken-target");
+        // 断链技能仍保留为符号链接（不破坏数据）。
+        assert!(std::fs::symlink_metadata(native.join("skills").join("ghost")).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn repair_resolves_relative_symlink_targets_against_their_own_directory() {
+        let base = temp_home("relative");
+        let home = base.join("home");
+        let (managed, native) = seed_legacy_managed_default(&home);
+
+        // home 链接改为相对目标（相对链接所在目录 home 解析）。
+        std::fs::remove_file(&native).unwrap();
+        create_symlink_path(Path::new(".kimi-code-switch-gui/.env/default"), &native).unwrap();
+
+        // 技能链接用相对目标（相对 skills/ 目录解析）。
+        std::fs::create_dir_all(managed.join("skills-source")).unwrap();
+        std::fs::write(managed.join("skills-source").join("SKILL.md"), "# rel\n").unwrap();
+        create_symlink_path(Path::new("../skills-source"), &managed.join("skills").join("rel-skill"))
+            .unwrap();
+
+        let result = repair_native_home_symlink_at(&home).unwrap();
+        assert!(result.repaired, "reason: {}", result.reason);
+        assert!(!std::fs::symlink_metadata(&native).unwrap().file_type().is_symlink());
+        let entry = result
+            .skills_materialized
+            .iter()
+            .find(|e| e.name == "rel-skill")
+            .expect("rel-skill entry present");
+        assert!(entry.copied, "reason: {}", entry.reason);
+        assert_eq!(
+            std::fs::read_to_string(native.join("skills").join("rel-skill").join("SKILL.md")).unwrap(),
+            "# rel\n"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 }

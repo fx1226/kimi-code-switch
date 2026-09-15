@@ -44,6 +44,7 @@ pub fn run() {
             fs_access::move_file,
             fs_access::copy_dir,
             fs_access::merge_directory_missing,
+            fs_access::repair_native_home_symlink,
             fs_access::path_exists,
             fs_access::resolve_home_path,
             fs_access::real_path,

@@ -219,6 +219,12 @@ export interface FileAccess {
     copiedEntries: number;
     skippedConflicts: number;
   }>;
+  /**
+   * 一次性修复：`~/.kimi-code` 是指向 GUI 托管默认环境（.env/default）的符号链接时，
+   * 翻转物理目录为真实 `~/.kimi-code` 并把 skills 顶层符号链接物化为本地副本。
+   * 自然幂等，未提供时跳过。
+   */
+  repairNativeHomeSymlink?(): Promise<NativeHomeSymlinkRepairResult>;
   // 可选：PanelSettings 专用读写（用于 SQLite 存储）
   // 若未提供，回退到 readText/writeText + TOML
   readPanelSettings?(path: string): Promise<PanelSettings | null>;
@@ -997,6 +1003,110 @@ export interface LegacyManagedDefaultEnvironmentMigrationResult {
   skillsCopied: boolean;
   pluginsMerged: boolean;
   reason?: string;
+}
+
+export interface SkillMaterializationEntry {
+  name: string;
+  copied: boolean;
+  reason: string;
+}
+
+export interface NativeHomeSymlinkRepairResult {
+  repaired: boolean;
+  reason: string;
+  skillsMaterialized: SkillMaterializationEntry[];
+}
+
+export interface LegacyManagedDefaultHomeRepairResult {
+  repaired: boolean;
+  reason: string;
+  skillsMaterialized: number;
+  /** 物化/扫描失败的技能诊断（name: reason），供启动日志保留细节。 */
+  skillIssues: string[];
+  pluginsRemapped: boolean;
+  remapError?: string;
+}
+
+/**
+ * 仅重映射指向旧托管默认 home 的插件根：逻辑前缀（~/.kimi-code-switch-gui/.env/default）
+ * 与绝对前缀（由 absoluteTargetHome 推导）。不碰其他 home 的 /plugins/managed/<id> 根，
+ * 避免把无关插件改写到原生目录。使用处已保证 targetHome 为绝对路径。
+ */
+function remapLegacyHomePluginRoots(
+  document: string,
+  absoluteLegacyHome: string | undefined,
+  targetHome: string,
+): string {
+  const parsed = JSON.parse(document) as unknown;
+  if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) {
+    throw new Error("installed.json must contain a plugins array");
+  }
+  const legacyPrefixes = [
+    `${LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME}/plugins/managed/`,
+    ...(absoluteLegacyHome ? [`${absoluteLegacyHome}/plugins/managed/`] : []),
+  ];
+  for (const record of parsed.plugins) {
+    if (!isRecord(record) || typeof record.root !== "string") continue;
+    const normalizedRoot = record.root.replace(/\\/g, "/");
+    const prefix = legacyPrefixes.find((candidate) => normalizedRoot.startsWith(candidate));
+    if (prefix) {
+      record.root = `${targetHome}/plugins/managed/${normalizedRoot.slice(prefix.length)}`;
+    }
+  }
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+/**
+ * 一次性修复：`~/.kimi-code` 是指向 GUI 托管默认环境（.env/default）的符号链接时，
+ * 先把物理目录翻转为真实 `~/.kimi-code`（Rust 侧 rename），再把 plugins/installed.json
+ * 里残留的 `.env/default` root 重映射回原生路径。自然幂等：修复后不再是符号链接，
+ * 重复调用返回 repaired=false。失败不抛错，逐项记录。
+ * absoluteTargetHome 传入绝对原生主目录（如 /Users/xfang/.kimi-code），用于把插件根
+ * 写成与 kimi-code CLI 自身一致的绝对路径；缺省回退 `~/.kimi-code`。
+ */
+export async function repairLegacyManagedDefaultHomeSymlink(
+  files: FileAccess,
+  absoluteTargetHome?: string,
+): Promise<LegacyManagedDefaultHomeRepairResult> {
+  if (!files.repairNativeHomeSymlink) {
+    return { repaired: false, reason: "unsupported", skillsMaterialized: 0, skillIssues: [], pluginsRemapped: false };
+  }
+  const repair = await files.repairNativeHomeSymlink();
+  if (!repair.repaired) {
+    return { repaired: false, reason: repair.reason, skillsMaterialized: 0, skillIssues: [], pluginsRemapped: false };
+  }
+
+  let pluginsRemapped = false;
+  let remapError: string | undefined;
+  const targetHome = absoluteTargetHome ?? defaultKimiCodeHomePath();
+  const absoluteLegacyHome = absoluteTargetHome?.endsWith("/.kimi-code")
+    ? `${absoluteTargetHome.slice(0, -"/.kimi-code".length)}/${LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME.replace(/^~\//, "")}`
+    : undefined;
+  const targetPluginsPath = `${targetHome}/plugins/installed.json`;
+  try {
+    // 不用 safeReadText：读取失败要进 remapError，而不是被当成文件缺失。
+    const document = await files.readText(targetPluginsPath);
+    if (document?.trim()) {
+      const remapped = remapLegacyHomePluginRoots(document, absoluteLegacyHome, targetHome);
+      if (remapped !== document) {
+        await files.ensureDir(`${targetHome}/plugins`);
+        await files.writeText(targetPluginsPath, remapped);
+        pluginsRemapped = true;
+      }
+    }
+  } catch (error) {
+    remapError = formatErrorMessage(error);
+  }
+  return {
+    repaired: true,
+    reason: "symlink-materialized",
+    skillsMaterialized: repair.skillsMaterialized.filter((entry) => entry.copied).length,
+    skillIssues: repair.skillsMaterialized
+      .filter((entry) => !entry.copied)
+      .map((entry) => `${entry.name}: ${entry.reason}`),
+    pluginsRemapped,
+    remapError,
+  };
 }
 
 /**
