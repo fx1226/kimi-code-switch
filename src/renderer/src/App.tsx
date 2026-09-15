@@ -9,8 +9,9 @@ import { formatAcceleratorForPlatform, getBrowserShortcutPlatform, normalizeShor
 
 import { CommandPalette } from "./commandPalette";
 import { QuickProfileSwitcher } from "./quickProfileSwitcher";
-import type { SaveRecoveryInfo } from "./tauri/kimiSwitch";
+import type { SaveRecoveryInfo, SaveRecoveryDecision } from "./tauri/kimiSwitch";
 import { TabPanels } from "./tabs/TabPanels";
+import { SaveRecoveryDialog } from "./SaveRecoveryDialog";
 import { AddAssistantWizard } from "./wizards/AddAssistantWizard";
 import { CascadeDeleteDialog } from "./dialogs/CascadeDeleteDialog";
 import { getCascadePreview } from "@shared/configRelations";
@@ -60,7 +61,7 @@ export function App(): JSX.Element {
     migrateLegacyBackupRecord,
     doctorReport,
     setFileSnapshot,
-    error, setError, notice, setNotice, externalChange, setExternalChange,
+    error, setError, notice, setNotice,
     isMcpImportOpen, setIsMcpImportOpen,
     mcpImportDraft, setMcpImportDraft,
     mcpImportInitialDraft, setMcpImportInitialDraft,
@@ -125,7 +126,6 @@ export function App(): JSX.Element {
           return;
         }
         try {
-          setExternalChange(null);
           setFileSnapshot(null);
           const result = await api.saveKimiCodeEnvironmentPreference(kimiCodeEnvironments, environmentId);
           setFileSnapshot(result.snapshot);
@@ -146,7 +146,6 @@ export function App(): JSX.Element {
     runAfterUnsavedHandled,
     setActiveTab,
     setError,
-    setExternalChange,
     setFileSnapshot,
     setNotice,
   ]);
@@ -178,6 +177,64 @@ export function App(): JSX.Element {
     window.addEventListener("kimi-refresh", check);
     return () => window.removeEventListener("kimi-refresh", check);
   }, []);
+
+  // C2：恢复对话框状态与决策处理。
+  const [saveRecoveryDialogOpen, setSaveRecoveryDialogOpen] = useState(false);
+  const [saveRecoveryBusy, setSaveRecoveryBusy] = useState(false);
+  const [saveRecoveryMessage, setSaveRecoveryMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  const dismissSaveRecovery = useCallback((): void => {
+    setSaveRecovery(null);
+    setSaveRecoveryDialogOpen(false);
+    getApi()?.dismissSaveRecovery?.();
+  }, []);
+
+  const resolveSaveRecovery = useCallback(async (decision: SaveRecoveryDecision): Promise<void> => {
+    const api = getApi();
+    if (!api?.resolveSaveRecovery) return;
+    setSaveRecoveryBusy(true);
+    setSaveRecoveryMessage(null);
+    try {
+      const result = await api.resolveSaveRecovery(decision);
+      if (!result.ok) {
+        // 复核失败/冲突：保持只读恢复模式，不关闭详情；提示进入只读。
+        setSaveRecoveryMessage({ tone: "error", text: t(locale, "saveRecoveryConflict") });
+        return;
+      }
+      if (decision === "export-journal") {
+        // 导出仅留档，不自动删除——仍停留在恢复横幅，由用户再点「放弃」。
+        setSaveRecoveryMessage({
+          tone: "success",
+          text: result.exportedPath
+            ? formatMessage(t(locale, "saveRecoveryExported"), { path: result.exportedPath })
+            : t(locale, "saveRecoveryExportCanceled"),
+        });
+        return;
+      }
+      setSaveRecoveryDialogOpen(false);
+      setSaveRecovery(null);
+      setSaveRecoveryMessage(null);
+      if (decision === "abandon") {
+        setNotice(t(locale, "saveRecoveryAbandoned"));
+      } else if (decision === "apply-desired") {
+        setNotice(formatMessage(t(locale, "saveRecoveryAppliedSummary"), {
+          written: result.writtenFiles,
+          removed: result.removedFiles,
+          unchanged: result.unchangedFiles,
+        }));
+      } else {
+        setNotice(formatMessage(t(locale, "saveRecoveryRestoredSummary"), {
+          written: result.writtenFiles,
+          removed: result.removedFiles,
+          unchanged: result.unchangedFiles,
+        }));
+      }
+    } catch (error) {
+      setSaveRecoveryMessage({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSaveRecoveryBusy(false);
+    }
+  }, [locale]);
 
   useShortcuts({
     shortcuts,
@@ -252,12 +309,14 @@ export function App(): JSX.Element {
   }, []);
 
   const handleCommandPaletteSelect = useCallback((result: SearchResult): void => {
-    if (!isTabId(result.tabId)) {
+    // 提取到局部常量：属性访问的窄化不能跨闭包边界保留。
+    const tabId = result.tabId;
+    if (!isTabId(tabId)) {
       return;
     }
     setCommandPaletteOpen(false);
     runAfterUnsavedHandled(() => {
-      setActiveTab(result.tabId);
+      setActiveTab(tabId);
       if (result.type === "provider") setSelectedProvider(result.name);
       else if (result.type === "model") setSelectedModel(result.name);
       else if (result.type === "profile") setSelectedProfile(result.name);
@@ -288,37 +347,6 @@ export function App(): JSX.Element {
       <div className="window-titlebar drag-region" aria-hidden="true" data-tauri-drag-region>
         <div className="window-titlebar-safe" data-tauri-drag-region />
       </div>
-      {externalChange ? (
-        <div className="app-tip-layer" role="status" aria-live="polite">
-          <div className="app-tip app-tip-warning">
-            <AlertTriangle size={18} className="app-tip-icon" />
-            <span className="app-tip-message">
-              {t(locale, "fileWatchExternalChange").replace("{files}", externalChange.changedFileNames.join(", "))}
-            </span>
-            <button
-              type="button"
-              className="app-tip-action"
-              onClick={() => {
-                runAfterUnsavedHandled(() => {
-                  setExternalChange(null);
-                  void loadState();
-                });
-              }}
-            >
-              <RefreshCw size={13} />
-              {t(locale, "fileWatchReload")}
-            </button>
-            <button
-              type="button"
-              className="app-tip-close"
-              aria-label={t(locale, "close")}
-              onClick={() => setExternalChange(null)}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      ) : null}
       {saveRecovery ? (
         <div className="app-tip-layer" role="dialog" aria-label={t(locale, "saveRecoveryTitle")}>
           <div className="app-tip app-tip-warning">
@@ -326,18 +354,21 @@ export function App(): JSX.Element {
             <span className="app-tip-message">
               {saveRecovery.action === "unknown" || saveRecovery.action === "unknown-restore"
                 ? t(locale, "saveRecoveryUnknown")
-                : t(locale, saveRecovery.reason === "malformed" ? "saveRecoveryQuarantinedMalformed" : "saveRecoveryQuarantinedUnsupported")}
+                : t(locale, ("reason" in saveRecovery && saveRecovery.reason === "malformed") ? "saveRecoveryQuarantinedMalformed" : "saveRecoveryQuarantinedUnsupported")}
             </span>
+            {saveRecovery.action === "unknown" ? (
+              <button
+                type="button"
+                className="app-tip-action"
+                onClick={() => setSaveRecoveryDialogOpen(true)}
+              >
+                {t(locale, "saveRecoveryViewDetails")}
+              </button>
+            ) : null}
             <button
               type="button"
               className="app-tip-action"
-              onClick={async () => {
-                const api = getApi();
-                if (!api?.resolveSaveRecovery) return;
-                await api.resolveSaveRecovery("abandon");
-                setSaveRecovery(null);
-                setNotice(t(locale, "saveRecoveryAbandoned"));
-              }}
+              onClick={() => void resolveSaveRecovery("abandon")}
             >
               <X size={13} />
               {t(locale, "saveRecoveryAbandon")}
@@ -346,7 +377,7 @@ export function App(): JSX.Element {
               type="button"
               className="app-tip-close"
               aria-label={t(locale, "close")}
-              onClick={() => setSaveRecovery(null)}
+              onClick={dismissSaveRecovery}
             >
               <X size={14} />
             </button>
@@ -529,7 +560,6 @@ export function App(): JSX.Element {
             setActiveTab={setActiveTab}
             setError={setError}
             setNotice={setNotice}
-            setExternalChange={setExternalChange}
             setFileSnapshot={setFileSnapshot}
             loadState={loadState}
           />
@@ -692,6 +722,16 @@ export function App(): JSX.Element {
         />
       ) : null}
       <ToastContainer locale={locale} toasts={toasts} onRemove={removeToast} />
+      {saveRecovery && saveRecovery.action === "unknown" && saveRecoveryDialogOpen ? (
+        <SaveRecoveryDialog
+          locale={locale}
+          recovery={saveRecovery}
+          busy={saveRecoveryBusy}
+          message={saveRecoveryMessage}
+          onResolve={(decision) => void resolveSaveRecovery(decision)}
+          onClose={() => setSaveRecoveryDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

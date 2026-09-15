@@ -19,6 +19,7 @@ const snapshotMocks = vi.hoisted(() => ({
 vi.mock("./fileSnapshots", () => snapshotMocks);
 
 import { kimiSwitchTauri, loadPluginInventory, loadProjectLocalConfig, loadProjectMcpScope, recoverLegacyNativeConfig, remapPluginDirectoryForRestore, resolveProjectAdditionalDirs } from "./kimiSwitch";
+import { RESTORE_TRANSACTION_PATH, SAVE_TRANSACTION_PATH } from "./fileAccess";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -272,8 +273,6 @@ describe("kimiSwitchTauri API surface", () => {
 
     await expect(kimiSwitchTauri.defaultSettings()).resolves.toMatchObject({ config_target: "kimi-code" });
     await expect(kimiSwitchTauri.getInstallSource()).resolves.toBe("manual");
-    expect(kimiSwitchTauri.onTrayCommand()()).toBeUndefined();
-    expect(kimiSwitchTauri.onExternalFileChange()()).toBeUndefined();
     await expect(kimiSwitchTauri.usageGetStatus()).resolves.toMatchObject({
       ok: true,
       proxy: { status: "stopped", sessionsTracked: 0, eventsIngested: 0 },
@@ -583,5 +582,248 @@ describe("kimiSwitchTauri API surface", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("resolve_workspace_directory", expect.objectContaining({
       projectRoot: "/repo",
     }));
+  });
+});
+
+describe("resolveSaveRecovery (C2 manual recovery)", () => {
+  const SAVE = SAVE_TRANSACTION_PATH;
+  const RESTORE = RESTORE_TRANSACTION_PATH;
+
+  function createFileSystemMock(initial?: Record<string, string | null>) {
+    const files: Record<string, string | null> = { ...(initial ?? {}) };
+    const calls: Array<{ command: string; args?: Record<string, unknown> | null }> = [];
+    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      const input = (args ?? {}) as { path?: string; content?: string; expectedSha256?: string; settingsJson?: string };
+      calls.push({ command, args: (args ?? null) as Record<string, unknown> | null });
+      if (command === "read_text") return files[input.path ?? ""] ?? null as never;
+      if (command === "write_text_cas") {
+        if (input.path !== undefined) files[input.path] = input.content ?? null;
+        return "hash-after" as never;
+      }
+      if (command === "remove_file_cas") {
+        if (input.path !== undefined) delete files[input.path];
+        return undefined as never;
+      }
+      if (command === "remove_file") {
+        if (input.path !== undefined) delete files[input.path];
+        return undefined as never;
+      }
+      if (command === "save_file_with_dialog") return "/exported/journal.json" as never;
+      if (command === "get_panel_settings") return files["__panel__"] ?? null as never;
+      if (command === "save_panel_settings") {
+        files["__panel__"] = input.settingsJson ?? null;
+        return undefined as never;
+      }
+      if (command === "import_panel_settings") return true as never;
+      return undefined as never;
+    });
+    return { files, calls };
+  }
+
+  const journal = (overrides?: Record<string, unknown>) => JSON.stringify({
+    version: 1,
+    kind: "save-app-state",
+    createdAt: "2026-09-15T00:00:00.000Z",
+    textFiles: [
+      { path: "/cfg/config.toml", originalContent: "old", desiredContent: "new" },
+    ],
+    ...overrides,
+  });
+
+  const targetWrites = (calls: Array<{ command: string; args?: Record<string, unknown> | null }>) =>
+    calls.filter((call) => ["write_text_cas", "remove_file_cas", "write_text"].includes(call.command));
+
+  it("abandon keeps existing behavior: both save and restore journals are removed", async () => {
+    const { files, calls } = createFileSystemMock({ [SAVE]: "{}", [RESTORE]: "{}" });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("abandon");
+
+    expect(result.ok).toBe(true);
+    expect(result.deletedJournals).toEqual([SAVE, RESTORE]);
+    expect(SAVE in files).toBe(false);
+    expect(RESTORE in files).toBe(false);
+    expect(targetWrites(calls)).toEqual([]);
+  });
+
+  it("export-journal reuses saveFile and does not delete the journal for later abandon", async () => {
+    const raw = journal();
+    const { files, calls } = createFileSystemMock({ [SAVE]: raw });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("export-journal");
+
+    expect(result.ok).toBe(true);
+    expect(result.exportedPath).toBe("/exported/journal.json");
+    expect(calls.some((call) => call.command === "save_file_with_dialog")).toBe(true);
+    const exportCall = calls.find((call) => call.command === "save_file_with_dialog");
+    expect(exportCall?.args?.["content"]).toBe(raw);
+    // 导出仅留档：journal 不被自动删除，banner 保持由用户再点放弃。
+    expect(files[SAVE]).toBe(raw);
+    expect(calls.some((call) => call.command === "remove_file" && call.args?.["path"] === SAVE)).toBe(false);
+  });
+
+  it("export-journal reports user-cancel with a null exported path and keeps the journal", async () => {
+    const raw = journal();
+    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      const input = (args ?? {}) as { path?: string };
+      if (command === "read_text" && input.path === SAVE) return raw as never;
+      if (command === "save_file_with_dialog") return null as never;
+      return undefined as never;
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("export-journal");
+    expect(result.ok).toBe(true);
+    expect(result.exportedPath).toBeNull();
+  });
+
+  it("apply-desired writes desired via CAS against the on-disk revision and deletes the save journal", async () => {
+    const { files, calls } = createFileSystemMock({
+      [SAVE]: journal(),
+      "/cfg/config.toml": "old",
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(true);
+    expect(result.decision).toBe("apply-desired");
+    expect(result.writtenFiles).toBe(1);
+    expect(result.failures).toEqual([]);
+    expect(files["/cfg/config.toml"]).toBe("new");
+    expect(SAVE in files).toBe(false);
+    const writeCall = targetWrites(calls)[0];
+    expect(writeCall.command).toBe("write_text_cas");
+    const writeArgs = writeCall.args as { path: string; content: string; expectedSha256: string };
+    expect(writeArgs.path).toBe("/cfg/config.toml");
+    expect(writeArgs.content).toBe("new");
+    expect(writeArgs.expectedSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("apply-desired already-desired files are left untouched and counted as unchanged", async () => {
+    const { files, calls } = createFileSystemMock({
+      [SAVE]: journal(),
+      "/cfg/config.toml": "new",
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(true);
+    expect(result.writtenFiles).toBe(0);
+    expect(result.unchangedFiles).toBe(1);
+    expect(targetWrites(calls)).toEqual([]);
+    expect(files["/cfg/config.toml"]).toBe("new");
+  });
+
+  it("apply-desired force-applies desired over an externally modified file (CAS on external revision)", async () => {
+    const { files } = createFileSystemMock({
+      [SAVE]: journal(),
+      "/cfg/config.toml": "external-edit",
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(true);
+    expect(result.writtenFiles).toBe(1);
+    expect(files["/cfg/config.toml"]).toBe("new");
+  });
+
+  it("restore-original writes original back and removes files created by the crashed save", async () => {
+    const { files, calls } = createFileSystemMock({
+      [SAVE]: journal({
+        textFiles: [
+          { path: "/cfg/config.toml", originalContent: "old", desiredContent: "new" },
+          { path: "/cfg/tui.toml", originalContent: null, desiredContent: "theme = \"dark\"" },
+        ],
+      }),
+      "/cfg/config.toml": "new",
+      "/cfg/tui.toml": "theme = \"dark\"",
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("restore-original");
+
+    expect(result.ok).toBe(true);
+    expect(result.writtenFiles).toBe(1);
+    expect(result.removedFiles).toBe(1);
+    expect(files["/cfg/config.toml"]).toBe("old");
+    expect("/cfg/tui.toml" in files).toBe(false);
+    expect(SAVE in files).toBe(false);
+    const args = calls
+      .filter((call) => call.command === "remove_file_cas")
+      .map((call) => call.args as { path: string; expectedSha256: string });
+    expect(args).toHaveLength(1);
+    expect(args[0].path).toBe("/cfg/tui.toml");
+    expect(args[0].expectedSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("revision recheck failure (journal vanished) modifies no file and keeps read-only", async () => {
+    const { files, calls } = createFileSystemMock({ "/cfg/config.toml": "external" });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(false);
+    expect(result.failures.length).toBeGreaterThan(0);
+    expect(targetWrites(calls)).toEqual([]);
+    expect(calls.some((call) => call.command === "remove_file")).toBe(false);
+    expect(files["/cfg/config.toml"]).toBe("external");
+  });
+
+  it("revision recheck failure (target unreadable) modifies no file and keeps read-only", async () => {
+    const { files, calls } = createFileSystemMock({ [SAVE]: journal(), "/cfg/config.toml": "old" });
+    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
+      const input = (args ?? {}) as { path?: string };
+      if (command === "read_text" && input.path === SAVE) return journal() as never;
+      if (command === "read_text" && input.path === "/cfg/config.toml") throw new Error("read denied");
+      if (command === "read_text") return null as never;
+      if (command === "get_panel_settings") return null as never;
+      return undefined as never;
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("restore-original");
+
+    expect(result.ok).toBe(false);
+    expect(result.failures[0]?.path).toBe("/cfg/config.toml");
+    expect(targetWrites(calls)).toEqual([]);
+    expect(files["/cfg/config.toml"]).toBe("old");
+  });
+
+  it("applies the panel resource when it sits at the original revision", async () => {
+    const panelOriginal = { version: 1 };
+    const panelDesired = { version: 2 };
+    const { files, calls } = createFileSystemMock({
+      [SAVE]: journal({
+        textFiles: [{ path: "/cfg/config.toml", originalContent: "old", desiredContent: "new" }],
+        panelOriginal,
+        panelDesired,
+      }),
+      "/cfg/config.toml": "old",
+      "__panel__": JSON.stringify(panelOriginal),
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(true);
+    expect(files["/cfg/config.toml"]).toBe("new");
+    const savePanel = calls.find((call) => call.command === "save_panel_settings");
+    expect(savePanel).toBeDefined();
+    const savePanelArgs = savePanel?.args as { settingsJson: string } | null;
+    expect(savePanelArgs).toBeDefined();
+    expect((savePanelArgs as { settingsJson: string }).settingsJson).toBe(JSON.stringify(panelDesired));
+  });
+
+  it("keeps the journal read-only when the panel resource is externally modified", async () => {
+    const { files, calls } = createFileSystemMock({
+      [SAVE]: journal({
+        textFiles: [{ path: "/cfg/config.toml", originalContent: "old", desiredContent: "new" }],
+        panelOriginal: { version: 1 },
+        panelDesired: { version: 2 },
+      }),
+      "/cfg/config.toml": "old",
+      "__panel__": JSON.stringify({ version: 999 }),
+    });
+
+    const result = await kimiSwitchTauri.resolveSaveRecovery("apply-desired");
+
+    expect(result.ok).toBe(false);
+    expect(result.failures[0]?.path).toBe("panel");
+    expect(SAVE in files).toBe(true); // journal 保留
+    expect(targetWrites(calls).filter((call) => call.command === "write_text_cas")).toEqual([]);
   });
 });
