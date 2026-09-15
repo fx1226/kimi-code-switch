@@ -45,16 +45,16 @@
 
 ## 2. 剩余工作总览
 
-状态列说明：下表反映「2026-08-26 实施轮」后的真实状态；标注完成依据见第 11 章《本轮完成证据》。
+状态列说明：下表反映「2026-08-26 实施轮」+「2026-09-15 推进轮」后的真实状态；标注完成依据见第 11/12 章。2026-09-15 轮重新修复 B1 授权来源、补全 B4 完整清单与 C2 人工恢复 UI、并修复恢复 apply 竞态；F3 重开，需在收口与 D 系列推进后重跑完整门禁。
 
 | ID | 优先级 | 领域 | 状态 | 发布影响 |
 | --- | --- | --- | --- | --- |
-| B1 | P0 | Rust 文件系统授权与最终 symlink 边界 | 已完成 | 阻断发布 |
+| B1 | P0 | Rust 文件系统授权与最终 symlink 边界 | 已完成（2026-09-15 重新修复：durable grant 改由 Rust 原生 dialog 生成并以 Rust 侧 store 持久化；backup_local_path 不再作为授权来源；含 pick_backup_directory） | 阻断发布 |
 | B2 | P0 | portable directory 最终 revision 复核 | 已完成 | 阻断发布 |
-| B3 | P1 | Provider 自定义 URL 的真实请求边界 | 已完成（残余 DNS-rebinding 已文档化） | 阻断安全验收 |
-| B4 | P1 | 备份危险内容审查覆盖所有恢复入口 | 已完成（local/WebDAV 统一门禁） | 阻断安全验收 |
+| B3 | P1 | Provider 自定义 URL 的真实请求边界 | 已完成（2026-09-15 用户决策：接受已文档化的残余 DNS-rebinding/redirect 边界，保留 GUI 自动导入并保持 trust 确认文案；真实请求层约束需官方 SDK transport 后再收口） | 阻断安全验收 |
+| B4 | P1 | 备份危险内容审查覆盖所有恢复入口 | 已完成（2026-09-15 补齐：风险清单不再截断，UI 完整可滚动/复制；local/WebDAV 统一门禁） | 阻断安全验收 |
 | C1 | P0 | 保存请求串行化/latest-wins | 已完成 | 阻断发布 |
-| C2 | P0 | 损坏/未知 journal quarantine 与恢复 UI | 已完成（核心：quarantine+只读恢复+放弃；original/desired 选择走 C3） | 阻断发布 |
+| C2 | P0 | 损坏/未知 journal quarantine 与恢复 UI | 已完成（2026-09-15 补全人工恢复：查看脱敏摘要/导出 journal/放弃/选择 original|desired + 写前 revision 复核 + 审计结果；quarantine+只读恢复保留） | 阻断发布 |
 | C3 | P0 | regular/full/history restore crash journal | 已完成（full/regular 统一 journal；history 目录由 B2 复核+回滚点） | 阻断发布 |
 | C4 | P1 | 历史文件权限、schema transaction、目标重绑定 | 已完成（本实施轮补齐 schema migration savepoint + rollback 测试） | 阻断迁移可靠性 |
 | C5 | P2 | optimistic revision guard 的竞态模型 | 已完成（命名/文档统一为 optimistic revision guard；竞态+恢复路径已在 fileSnapshots/fs_access 注释） | 需文档化或改善 |
@@ -69,7 +69,7 @@
 | E3 | P2 | project-local config 的备份策略 | 已完成（方案 1：可移植备份排除 + backup.ts 注释说明；如需项目映射恢复需单独授权） | 灾难恢复边界清晰 |
 | F1 | P1 | 官方契约 fixtures 与差异 CI | 已完成（新增 plugin/provider-registry fixtures+断言） | 防漂移已就位 |
 | F2 | P2 | 兼容性状态页和升级 SOP | 已完成（about 页五档分类+基线+风险提示；SOP 文档落地） | 维护能力已就位 |
-| F3 | P0 | 最终完成审计、全量构建与安全复核 | 已完成（tsc/npm test/build:web/cargo test/npm audit/secrets scan/全量 tauri build） | 阻断完成声明 |
+| F3 | P0 | 最终完成审计、全量构建与安全复核 | 重开：本轮已验证 tsc/build:web/cargo test 与 867 项 vitest，但需在收口提交与剩余功能主线后重跑计划 7 章完整门禁（Tauri 全量 build、npm audit、secrets scan、安全与官方交叉验证） | 阻断完成声明 |
 
 ## 11. 本轮完成证据（2026-08-26 实施轮）
 
@@ -594,4 +594,25 @@ git diff --check
 5. 完整 Tauri build、测试、覆盖率、npm audit、security review 和 upstream diff review 全部通过。
 6. 没有真实 secret、未脱敏预览、备份凭据或 OAuth token 进入仓库。
 7. 未经用户授权不执行 commit/push/release；这些动作不属于技术完成的默认步骤。
+
+## 12. 2026-09-15 推进轮完成与重开证据
+
+本轮聚焦「发布安全基线 + 验收缺口」，修改仅在工作树（未提交）：
+
+1. **B1 重新修复（Rust + renderer）**：
+   - `src-tauri/src/fs_access.rs` 新增 durable grant 持久化 store（`~/.kimi-code-switch-gui/access-grants.json`，目录 0700 / 文件 0600），新增 `pick_backup_directory` 命令（Rust 原生 folder dialog，properties openDirectory+createDirectory，canonicalize 后以 `source=dialog` 登记并落盘）。
+   - `reconcile_durable_grants` 不再把 SQLite `backup_local_path` 字符串当作授权来源，仅从 durable grant store 重建；环境 `homePath` 重建前 canonicalize 并通过 `within_managed_root` 校验。
+   - renderer：`TabPanels.tsx` 备份本地路径改为只读 + 按钮调 `pickBackupDirectory`（授权只能经 Rust dialog）；`backup.ts` 移除「每次备份前 reconcile 注册授权」逻辑（改启动一次幂等重建）；`kimiSwitch.ts` 暴露 `pickBackupDirectory`。
+   - Rust 测试新增 5 项（面板字符串不再产生授权 / pick 后放行、pick 前被拒 / store 重启重建+幂等 / 越界 home 跳过 / 序列化契约）。`cargo test` 113 passed / 1 ignored；`cargo check` 0 警告。
+2. **恢复 apply 竞态闭环**：`useSafetyActions.ts::restoreWithDryRun` 不再无条件 `allowOverwrite:true`；apply 保留 preflight，external-change 二次确认后才以该次 snapshot 覆盖，allowRisk 不绕过 preflight，成功后再同步最新 snapshot。`backup.test.ts` 新增 4 条用例覆盖该闭环。
+3. **B4 完整风险清单**：删除 `slice(0,20)` 截断；`ConfirmDialog` 支持可滚动 `<pre>` + 复制，风险列表完整可见，保留默认拒绝+allowRisk 重试语义。
+4. **C2 人工恢复 UI 补全**：`resolveSaveRecovery` 扩展为 `abandon | export-journal | apply-desired | restore-original`，逐资源写前 revision 复核、成功后才删 journal、返回审计结果；新增 `saveRecovery.ts` 脱敏摘要、`SaveRecoveryDialog.tsx`；i18n 6 语言新增键。测试 17 条（saveRecovery 6 + kimiSwitch 11）。
+5. **验证**：`npx tsc --noEmit` 0 错；`npx vitest run` 67 files / 867 tests 全绿；`npm run build:web` 成功；`cd src-tauri && cargo fmt --check && cargo test` 通过。这是阶段性证据，不是最终发布证据——F3 完整门禁（计划第 7 章）待剩余功能主线与收口提交后重跑。
+
+### 仍待推进/待用户决策
+
+- **B3**：接受已文档化的 DNS-rebinding/redirect 残余边界（现状），或停止 GUI 自动 custom registry import 仅委托官方 TUI，两者需在产品层决策。
+- **D1–D4、E1 其余字段**：官方运行时管理能力主线仍未开始/部分完成（D5/D6 有限），属需官方 service/SDK/harness 的长期工作。
+- **C3/C4/F1 完整证据**：directory/SQLite crash recovery、历史权限/重绑定、契约 fixtures 全面覆盖仍需逐条验收记录。
+- **当前工作树收口**：大量 WIP + 本轮改动待按主题拆分提交；`.qoder/` 约 275 个未跟踪生成文件需处理；`CONTRIBUTING.md`/`CLAUDE.md` 文档漂移需修正。
 
