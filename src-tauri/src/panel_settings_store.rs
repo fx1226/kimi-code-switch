@@ -103,6 +103,10 @@ fn ensure_structured_panel_settings_columns(
             "official_account_vault_enabled INTEGER NOT NULL DEFAULT 0",
         ),
         (
+            "chatgpt_bridge_bindings",
+            "chatgpt_bridge_bindings TEXT NOT NULL DEFAULT '{}'",
+        ),
+        (
             "backup_strategy",
             "backup_strategy TEXT NOT NULL DEFAULT 'manual'",
         ),
@@ -381,7 +385,8 @@ pub fn get_panel_settings(
                 insights_status, insights_proxy_port, insights_retention_days,
                 insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                 insights_onboarding_shown_at, insights_last_known_port,
-                insights_display_currency, insights_currency_rates, official_account_vault_enabled
+                insights_display_currency, insights_currency_rates, official_account_vault_enabled,
+                chatgpt_bridge_bindings
             FROM panel_settings WHERE id = 1",
             [],
             |row| {
@@ -434,6 +439,8 @@ pub fn get_panel_settings(
                     "insights_currency_rates": row.get::<_, Option<String>>(41)?
                         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                     "official_account_vault_enabled": row.get::<_, i64>(42)? != 0,
+                    "chatgpt_bridge_bindings": row.get::<_, Option<String>>(43)?
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                 });
                 Ok(json.to_string())
             },
@@ -570,6 +577,7 @@ pub fn save_panel_settings(
             insights_disk_warn_threshold_mb, insights_store_prompt_preview,
             insights_onboarding_shown_at, insights_last_known_port,
             insights_display_currency, insights_currency_rates, official_account_vault_enabled,
+            chatgpt_bridge_bindings,
             updated_at, created_at
         ) VALUES (
             1, ?1,
@@ -584,9 +592,9 @@ pub fn save_panel_settings(
             ?34, ?35, ?36,
             ?37, ?38,
             ?39, ?40,
-            ?41, ?42, ?43,
-            ?44, ?44
-        )
+                    ?41, ?42, ?43, ?44,
+                    ?45, ?45
+                )
         ON CONFLICT(id) DO UPDATE SET
             version = excluded.version,
             config_target = excluded.config_target,
@@ -631,6 +639,7 @@ pub fn save_panel_settings(
             insights_display_currency = excluded.insights_display_currency,
             insights_currency_rates = excluded.insights_currency_rates,
             official_account_vault_enabled = excluded.official_account_vault_enabled,
+            chatgpt_bridge_bindings = excluded.chatgpt_bridge_bindings,
             updated_at = excluded.updated_at",
     );
     if has_legacy_mcp_servers_column(conn)? {
@@ -697,6 +706,7 @@ pub fn save_panel_settings(
             get_str("insights_display_currency"),
             get_json_str("insights_currency_rates"),
             get_bool("official_account_vault_enabled"),
+            get_json_object_str("chatgpt_bridge_bindings"),
             now,
         ],
     )
@@ -872,6 +882,7 @@ mod tests {
                 insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                 insights_onboarding_shown_at, insights_last_known_port,
                 insights_display_currency, insights_currency_rates, official_account_vault_enabled,
+                chatgpt_bridge_bindings,
                 updated_at, created_at
             ) VALUES (
                 1, ?1,
@@ -886,8 +897,8 @@ mod tests {
                 ?34, ?35, ?36,
                 ?37, ?38,
                 ?39, ?40,
-                ?41, ?42, ?43,
-                ?44, ?44
+                ?41, ?42, ?43, ?44,
+                ?45, ?45
             )
             ON CONFLICT(id) DO UPDATE SET
                 version = excluded.version,
@@ -933,6 +944,7 @@ mod tests {
                 insights_display_currency = excluded.insights_display_currency,
                 insights_currency_rates = excluded.insights_currency_rates,
                 official_account_vault_enabled = excluded.official_account_vault_enabled,
+                chatgpt_bridge_bindings = excluded.chatgpt_bridge_bindings,
                 updated_at = excluded.updated_at",
         );
         if has_legacy_mcp_servers_column(conn)? {
@@ -998,6 +1010,7 @@ mod tests {
                 get_str("insights_display_currency"),
                 get_json_str("insights_currency_rates"),
                 get_bool("official_account_vault_enabled"),
+                get_json_object_str("chatgpt_bridge_bindings"),
                 now,
             ],
         )
@@ -1024,7 +1037,8 @@ mod tests {
                     insights_status, insights_proxy_port, insights_retention_days,
                     insights_disk_warn_threshold_mb, insights_store_prompt_preview,
                     insights_onboarding_shown_at, insights_last_known_port,
-                    insights_display_currency, insights_currency_rates, official_account_vault_enabled
+                    insights_display_currency, insights_currency_rates, official_account_vault_enabled,
+                    chatgpt_bridge_bindings
                 FROM panel_settings WHERE id = 1",
                 [],
                 |row| {
@@ -1077,6 +1091,8 @@ mod tests {
                         "insights_currency_rates": row.get::<_, Option<String>>(41)?
                             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                         "official_account_vault_enabled": row.get::<_, i64>(42)? != 0,
+                    "chatgpt_bridge_bindings": row.get::<_, Option<String>>(43)?
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
                     });
                     Ok(json.to_string())
                 },
@@ -1160,6 +1176,65 @@ mod tests {
         assert_eq!(
             loaded_json["model_ui_metadata"]["default"]["kimi-k2"]["pricing"]["input_per_mtok"],
             1.0
+        );
+    }
+
+    #[test]
+    fn chatgpt_bridge_bindings_round_trip() {
+        let state = make_test_state();
+        let test_settings = serde_json::json!({
+            "version": 1,
+            "config_target": "kimi-code",
+            "config_path": "~/.kimi-code/config.toml",
+            "profiles_path": "",
+            "follow_config_profiles": false,
+            "theme": "dark",
+            "appearance_theme": "cupertino",
+            "ui_font_size": "medium",
+            "locale": "zh-CN",
+            "tray_icon": true,
+            "sidebar_collapsed": false,
+            "display_open_mode": "normal",
+            "close_behavior": "minimize",
+            "terminal_app": "auto",
+            "backup_strategy": "manual",
+            "backup_frequency": "daily",
+            "backup_retention_count": 7,
+            "backup_destination_type": "local",
+            "backup_local_path": "",
+            "backup_webdav_url": "",
+            "backup_webdav_username": "",
+            "backup_webdav_password": "",
+            "backup_webdav_path": "",
+            "active_kimi_code_environment_id": "default",
+            "insights_status": "enabled",
+            "insights_retention_days": 30,
+            "insights_disk_warn_threshold_mb": 500,
+            "insights_store_prompt_preview": true,
+            "insights_display_currency": "USD",
+            "chatgpt_bridge_bindings": {
+                "default": {
+                    "environmentId": "default",
+                    "providerName": "chatgpt-bridge",
+                    "modelAliases": ["chatgpt/gpt-5.5"],
+                    "bridgePort": 8317,
+                    "bridgeSecret": "s",
+                    "createdAt": "2026-01-01T00:00:00.000Z"
+                }
+            }
+        });
+
+        save_test(&test_settings.to_string(), &state).unwrap();
+        let loaded = get_test(&state).unwrap().expect("settings should exist");
+        let loaded_json: serde_json::Value = serde_json::from_str(&loaded).unwrap();
+
+        assert_eq!(
+            loaded_json["chatgpt_bridge_bindings"]["default"]["providerName"],
+            "chatgpt-bridge"
+        );
+        assert_eq!(
+            loaded_json["chatgpt_bridge_bindings"]["default"]["bridgePort"],
+            8317
         );
     }
 

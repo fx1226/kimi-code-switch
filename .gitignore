@@ -2,6 +2,7 @@
 .claude
 node_modules
 dist
+dist-bridge
 out
 release
 coverage
@@ -11,6 +12,7 @@ spec-analytics.jsonl
 .sisyphus
 src-tauri/target
 src-tauri/gen
+src-tauri/binaries
 .codegraph/daemon.pid
 *.tsbuildinfo
 

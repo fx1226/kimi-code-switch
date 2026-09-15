@@ -7,6 +7,7 @@ import { SUPPORTED_CURRENCIES } from "./currency";
 import { buildMcpConfigDocument, DEFAULT_MCP_CONFIG_PATH, loadMcpConfig } from "./mcpStore";
 import { normalizeEntryName } from "./nameRules";
 import { remapInstalledPluginRoots } from "./pluginStore";
+import type { ChatgptBridgeBinding } from "./chatgptBridge";
 import { createDefaultShortcuts, normalizeShortcuts } from "./shortcutStore";
 import { TUI_CONFIG_FILENAME, buildTuiConfigDocument, hasTuiConfigValues, mergeTuiConfigDocument, parseTuiConfigDocumentWithDiagnostics, TuiConfigFromProfile } from "./tuiStore";
 import type {
@@ -670,6 +671,7 @@ function panelSettingsFromUnknown(data: Record<string, unknown>, fallback: Panel
     uiState: parseUiState(data.uiState),
     favorites: parseFavorites(data.favorites),
     official_account_vault_enabled: asBoolean(data.official_account_vault_enabled, false),
+    chatgpt_bridge_bindings: parseChatgptBridgeBindings(data.chatgpt_bridge_bindings),
     active_official_account_id: asString(data.active_official_account_id, fallback.active_official_account_id ?? ""),
     insights_status:
       data.insights_status === "enabled" || data.insights_status === "paused" || data.insights_status === "disabled"
@@ -2925,6 +2927,34 @@ function parseFavorites(value: unknown): PanelSettings["favorites"] {
 function sanitizeEnvironmentId(value: string, fallback: string): string {
   const normalized = normalizeEntryName(value);
   return normalized || fallback;
+}
+
+/** 解析 panel settings 中的 ChatGPT 桥接绑定；缺失/不完整时返回 undefined。 */
+function parseChatgptBridgeBindings(
+  value: unknown,
+): Record<string, ChatgptBridgeBinding> | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: Record<string, ChatgptBridgeBinding> = {};
+  for (const [environmentId, raw] of Object.entries(value)) {
+    if (!isRecord(raw)) continue;
+    const providerName = asString(raw.providerName, "");
+    const bridgeSecret = asString(raw.bridgeSecret, "");
+    if (!providerName || !bridgeSecret) continue;
+    result[environmentId] = {
+      environmentId: asString(raw.environmentId, environmentId) || environmentId,
+      providerName,
+      modelAliases: Array.isArray(raw.modelAliases)
+        ? raw.modelAliases.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      profileName: typeof raw.profileName === "string" ? raw.profileName : undefined,
+      bridgePort: typeof raw.bridgePort === "number" ? raw.bridgePort : 8317,
+      bridgeSecret,
+      createdAt: asString(raw.createdAt, ""),
+      lastVerifiedAt: typeof raw.lastVerifiedAt === "string" ? raw.lastVerifiedAt : undefined,
+      lastVerifiedOk: typeof raw.lastVerifiedOk === "boolean" ? raw.lastVerifiedOk : undefined,
+    };
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function parseKimiCodeEnvironments(

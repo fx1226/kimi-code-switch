@@ -33,6 +33,7 @@ import type {
 } from "@shared/types";
 
 import { AboutPage } from "../aboutPage";
+import { ChatgptBridgePanel } from "../chatgptBridgePanel";
 import { getHistory, restoreHistoryEntry } from "../historyManager";
 import { getApi, getMcpAction, getMcpActionNotice, getResourceLabel, createUniqueName, renameModelInState, renameProviderInState } from "../appHelpers";
 import {
@@ -2014,6 +2015,13 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                     ) : null}
                   </div>
                 </SettingsGroup>
+                <ChatgptBridgePanel
+                  locale={locale}
+                  state={state}
+                  updateState={updateState}
+                  setError={setError}
+                  setNotice={setNotice}
+                />
                 </>
                 ) : null}
                 {kimiCodeSubTab === "environment" ? (

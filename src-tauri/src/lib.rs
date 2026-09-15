@@ -14,6 +14,7 @@ mod shortcuts;
 mod system;
 mod tray;
 mod usage;
+mod bridge;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +27,7 @@ pub fn run() {
         .manage(usage::UsageState::default())
         .manage(tray::TrayState::default())
         .manage(fs_access::PathGrantState::default())
+        .manage(bridge::BridgeState::default())
         .invoke_handler(tauri::generate_handler![
             // 文件 I/O
             fs_access::read_text,
@@ -105,6 +107,15 @@ pub fn run() {
             official_accounts::complete_official_account_login,
             official_accounts::activate_official_account,
             official_accounts::delete_official_account,
+            // ChatGPT 订阅桥接宿主
+            bridge::bridge_start,
+            bridge::bridge_stop,
+            bridge::bridge_status,
+            bridge::bridge_login,
+            bridge::bridge_wait_login,
+            bridge::bridge_logout,
+            bridge::bridge_refresh_models,
+            bridge::bridge_probe_connectivity,
             // 托盘
             tray::set_tray,
             tray::show_main_window,

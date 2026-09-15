@@ -494,6 +494,25 @@ url = "https://mcp.context7.com/mcp"
     expect(parsed.sidebar_collapsed).toBe(true);
   });
 
+  it("round-trips chatgpt bridge bindings in panel settings", () => {
+    const panelSettings = createDefaultPanelSettings("/tmp/config.toml", "/tmp/config.panel.toml");
+    panelSettings.chatgpt_bridge_bindings = {
+      default: {
+        environmentId: "default",
+        providerName: "chatgpt-bridge",
+        modelAliases: ["chatgpt/gpt-5.5"],
+        bridgePort: 8317,
+        bridgeSecret: "local-secret",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+    const document = buildPanelSettingsDocument(panelSettings);
+    const parsed = parsePanelSettingsDocument(document);
+    expect(parsed.chatgpt_bridge_bindings?.default.providerName).toBe("chatgpt-bridge");
+    expect(parsed.chatgpt_bridge_bindings?.default.bridgeSecret).toBe("local-secret");
+    expect(parsed.chatgpt_bridge_bindings?.default.modelAliases).toEqual(["chatgpt/gpt-5.5"]);
+  });
+
   it("forces quit behavior when tray icon is disabled", async () => {
     const files = createMemoryFs({
       "/tmp/config.panel.toml": 'tray_icon = false\nclose_behavior = "keep-in-tray"\n',

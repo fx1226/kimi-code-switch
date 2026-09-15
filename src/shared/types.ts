@@ -357,6 +357,8 @@ export interface PanelSettings {
   /** Explicit opt-in for the GUI-only multi-account credential vault. */
   official_account_vault_enabled?: boolean;
   active_official_account_id?: string;
+  /** ChatGPT 订阅桥接绑定，按 Kimi Code 环境 id 索引（GUI-only；OAuth token 不入此表）。 */
+  chatgpt_bridge_bindings?: Record<string, import("./chatgptBridge").ChatgptBridgeBinding>;
   insights_status?: import("./usageTypes").InsightsStatus;
   insights_proxy_port?: number | "auto";
   insights_retention_days?: number;

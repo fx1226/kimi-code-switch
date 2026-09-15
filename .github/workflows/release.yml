@@ -207,6 +207,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build ChatGPT bridge sidecar for target
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          case "${TARGET}" in
+            aarch64-apple-darwin) PKG="node22-darwin-arm64" ;;
+            x86_64-apple-darwin)  PKG="node22-darwin-x64" ;;
+            x86_64-pc-windows-msvc) PKG="node22-win-x64" ;;
+            *) echo "unsupported target ${TARGET}"; exit 1 ;;
+          esac
+          node scripts/build-bridge-sidecar.mjs "${TARGET}" "${PKG}"
+
       - name: Build Tauri bundle
         uses: tauri-apps/tauri-action@v0
         env:

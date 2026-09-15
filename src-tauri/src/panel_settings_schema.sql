@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS panel_settings (
   favorites TEXT, -- {providers?: string[], profiles?: string[]}
   active_official_account_id TEXT NOT NULL DEFAULT '',
   official_account_vault_enabled INTEGER NOT NULL DEFAULT 0, -- Explicit GUI-only credential vault opt-in
+  chatgpt_bridge_bindings TEXT NOT NULL DEFAULT '{}', -- env id -> ChatgptBridgeBinding
 
   -- 备份配置
   backup_strategy TEXT NOT NULL DEFAULT 'manual',

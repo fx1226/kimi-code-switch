@@ -13,6 +13,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // 桥接是纯 Node 侧（http/net/crypto），必须跑在 node 环境而非 jsdom。
+    environmentMatchGlobs: [["src/bridge/**", "node"]],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
