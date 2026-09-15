@@ -2,6 +2,16 @@
 
 Este archivo recoge los cambios relevantes del proyecto. El formato sigue Keep a Changelog y el proyecto adopta el esquema de versiones `major.minor.patch`.
 
+## [2.2.7] - 2026-09-15
+
+### Cambiado
+
+- **El flujo de publicación admite activación manual**: el flujo de publicación puede activarse ahora manualmente desde GitHub Actions; la versión se resuelve de forma uniforme a partir de la etiqueta, una entrada manual o la última etiqueta `v*`, y se obtienen las etiquetas antes de resolver automáticamente para no omitir etiquetas recién publicadas.
+
+### Corregido
+
+- **Pruebas de Insights aisladas**: las pruebas del panel de uso de Insights limpian la preferencia de interfaz persistida después de cada ejecución, evitando que las pruebas se contaminen entre sí a través de localStorage en CI.
+
 ## [2.2.6] - 2026-09-15
 
 ### Añadido

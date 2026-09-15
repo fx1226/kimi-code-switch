@@ -2,6 +2,16 @@
 
 Diese Datei dokumentiert die wesentlichen Änderungen des Projekts. Das Format folgt Keep a Changelog; verwendet wird das `major.minor.patch`-Versionsschema.
 
+## [2.2.7] - 2026-09-15
+
+### Geändert
+
+- **Release-Workflow mit manuellem Auslösen**: Der Release-Workflow kann jetzt manuell aus GitHub Actions ausgelöst werden; die Version wird einheitlich aus dem Tag, einer manuellen Eingabe oder dem neuesten `v*`-Tag aufgelöst, wobei vor der automatischen Auflösung die Tags abgerufen werden, sodass frisch gepushte Tags nicht übersehen werden.
+
+### Behoben
+
+- **Isolierte Insights-Tests**: Die Dashboard-Tests der Nutzungs-Insights löschen nach jeder Ausführung die persistierte Panel-Einstellung, um zu verhindern, dass sich Tests in CI über localStorage gegenseitig beeinflussen.
+
 ## [2.2.6] - 2026-09-15
 
 ### Neu

@@ -2038,7 +2038,7 @@ dependencies = [
 
 [[package]]
 name = "kimi-code-switch-gui"
-version = "2.2.6"
+version = "2.2.7"
 dependencies = [
  "atomicwrites",
  "base64 0.22.1",

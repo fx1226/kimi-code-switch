@@ -2,6 +2,16 @@
 
 This file records the project's notable changes. Format follows Keep a Changelog; the project uses `major.minor.patch` versioning.
 
+## [2.2.7] - 2026-09-15
+
+### Changed
+
+- **Release workflow supports manual dispatch**: the release workflow can now be triggered manually from GitHub Actions; the version is resolved consistently from the tag, a manual input, or the latest `v*` tag, and tags are fetched before auto-resolving so freshly pushed tags are not missed.
+
+### Fixed
+
+- **Isolated insights tests**: usage-insights dashboard tests now clear the persisted panel UI preference after each run, preventing tests from polluting each other through localStorage in CI.
+
 ## [2.2.6] - 2026-09-15
 
 ### Added
