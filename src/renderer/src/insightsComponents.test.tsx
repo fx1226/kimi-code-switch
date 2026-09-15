@@ -7,6 +7,7 @@ const originalApi = window.kimiSwitch;
 
 afterEach(() => {
   window.kimiSwitch = originalApi;
+  window.localStorage?.removeItem("kimi-insights-ui-prefs-v1");
 });
 
 function enabledApi() {
