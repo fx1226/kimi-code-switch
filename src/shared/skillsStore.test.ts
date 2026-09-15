@@ -272,6 +272,34 @@ description: Review
     expect(report.skills.filter((skill) => skill.name === "review")).toHaveLength(1);
   });
 
+  it("keeps user-brand display path logical while deduping by the resolved physical path", async () => {
+    const physicalSkills = "/Users/demo/.kimi-code-switch-gui/.env/default/skills";
+    const base = createMemorySkillFs({
+      "~/.kimi-code/skills/writer/SKILL.md": `---
+name: writer
+description: Writer
+---
+# Writer
+`,
+    });
+    const files = {
+      ...base,
+      async realPath(path: string) {
+        return path === "~/.kimi-code/skills" ? physicalSkills : path;
+      },
+    };
+
+    const report = await scanSkills(files, { mergeAllAvailableSkills: false });
+
+    const brand = report.paths.find((entry) => entry.group === "user-brand");
+    expect(brand?.path).toBe("~/.kimi-code/skills");
+    expect(brand?.resolvedPath).toBe(physicalSkills);
+    expect(brand?.label).toBe("User Brand · ~/.kimi-code/skills");
+    // 展示路径保持逻辑形式的同时，扫描仍能通过逻辑路径读到技能内容。
+    expect(report.skills.map((skill) => skill.name)).toEqual(["writer"]);
+    expect(report.skills[0]?.sourcePathId).toBe("user-brand-kimi");
+  });
+
   it("loads enabled plugin skill roots in extra scope with plugin identity", async () => {
     const files = createMemorySkillFs({
       "/plugins/demo/skills/review/SKILL.md": `---

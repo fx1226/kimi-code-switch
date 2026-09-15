@@ -6838,6 +6838,21 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.skill-path-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.skill-path-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-caption);
+  color: var(--muted);
+}
+
 .skills-view-toggle {
   display: inline-flex;
   align-items: center;

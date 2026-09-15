@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Boxes, Check, ChevronDown, ChevronUp, Copy, Eye, EyeOff, FileText, FolderOpen, LoaderCircle,
-  MoonStar, PenSquare, Play, RefreshCw, Sparkles, Wrench, X,
+  MoonStar, PenSquare, Play, Puzzle, RefreshCw, Sparkles, Wrench, X,
 } from "lucide-react";
 
 import { createDefaultPanelSettings } from "@shared/configStore";
@@ -2035,26 +2035,40 @@ export function formatSkillPathLabel(
   path: SkillsScanReport["paths"][number],
   locale: Locale,
 ): string {
-  return predictSkillLibrary(path.path, locale).label;
+  return predictSkillLibrary(path.path, locale, path).label;
 }
 
 export function renderSkillPathLabel(
   path: SkillsScanReport["paths"][number],
   locale: Locale,
 ): JSX.Element {
-  const prediction = predictSkillLibrary(path.path, locale);
+  const prediction = predictSkillLibrary(path.path, locale, path);
   return (
     <span className="skill-path-label">
       <span className={`skill-path-icon ${prediction.className}`} aria-hidden="true">
         <prediction.icon size={14} />
       </span>
-      <span className="skill-path-copy">{prediction.label}</span>
+      <span className="skill-path-text">
+        <span className="skill-path-copy">{prediction.label}</span>
+        <span className="skill-path-sub">{path.path}</span>
+      </span>
     </span>
   );
 }
 
-export function predictSkillLibrary(path: string, locale: Locale): { icon: typeof Sparkles; className: string; label: string } {
+export function predictSkillLibrary(
+  path: string,
+  locale: Locale,
+  entry?: Pick<SkillsScanReport["paths"][number], "group" | "pluginId">,
+): { icon: typeof Sparkles; className: string; label: string } {
+  if (entry?.group === "plugin") {
+    return { icon: Puzzle, className: "is-generic", label: entry.pluginId || t(locale, "skillLibraryPlugin") };
+  }
   const normalized = path.toLowerCase();
+  // 注意顺序：/.kimi-code/ 必须先于 /.kimi/ 判断（前者不包含后者，但语义更具体）。
+  if (normalized.includes("/.kimi-code/")) {
+    return { icon: MoonStar, className: "is-kimi", label: t(locale, "skillLibraryKimiCode") };
+  }
   if (normalized.includes("/.claude/")) {
     return { icon: Sparkles, className: "is-claude", label: t(locale, "skillLibraryClaude") };
   }

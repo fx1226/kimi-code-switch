@@ -46,6 +46,8 @@ export interface SkillDiscoveryPath {
   reason: string;
   pluginId?: string;
   rootSkillOnly?: boolean;
+  /** 仅供去重用的物理解析路径（realPath 结果）；展示仍用逻辑 path。 */
+  resolvedPath?: string;
 }
 
 export interface SkillMetadata {
@@ -274,10 +276,12 @@ async function buildDiscoveryPaths(
         // Keep the lexical candidate so the later scanner can report the race.
       }
     }
+    // path 保持逻辑路径（供展示与扫描），realPath 结果只用于下方去重 key。
     return {
       ...candidate,
-      path: resolvedPath,
-      label: pathLabel(candidate.group, resolvedPath),
+      path: candidate.path,
+      resolvedPath,
+      label: pathLabel(candidate.group, candidate.path),
       exists,
       selected: false,
       priority: Number.MAX_SAFE_INTEGER,
@@ -292,7 +296,7 @@ async function buildDiscoveryPaths(
       : candidate.group === "plugin"
         ? `plugin:${candidate.pluginId ?? ""}`
         : candidate.group;
-    const key = `${sourceIdentity}\0${candidate.path}`;
+    const key = `${sourceIdentity}\0${candidate.resolvedPath ?? candidate.path}`;
     if (seenResolvedRoots.has(key)) return false;
     seenResolvedRoots.add(key);
     return true;
