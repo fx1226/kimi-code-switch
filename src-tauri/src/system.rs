@@ -1448,7 +1448,10 @@ mod tests {
     #[test]
     fn resolve_home_expands_tilde_prefix() {
         let home = dirs::home_dir().expect("home dir required");
-        assert_eq!(crate::fs_access::resolve_home("~/run.sh"), home.join("run.sh"));
+        assert_eq!(
+            crate::fs_access::resolve_home("~/run.sh"),
+            home.join("run.sh")
+        );
         assert_eq!(crate::fs_access::resolve_home("~"), home);
     }
 
@@ -1492,7 +1495,10 @@ mod tests {
 
     #[test]
     fn resolve_home_keeps_plain_path() {
-        assert_eq!(crate::fs_access::resolve_home("/tmp/run.sh"), PathBuf::from("/tmp/run.sh"));
+        assert_eq!(
+            crate::fs_access::resolve_home("/tmp/run.sh"),
+            PathBuf::from("/tmp/run.sh")
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ import type { AppState } from "@shared/types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { callKimiMcpServerTool, classifyKimiTargetFromSignals, evaluateCliCompatibility, getCliVersion, getKimiProviderCatalogModels, getTargetCliVersion, importKimiProviderCatalog, importKimiProviderRegistry, listKimiMcpServerTools, listKimiProviderCatalog, MIN_CLI_VERSION, runKimiConnectivityTest, runKimiMcpServerTest, runProvidersHealthCheck, startKimiOAuthLogin, upgradeKimiCli, upgradeTargetCli } from "./cli";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -853,8 +853,8 @@ describe("runProvidersHealthCheck", () => {
   }
 
   it("probes every provider independently and reports per-item results", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
-      const url = String(args.url ?? "");
+    mockedInvoke.mockImplementation((cmd: string, args?: InvokeArgs) => {
+      const url = String((args as Record<string, unknown> | undefined)?.url ?? "");
       if (url.includes("ok.example.com")) return Promise.resolve(http(200, "{}") as unknown as never);
       if (url.includes("limited.example.com")) return Promise.resolve(http(429, "slow down") as unknown as never);
       if (url.includes("broken.example.com")) return Promise.reject(new Error("connection refused")) as unknown as never;

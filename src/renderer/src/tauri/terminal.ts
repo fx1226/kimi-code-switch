@@ -95,7 +95,7 @@ function buildProfileKimiArgs(request: OpenKimiTerminalRequest, profileName: str
 }
 
 export async function openKimiInTerminal(
-  request: Pick<PanelSettings, "config_path" | "terminal_app"> | OpenKimiTerminalRequest,
+  request: Pick<PanelSettings, "config_path" | "terminal_app" | "kimi_code_environments" | "active_kimi_code_environment_id"> | OpenKimiTerminalRequest,
 ): Promise<{ ok: true }> {
   const settings = "settings" in request ? request.settings : request;
   const targetProfileName = "settings" in request ? request.profileName?.trim() : "";

@@ -48,11 +48,14 @@ function createState(): AppState {
   state.activeProfile = "active";
   state.mainConfig.default_model = "primary/model-a";
   state.kimiTargetDetection = {
+    target: "kimi-code",
     status: "detected",
     installed: true,
     version: "0.38.0",
     executablePath: "/usr/local/bin/kimi",
     resolvedPath: "/usr/local/bin/kimi",
+    candidates: ["/usr/local/bin/kimi"],
+    reason: "",
     installSource: "homebrew",
     hasUpdate: false,
   };

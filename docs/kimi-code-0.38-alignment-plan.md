@@ -1,5 +1,7 @@
 # Kimi Code 0.38 对齐计划
 
+> **状态：已被取代（superseded）**。本文档保留为历史调研参考；后续实施、验收与完成判断以根目录 `plan_kimi_code_alignment_remaining.md` 为准。
+
 ## 1. 基线与目标
 
 - 官方基线：`@moonshot-ai/kimi-code@0.38.0`

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { t, type Locale } from "./i18n";
+import type { Locale } from "@shared/types";
+
+import { t } from "./i18n";
 
 function formatNumber(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";

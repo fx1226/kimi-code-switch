@@ -20,7 +20,8 @@ interface StateMutationsContext {
   setDiagnostics: Dispatch<SetStateAction<DiagnosticsState>>;
   refreshPreview: (draft?: AppState) => Promise<void>;
   persistState: (nextState: AppState) => Promise<boolean>;
-  persistImmediateState: (nextVisibleState: AppState, nextSavedStateOverride?: AppState) => Promise<void>;
+  // 即时偏好是 fire-and-forget：协调器合并后不回传结果。
+  persistImmediateState: (nextVisibleState: AppState, nextSavedStateOverride?: AppState) => void;
 }
 
 export function useStateMutations(ctx: StateMutationsContext) {

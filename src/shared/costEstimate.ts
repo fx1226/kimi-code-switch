@@ -66,7 +66,8 @@ export function estimateMonthlyCost(
       ? resolveModelPricing(configured)
       : resolveModelPricing({ model: e.model });
     if (pricing) {
-      monthToDate += computeEventCost(e, pricing);
+      const cost = computeEventCost(e, pricing);
+      if (cost != null) monthToDate += cost;
     }
   }
 

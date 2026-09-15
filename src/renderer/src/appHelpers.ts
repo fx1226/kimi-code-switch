@@ -9,7 +9,7 @@ export function getApi() {
 export function getMcpAction(
   api: ReturnType<typeof getApi>,
   action: "test" | "auth" | "reset-auth",
-): ((name: string) => Promise<{ ok: true; stdout: string; stderr: string }>) | null {
+): ((name: string) => Promise<{ ok: boolean; stdout?: string; stderr?: string }>) | null {
   if (!api) {
     return null;
   }

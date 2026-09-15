@@ -239,7 +239,7 @@ describe("pruneWebDavBackups", () => {
     const calls = mockedInvoke.mock.calls.map((c) => c[1] as { method: string });
     // 1 DELETE (oldest beyond retention) + 1 PUT (manifest)
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
-    const put = calls.find((c) => c.method === "PUT") as { body: string };
+    const put = calls.find((c) => c.method === "PUT") as unknown as { body: string };
     const kept = (JSON.parse(put.body) as { backups: Array<{ name: string }> }).backups.map((b) => b.name);
     expect(kept).toEqual(["backup-3", "backup-2"]);
   });

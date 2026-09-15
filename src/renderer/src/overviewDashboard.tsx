@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Boxes, Check, Download, FileText, Globe, Layers3, LoaderCircle, RefreshCw, Zap } from "lucide-react";
 
+import type { SkillsScanReport } from "@shared/skillsStore";
 import type { AppState, KimiCodeInstallSource, Locale, McpServerConfig } from "@shared/types";
 
 import { ABOUT_INFO } from "./aboutPage";
@@ -46,7 +47,7 @@ export function OverviewDashboard(props: {
   state: AppState;
   locale: Locale;
   diagnostics: DiagnosticsState;
-  skillsReport: AppState["skillsReport"];
+  skillsReport: SkillsScanReport | null;
   mcpEntries: [string, McpServerConfig][];
   onNavigate: (tab: OverviewTabId, item?: string) => void;
   onOpenDoctor: () => void;

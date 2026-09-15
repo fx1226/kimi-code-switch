@@ -290,7 +290,6 @@ describe("Kimi Code 0.38.0 upstream contract", () => {
       mergeAllAvailableSkills: true,
       envHome: resolve(CONTRACT_DIR),
       userHome: resolve(CONTRACT_DIR, "isolated-home"),
-      readJson: async () => null,
     });
     expect(skills.skills.map((skill) => skill.name).sort()).toEqual(["release-notes", "review-pr"]);
   });

@@ -56,7 +56,12 @@ function enabledApi() {
     usageQueryBreakdown: vi.fn(async () => ({ ok: true as const, rows: [] })),
     usageQuerySessions: vi.fn(async () => ({ ok: true as const, rows: [] })),
     usageGetStorageInfo: vi.fn(async () => ({ ok: true as const, info: { totalBytes: 0, exceedsWarn: false } })),
-  } as unknown as Window["kimiSwitch"];
+  };
+}
+
+// 安装到 window.kimiSwitch 时抹平为完整 API 类型；测试侧保留 vi.Mock 访问能力。
+function installApi(api: ReturnType<typeof enabledApi>): void {
+  window.kimiSwitch = api as unknown as Window["kimiSwitch"];
 }
 
 describe("InsightsDashboard", () => {
@@ -71,7 +76,7 @@ describe("InsightsDashboard", () => {
   });
 
   it("renders exactly three sub tabs with no trend tab", async () => {
-    window.kimiSwitch = enabledApi();
+    window.kimiSwitch = enabledApi() as unknown as Window["kimiSwitch"];
 
     const { findAllByRole } = render(<InsightsDashboard locale="zh-CN" />);
 
@@ -83,7 +88,7 @@ describe("InsightsDashboard", () => {
   });
 
   it("uses accessible tabs and supports keyboard navigation", async () => {
-    window.kimiSwitch = enabledApi();
+    window.kimiSwitch = enabledApi() as unknown as Window["kimiSwitch"];
     const { findByRole } = render(<InsightsDashboard locale="zh-CN" />);
     const overviewTab = await findByRole("tab", { name: "总览" });
 
@@ -96,7 +101,7 @@ describe("InsightsDashboard", () => {
   });
 
   it("does not render trend metric switching controls after ready", async () => {
-    window.kimiSwitch = enabledApi();
+    window.kimiSwitch = enabledApi() as unknown as Window["kimiSwitch"];
 
     const { container, findAllByRole } = render(<InsightsDashboard locale="zh-CN" />);
 
@@ -108,7 +113,7 @@ describe("InsightsDashboard", () => {
 
   it("places the adjustable time range beside the trend and reloads the shared statistics", async () => {
     const api = enabledApi();
-    window.kimiSwitch = api;
+    installApi(api);
 
     const { container, findByRole } = render(<InsightsDashboard locale="zh-CN" />);
     const rangeGroup = await findByRole("group", { name: "时间范围" });
@@ -131,7 +136,7 @@ describe("InsightsDashboard", () => {
 
   it("keeps current content visible and the refresh button idle while a range query is pending", async () => {
     const api = enabledApi();
-    window.kimiSwitch = api;
+    installApi(api);
     const { container, findByRole, getByText, queryByRole } = render(<InsightsDashboard locale="zh-CN" />);
     const rangeGroup = await findByRole("group", { name: "时间范围" });
     await waitFor(() => expect(getByText("1,000")).toBeDefined());
@@ -149,7 +154,7 @@ describe("InsightsDashboard", () => {
 
   it("ingests logs only for an explicit refresh, before running queries", async () => {
     const api = enabledApi();
-    window.kimiSwitch = api;
+    installApi(api);
     const { findByRole } = render(<InsightsDashboard locale="zh-CN" />);
     await waitFor(() => expect(api.usageQueryOverview).toHaveBeenCalled());
     api.usageIngestNow.mockClear();
@@ -169,7 +174,7 @@ describe("InsightsDashboard", () => {
 
   it("edits a custom range as a draft and queries only after apply", async () => {
     const api = enabledApi();
-    window.kimiSwitch = api;
+    installApi(api);
     const { findByLabelText, findByRole, findByText } = render(<InsightsDashboard locale="zh-CN" />);
     const rangeGroup = await findByRole("group", { name: "时间范围" });
     await waitFor(() => expect(api.usageQueryOverview).toHaveBeenCalled());
@@ -197,7 +202,7 @@ describe("InsightsDashboard", () => {
 
 describe("InsightsSettingsPanel", () => {
   it("uses the shared accessible dialog for irreversible data reset confirmation", async () => {
-    window.kimiSwitch = enabledApi();
+    window.kimiSwitch = enabledApi() as unknown as Window["kimiSwitch"];
     const { findByRole, queryByRole } = render(<InsightsSettingsPanel locale="en-US" />);
 
     fireEvent.click(await findByRole("button", { name: "Clear Data" }));

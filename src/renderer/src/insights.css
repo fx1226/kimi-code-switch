@@ -364,54 +364,6 @@
   margin-top: 12px;
 }
 
-.insights-info-banner {
-  border-left: 4px solid var(--primary);
-  border-radius: var(--radius-lg);
-  padding: 16px 20px;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  background: var(--panel);
-  border: 1px solid var(--line);
-}
-
-.insights-info-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(var(--primary-rgb), 0.15);
-  color: var(--primary);
-  flex-shrink: 0;
-}
-
-.insights-info-content {
-  flex: 1;
-}
-
-.insights-info-title {
-  font-weight: var(--fw-strong);
-  margin-bottom: 8px;
-  color: var(--text);
-  font-size: var(--text-sm);
-}
-
-.insights-info-text {
-  font-size: var(--text-sm);
-  line-height: 1.6;
-  color: var(--muted);
-}
-
-.insights-info-text p {
-  margin: 0;
-}
-
-.insights-info-text p + p {
-  margin-top: 6px;
-}
-
 .insights-buttons-group {
   display: flex;
   gap: 8px;
@@ -741,16 +693,6 @@
   color: var(--primary-2);
 }
 
-.usage-metric-icon.green {
-  background: rgba(var(--success-rgb), 0.12);
-  color: var(--success);
-}
-
-.usage-metric-icon.orange {
-  background: rgba(var(--warning-rgb), 0.12);
-  color: var(--warning);
-}
-
 .usage-metric-icon.red {
   background: rgba(var(--danger-rgb), 0.12);
   color: var(--danger);
@@ -788,14 +730,10 @@
 
 .usage-metric-value {
   font-family: var(--font-mono);
-  font-size: clamp(var(--text-md), 1.45cqi, var(--text-xl));
+  font-size: clamp(var(--text-sm), 1.45cqi, var(--text-xl));
   font-weight: var(--fw-bold);
   color: var(--text);
   font-variant-numeric: tabular-nums;
-}
-
-.usage-metric-sub {
-  margin-top: auto;
 }
 
 .usage-progress {
@@ -838,7 +776,7 @@
 
 .usage-secondary-value {
   font-family: var(--font-mono);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: var(--fw-bold);
   color: var(--text);
   font-variant-numeric: tabular-nums;
@@ -867,7 +805,7 @@
 
 .insights-trend-section-head h3 {
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: var(--fw-strong);
   color: var(--text);
 }
@@ -884,7 +822,7 @@
 .insights-trend-custom-summary {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1141,7 +1079,7 @@
 
 .insights-coming-soon h3 {
   margin: 0 0 8px 0;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: var(--fw-strong);
   color: var(--text);
 }
@@ -1149,54 +1087,6 @@
 .insights-coming-soon p {
   margin: 0;
   font-size: var(--text-sm);
-}
-
-/* 趋势图 */
-.insights-trend-chart {
-  padding: 20px 0;
-  height: 300px;
-  display: flex;
-  flex-direction: column;
-}
-
-.insights-trend-bars {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-  flex: 1;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.insights-trend-bar-group {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.insights-trend-bar {
-  width: 100%;
-  max-width: 40px;
-  border-radius: 6px 6px 0 0;
-  background: var(--primary);
-  transition: height 0.3s ease, opacity 0.2s;
-  min-height: 2px;
-}
-
-.insights-trend-bar-group:hover .insights-trend-bar {
-  opacity: 0.8;
-  box-shadow: none;
-}
-
-.insights-trend-bar-label {
-  font-size: var(--text-2xs);
-  color: var(--muted);
-  white-space: nowrap;
-  padding-top: 6px;
 }
 
 /* 趋势图表（SVG 版） */
@@ -1240,73 +1130,6 @@
   background: rgba(var(--primary-rgb), 0.12);
   color: var(--primary);
   font-weight: var(--fw-medium);
-}
-
-.insights-chart-wrap {
-  position: relative;
-  width: 100%;
-  padding: 8px 0;
-}
-
-.insights-chart-svg {
-  display: block;
-  overflow: visible;
-}
-
-.insights-chart-grid line {
-  stroke: var(--line);
-  stroke-dasharray: 2 4;
-  stroke-width: 1;
-  opacity: 0.6;
-}
-
-.insights-chart-axis-text {
-  font-size: var(--text-2xs);
-  fill: var(--muted);
-  font-family: inherit;
-}
-
-.insights-chart-bar {
-  transition: opacity 0.15s ease;
-}
-
-.insights-chart-point {
-  transition: r 0.15s ease;
-}
-
-.insights-chart-tooltip {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  padding: 8px 12px;
-  background: var(--panel-strong);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  pointer-events: none;
-  white-space: nowrap;
-  font-size: var(--text-xs);
-  z-index: 10;
-}
-
-.insights-chart-tooltip-date {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  margin-bottom: 4px;
-}
-
-.insights-chart-tooltip-value {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.insights-chart-tooltip-label {
-  color: var(--muted);
-}
-
-.insights-chart-tooltip-num {
-  color: var(--text);
-  font-weight: var(--fw-strong);
 }
 
 /* 表格 */
@@ -1363,23 +1186,9 @@
   position: relative;
 }
 
-.insights-bar-inline {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  height: 6px;
-  border-radius: var(--radius-xs);
-  background: rgba(var(--primary-rgb), 0.2);
-  transition: width 0.3s ease;
-}
-
-.insights-breakdown-panel,
-.insights-sessions-panel,
-.insights-trend-panel {
+.insights-breakdown-panel, .insights-sessions-panel {
   padding: 4px 0;
 }
-
 
 /* Tab 描述文字 */
 .insights-tab-desc {
@@ -1387,30 +1196,6 @@
   font-size: var(--text-sm);
   color: var(--muted);
   line-height: 1.5;
-}
-
-/* 坐标轴标签 */
-.insights-axis-label {
-  font-size: var(--text-2xs);
-  color: var(--muted);
-  font-weight: var(--fw-medium);
-}
-
-.insights-axis-y {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  margin-right: 8px;
-}
-
-.insights-axis-x {
-  display: block;
-  text-align: center;
-  margin-top: 8px;
-}
-
-.insights-trend-chart {
-  display: flex;
-  align-items: stretch;
 }
 
 /* Icon 按钮 */
@@ -1498,7 +1283,7 @@
 }
 
 .insights-pie-center-value {
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   font-weight: var(--fw-bold);
   fill: var(--text);
   font-family: inherit;
@@ -1626,7 +1411,7 @@
   gap: 3px;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: var(--fw-strong);
   flex-shrink: 0;
 }
@@ -1673,7 +1458,7 @@
 }
 
 .insights-session-stat-label {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { AppState, ConfigDoctorReport, ExternalChangeNotifyPayload, FileSnapshotBundle } from "@shared/types";
+import type { AppState, ConfigDoctorReport, FileSnapshotBundle } from "@shared/types";
 import type { BackupRecordsDialogState, DocumentViewerState } from "./dialogs";
 import type { DiagnosticsState } from "./overviewDashboard";
 import { SkillsViewMode } from "./skillsWorkspace";
@@ -42,7 +42,6 @@ export function useAppHandlers() {
   const [doctorReport, setDoctorReport] = useState<ConfigDoctorReport | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [externalChange, setExternalChange] = useState<ExternalChangeNotifyPayload | null>(null);
   const [isMcpImportOpen, setIsMcpImportOpen] = useState(false);
   const [mcpImportDraft, setMcpImportDraft] = useState("");
   const [mcpImportInitialDraft, setMcpImportInitialDraft] = useState("");
@@ -321,32 +320,8 @@ export function useAppHandlers() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  useEffect(() => {
-    const api = getApi();
-    if (!api?.onTrayCommand) {
-      return;
-    }
-    return api.onTrayCommand((command) => {
-      if (command === "reload") {
-        void loadState();
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    const api = getApi();
-    if (!api?.onExternalFileChange) return;
-    return api.onExternalFileChange((payload) => {
-      void (async () => {
-        try {
-          const nextSnapshot = await api.captureSnapshot(state);
-          updateFileSnapshot(nextSnapshot);
-        } catch { /* snapshot 更新失败不影响通知 */ }
-      })();
-      setExternalChange(payload);
-    });
-  }, [state, locale]);
-
+  // 托盘“重载”走 window 事件通道（App.tsx 监听 kimi-tray-reload）；
+  // 外部文件变更由保存时的 optimistic revision guard 兜底，无独立 watcher。
   const title = t(locale, "appTitle");
 
   const closeMcpImportDialog = useCallback((): void => {
@@ -524,8 +499,6 @@ export function useAppHandlers() {
     setError,
     notice,
     setNotice,
-    externalChange,
-    setExternalChange,
     isMcpImportOpen,
     setIsMcpImportOpen,
     mcpImportDraft,

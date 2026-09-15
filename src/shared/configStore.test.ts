@@ -48,7 +48,7 @@ import {
 } from "./configStore";
 import { buildMcpConfigDocument } from "./mcpStore";
 import { parseTuiConfigDocument } from "./tuiStore";
-import type { AppState, MainConfig, Profile } from "./types";
+import type { AppState, ConfigTarget, KimiCodeEnvironment, MainConfig, Profile } from "./types";
 
 function createState(): AppState {
   return {
@@ -307,7 +307,6 @@ describe("configStore", () => {
   it("builds preview bundle with diff", () => {
     const preview = buildPreviewBundle(createState(), {
       configDocument: "",
-      profilesDocument: "",
       panelSettingsDocument: "",
     });
     expect(preview.configDocument).toContain("default_model");
@@ -592,7 +591,7 @@ url = "https://mcp.context7.com/mcp"
       "~/.kimi/config.profiles.toml": 'version = 1\nactive_profile = "default"\n',
       "~/.kimi/config.panel.toml": 'locale = "en-US"\ntheme = "dark"\n',
     });
-    const loaded = await loadAppState(files, { configTarget: "kimi-cli" });
+    const loaded = await loadAppState(files);
     expect(loaded.panelSettingsPath).toBe("~/.kimi-code-switch-gui/app.db#panel_settings");
     expect(loaded.panelSettings.locale).toBe("en-US");
     expect(loaded.panelSettings.theme).toBe("dark");
@@ -1172,7 +1171,7 @@ describe("toggleFavorite", () => {
     const state = createState();
     state.panelSettings.favorites = undefined;
     toggleFavorite(state, "profile", "default");
-    expect(state.panelSettings.favorites?.profiles).toContain("default");
+    expect(state.panelSettings.favorites).toMatchObject({ profiles: ["default"] });
   });
 
   it("handles provider and profile independently", () => {
@@ -1245,7 +1244,7 @@ model = "gpt-4"
 max_context_size = 8192
 `,
     });
-    const state = await loadAppState(files, { configTarget: "kimi-cli" });
+    const state = await loadAppState(files);
     expect(state.configTarget).toBe("kimi-code");
     expect(state.configPath).toBe("~/.kimi-code/config.toml");
     expect(state.profilesPath).toBe("");
@@ -1328,7 +1327,8 @@ default_thinking = false
 
   it("keeps Kimi Code defaults even when historical target is present", () => {
     const state = createState();
-    state.configTarget = "kimi-cli";
+    // 模拟历史遗留数据中的 kimi-cli 目标值（当前类型系统只允许 kimi-code）。
+    state.configTarget = "kimi-cli" as unknown as ConfigTarget;
     state.configPath = "~/.kimi-code/config.toml";
     state.profilesPath = "~/.kimi-code/config.profiles.toml";
     state.mcpConfigPath = "~/.kimi-code/mcp.json";
@@ -1358,7 +1358,8 @@ default_thinking = false
 
   it("keeps custom paths when config target changes", () => {
     const state = createState();
-    state.configTarget = "kimi-cli";
+    // 模拟历史遗留数据中的 kimi-cli 目标值（当前类型系统只允许 kimi-code）。
+    state.configTarget = "kimi-cli" as unknown as ConfigTarget;
     state.configPath = "/custom/kimi-code/config.toml";
     state.profilesPath = "/custom/kimi-code/config.profiles.toml";
     state.mcpConfigPath = "/custom/kimi-code/mcp.json";
@@ -2051,6 +2052,13 @@ enabled = true
       [`${legacyHome}/plugins`, `${nativeHome}/plugins`],
     ]);
   });
+
+  it("reports legacy-environment-missing when the legacy home has no recoverable content", async () => {
+    const files = createMemoryFs({});
+    const result = await migrateLegacyManagedDefaultEnvironmentToNativeHome(files);
+    expect(result.migrated).toBe(false);
+    expect(result.reason).toBe("legacy-environment-missing");
+  });
 });
 
 describe("full backup", () => {
@@ -2066,7 +2074,7 @@ describe("full backup", () => {
   it("buildFullBackup uses each environment's native files without an env-config cache", () => {
     const state = createState();
     state.panelSettings.kimi_code_environments = [
-      ...state.panelSettings.kimi_code_environments,
+      ...(state.panelSettings.kimi_code_environments ?? []),
       { id: "work", name: "Work", homePath: getKimiCodeEnvironmentHomePath("work") },
     ];
     const bundle = buildFullBackup(state, {
@@ -2099,7 +2107,7 @@ describe("full backup", () => {
     const state = createState();
     // work 环境只有面板快照（mainConfig），DB 中无记录（模拟旧版复制环境的遗留数据）
     state.panelSettings.kimi_code_environments = [
-      ...state.panelSettings.kimi_code_environments,
+      ...(state.panelSettings.kimi_code_environments ?? []),
       {
         id: "work",
         name: "Work",
@@ -2109,7 +2117,8 @@ describe("full backup", () => {
           providers: { snap_prov: { type: "kimi", base_url: "https://s", api_key: "sk", enabled: true } },
           models: { "snap_prov/m": { provider: "snap_prov", model: "m", max_context_size: 1, capabilities: [], enabled: true } },
         },
-      },
+        // enabled 字段是旧版面板快照的遗留数据，当前契约已不含该字段。
+      } as unknown as KimiCodeEnvironment,
     ];
     const bundle = buildFullBackup(state, {}); // DB 为空
     const work = bundle.environments.find((e) => e.environment.id === "work");
@@ -2185,7 +2194,7 @@ describe("full backup", () => {
     const bundle = buildFullBackup(state, {});
     const panel = rebuildPanelSettingsFromBackup(bundle);
     expect(panel.active_kimi_code_environment_id).toBe(bundle.activeEnvironmentId);
-    expect(panel.kimi_code_environments.length).toBe(bundle.environments.length);
+    expect(panel.kimi_code_environments?.length).toBe(bundle.environments.length);
   });
 
   it("fullBackupContainsRedactedSecrets detects masked keys", () => {

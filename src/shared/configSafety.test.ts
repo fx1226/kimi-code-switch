@@ -67,7 +67,7 @@ describe("configSafety", () => {
     const documents = buildManagedDocuments(createState());
 
     expect(documents.config).toContain('default_model = "kimi_gateway/kimi-k2.5"');
-    expect(documents.profiles).toBeUndefined();
+    expect("profiles" in documents).toBe(false);
     expect(documents.panel).toContain("backup_strategy");
     expect(documents.panel).toContain("active_profile");
     expect(documents.mcp).toContain('"mcpServers"');
@@ -257,10 +257,6 @@ describe("configSafety", () => {
           },
           providers: { kimi_gateway: { type: "kimi", base_url: "https://api.example.test", api_key: "sk-x" } },
           loop_control: { anything: { goes: true } },
-        },
-        profiles: {
-          active_profile: "default",
-          profiles: { default: { name: "default", label: "Default", default_model: "kimi_gateway/kimi-k2.5", theme: "dark" } },
         },
         mcp: { mcpServers: { gateway: { enabled: true, transport: "stdio", command: "npx", args: [] } } },
       });

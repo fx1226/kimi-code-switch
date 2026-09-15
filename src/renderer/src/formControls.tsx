@@ -624,10 +624,10 @@ export function MultiSelectField(props: {
   );
 }
 
-export function Toggle(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }): JSX.Element {
+export function Toggle(props: { label?: string; checked: boolean; onChange: (checked: boolean) => void }): JSX.Element {
   return (
     <label className="toggle-row">
-      <span>{props.label}</span>
+      {props.label ? <span>{props.label}</span> : null}
       <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />
     </label>
   );

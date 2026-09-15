@@ -138,6 +138,8 @@ textarea {
 }
 
 .section-title { font-size: var(--font-section-title); line-height: var(--line-height-tight); }
+/* 带自动保存提示的标题行：提示靠右对齐。父级必须是 flex，否则 margin-left:auto 不生效。 */
+.section-title-with-hint { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .autosave-status { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: var(--fw-medium); }
 
 .action-button {

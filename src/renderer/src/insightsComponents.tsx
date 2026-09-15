@@ -195,7 +195,7 @@ export function InsightsSettingsPanel({ locale, onStateChange }: InsightsSetting
         onStateChange?.();
         showToast(t(locale, "insightsToastEnabled"), "success");
       } else {
-        showToast(`${t(locale, "insightsToastEnableError")}: ${result.message}`, "error");
+        showToast(t(locale, "insightsToastEnableError"), "error");
       }
     } catch (err) {
       showToast(`${t(locale, "insightsToastEnableError")}: ${String(err)}`, "error");

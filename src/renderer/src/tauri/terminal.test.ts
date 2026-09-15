@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createDefaultShortcuts } from "@shared/shortcutStore";
 import type { AppState, PanelSettings, TerminalApp } from "@shared/types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -39,7 +40,7 @@ function appState(): AppState {
       merge_all_available_skills: false,
       hooks: [],
       models: {
-        "alt/model": { model: "raw-model", provider: "provider", context_size: 1000, max_tokens: 1000 },
+        "alt/model": { model: "raw-model", provider: "provider", max_context_size: 1000, capabilities: [] },
       },
       providers: {
         provider: { type: "openai_legacy", base_url: "https://example.com/v1", api_key: "key" },
@@ -70,11 +71,11 @@ function appState(): AppState {
       follow_config_profiles: true,
       theme: "dark",
       appearance_theme: "aurora",
-      ui_font_size: "medium",
+      ui_font_size: "standard",
       locale: "zh-CN",
       tray_icon: false,
       sidebar_collapsed: false,
-      display_open_mode: "default",
+      display_open_mode: "remember-last",
       close_behavior: "quit",
       terminal_app: "system-terminal",
       backup_strategy: "manual",
@@ -86,7 +87,7 @@ function appState(): AppState {
       backup_webdav_username: "",
       backup_webdav_password: "",
       backup_webdav_path: "",
-      shortcuts: {},
+      shortcuts: createDefaultShortcuts(),
       kimi_code_environments: [{ id: "work", name: "Work", homePath: "~/.kimi-code-work" }],
       active_kimi_code_environment_id: "work",
     },

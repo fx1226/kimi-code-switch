@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:a11y": "vitest run src/renderer/src/dialogs.test.tsx src/renderer/src/commandPalette.test.tsx src/renderer/src/quickProfileSwitcher.test.tsx src/renderer/src/resourceWorkspace.test.tsx src/renderer/src/tabList.test.tsx src/renderer/src/tabComponents.test.tsx src/renderer/src/insightsComponents.test.tsx",
     "lint:css": "node scripts/check-css-architecture.mjs",
+    "typecheck": "tsc -b",
     "tauri": "tauri",
     "tauri:dev:web": "vite",
     "tauri:build:web": "vite build",

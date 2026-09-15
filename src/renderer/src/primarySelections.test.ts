@@ -4,6 +4,7 @@ import {
   getRetainedPrimarySelections,
 } from "./primarySelections";
 import type { AppState } from "@shared/types";
+import { createDefaultPanelSettings } from "@shared/configStore";
 
 function createState(): AppState {
   return {
@@ -69,27 +70,10 @@ function createState(): AppState {
     },
     activeProfile: "work",
     panelSettings: {
-      version: 1,
+      ...createDefaultPanelSettings(),
       config_path: "/tmp/config.toml",
-      profiles_path: "",
-      follow_config_profiles: true,
-      theme: "auto",
-      appearance_theme: "aurora",
-      ui_font_size: "standard",
-      locale: "zh-CN",
-      tray_icon: false,
-      display_open_mode: "remember-last",
-      close_behavior: "quit",
-      backup_strategy: "manual",
-      backup_frequency: "daily",
-      backup_retention_count: 10,
-      backup_destination_type: "local",
       backup_local_path: "/tmp/backups",
-      backup_webdav_url: "",
-      backup_webdav_username: "",
-      backup_webdav_password: "",
-      backup_webdav_path: "",
-      shortcuts: {} as AppState["panelSettings"]["shortcuts"],
+      theme: "auto",
     },
     mcpConfig: {
       mcpServers: {

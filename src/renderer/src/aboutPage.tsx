@@ -1013,6 +1013,7 @@ export function AboutPage(props: {
           releaseUrl: `${ABOUT_INFO.repositoryUrl}/releases`,
           releaseName: "",
           publishedAt: "",
+          releaseBody: "",
           homebrewCommand: "brew upgrade --cask kimi-code-switch-gui",
           installSource: installSource === "unknown" ? undefined : installSource,
           errorMessage: message,

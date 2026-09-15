@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { AppState, BackupRecord, ConfigDoctorReport, ExternalChangeNotifyPayload, FileSnapshotBundle, Locale, McpServerConfig, ModelConfig, PreviewBundle, Profile, ProviderConfig } from "@shared/types";
+import type { AppState, BackupRecord, ConfigDoctorReport, FileSnapshotBundle, Locale, McpServerConfig, ModelConfig, PreviewBundle, Profile, ProviderConfig } from "@shared/types";
 import type { SkillDiscoveryPath, SkillEntry, SkillsScanReport } from "@shared/skillsStore";
 import type { SkillsViewMode } from "../skillsWorkspace";
 import type { KimiCodeSubTab, PreviewFileId, SettingsSubTab, TabId } from "../appOptions";
@@ -80,8 +80,6 @@ export interface AppContext {
   setError: Dispatch<SetStateAction<string>>;
   notice: string;
   setNotice: Dispatch<SetStateAction<string>>;
-  externalChange: ExternalChangeNotifyPayload | null;
-  setExternalChange: Dispatch<SetStateAction<ExternalChangeNotifyPayload | null>>;
   isMcpImportOpen: boolean;
   setIsMcpImportOpen: Dispatch<SetStateAction<boolean>>;
   mcpImportDraft: string;
@@ -101,6 +99,7 @@ export interface AppContext {
   confirmDialog: ConfirmDialogState | null;
   setConfirmDialog: Dispatch<SetStateAction<ConfirmDialogState | null>>;
   // Handlers
+  loadState: () => Promise<void>;
   updateState: (updater: (draft: AppState) => void, options?: { persist?: boolean; recordHistory?: boolean; historySummary?: string }) => void;
   updateImmediateState: (updater: (draft: AppState) => void, options?: { recordHistory?: boolean; historySummary?: string }) => void;
   runAfterUnsavedHandled: (action: () => void | Promise<void>) => void;

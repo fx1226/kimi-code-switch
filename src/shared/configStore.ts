@@ -31,6 +31,7 @@ import type {
   PreviewBundle,
   Profile,
   ProfileDiff,
+  ProviderConfig,
   ValidationResult,
 } from "./types";
 
@@ -1052,6 +1053,9 @@ export async function migrateLegacyManagedDefaultEnvironmentToNativeHome(
   let agentsCopied = false;
   let skillsCopied = false;
   let pluginsMerged = false;
+  // 声明在 try 外：结果摘要要在下方 reason 判定中复用。
+  let skillsResult = { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
+  let pluginsResult = { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
 
   try {
     if (legacyConfigDocument?.trim()) {
@@ -1091,7 +1095,7 @@ export async function migrateLegacyManagedDefaultEnvironmentToNativeHome(
       agentsCopied = true;
     }
 
-    const skillsResult = files.mergeDirectoryMissing
+    skillsResult = files.mergeDirectoryMissing
       ? await files.mergeDirectoryMissing(`${sourceHome}/skills`, `${targetHome}/skills`)
       : { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
     skillsCopied = skillsResult.copiedEntries > 0;
@@ -1113,7 +1117,7 @@ export async function migrateLegacyManagedDefaultEnvironmentToNativeHome(
       }
     }
 
-    const pluginsResult = files.mergeDirectoryMissing
+    pluginsResult = files.mergeDirectoryMissing
       ? await files.mergeDirectoryMissing(`${sourceHome}/plugins`, `${targetHome}/plugins`)
       : { sourceExists: false, copiedEntries: 0, skippedConflicts: 0 };
     pluginsMerged ||= pluginsResult.copiedEntries > 0;
@@ -1487,7 +1491,7 @@ export function copyProfileField(
   if (!to) {
     throw new Error(`Profile not found: ${toName}`);
   }
-  (to as Record<string, unknown>)[field] = (from as Record<string, unknown>)[field];
+  (to as unknown as Record<string, unknown>)[field] = (from as unknown as Record<string, unknown>)[field];
 }
 
 export function deleteProfile(state: AppState, name: string): void {
@@ -2461,7 +2465,7 @@ export function buildFullBackup(
     state.panelSettings.kimi_code_environments,
     [createDefaultKimiCodeEnvironment()],
   );
-  const activeId = state.panelSettings.active_kimi_code_environment_id;
+  const activeId = state.panelSettings.active_kimi_code_environment_id ?? DEFAULT_KIMI_CODE_ENVIRONMENT_ID;
 
   const bundles: EnvironmentConfigBundle[] = environments.map((environment) => {
     // 当前激活环境的 Provider/Model 以内存 state 为准（可能含未保存编辑）；
@@ -2831,7 +2835,7 @@ function parseModelUiMetadata(value: unknown): PanelSettings["model_ui_metadata"
         ...(rawMetadata.official_account_scope === "global"
           ? { official_account_scope: "global" as const }
           : {}),
-        ...(isRecord(rawMetadata.pricing) ? { pricing: rawMetadata.pricing as ModelUiMetadata["pricing"] } : {}),
+        ...(isRecord(rawMetadata.pricing) ? { pricing: rawMetadata.pricing as unknown as ModelUiMetadata["pricing"] } : {}),
       };
       if (Object.keys(metadata).length > 0) models[modelId] = metadata;
     }
@@ -2979,7 +2983,9 @@ function parseKimiCodeEnvironments(
   return result.length > 0 ? result : defaults;
 }
 
-function resolveActiveKimiCodeEnvironment(settings: PanelSettings): KimiCodeEnvironment {
+function resolveActiveKimiCodeEnvironment(
+  settings: Pick<PanelSettings, "kimi_code_environments" | "active_kimi_code_environment_id">,
+): KimiCodeEnvironment {
   const environments = parseKimiCodeEnvironments(
     settings.kimi_code_environments,
     [createDefaultKimiCodeEnvironment()],
@@ -2996,7 +3002,9 @@ export function normalizeKimiCodeEnvironments(
   return parseKimiCodeEnvironments(value, fallback);
 }
 
-export function getActiveKimiCodeEnvironment(settings: PanelSettings): KimiCodeEnvironment {
+export function getActiveKimiCodeEnvironment(
+  settings: Pick<PanelSettings, "kimi_code_environments" | "active_kimi_code_environment_id">,
+): KimiCodeEnvironment {
   return resolveActiveKimiCodeEnvironment(settings);
 }
 

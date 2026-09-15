@@ -102,9 +102,7 @@ fn export_from_connection(conn: &rusqlite::Connection) -> Result<String, String>
         }
     }
 
-    if table_exists(conn, "mcp_servers")?
-        && table_has_column(conn, "mcp_servers", "server_name")?
-    {
+    if table_exists(conn, "mcp_servers")? && table_has_column(conn, "mcp_servers", "server_name")? {
         // Very old releases had a globally unique server name without an
         // environment column. Those entries belong to the default home.
         let environment_column =

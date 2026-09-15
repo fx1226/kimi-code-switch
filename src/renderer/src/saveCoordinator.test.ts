@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AppState } from "@shared/types";
+
 import { createSaveCoordinator } from "./saveCoordinator";
 import type { PendingSave } from "./saveCoordinator";
 
-function makeState(marker: string): { marker: string } {
-  return { marker };
+// 测试只关心标记字段：用最小对象代替完整 AppState。
+function makeState(marker: string): AppState {
+  return { marker } as unknown as AppState;
+}
+
+function markerOf(state: AppState): string {
+  return (state as unknown as { marker: string }).marker;
 }
 
 describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
@@ -13,7 +20,7 @@ describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
     let counter = 0;
     const coordinator = createSaveCoordinator(async (save) => {
       if (save.kind === "explicit") {
-        const marker = (save.state as { marker: string }).marker;
+        const marker = markerOf(save.state);
         executed.push(marker);
         counter += 1;
         return counter >= 2 ? false : true;
@@ -33,7 +40,7 @@ describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
     const executed: Array<string | undefined> = [];
     const coordinator = createSaveCoordinator(async (save) => {
       if (save.kind === "immediate") {
-        executed.push((save.visible as { marker: string }).marker);
+        executed.push(markerOf(save.visible));
       }
       return true;
     });
@@ -51,7 +58,7 @@ describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
     let releaseFirst: (() => void) | null = null;
     const coordinator = createSaveCoordinator((save) => {
       if (save.kind === "immediate") {
-        executed.push((save.visible as { marker: string }).marker);
+        executed.push(markerOf(save.visible));
         if (executed.length === 1) {
           return new Promise<boolean>((resolve) => {
             releaseFirst = () => resolve(true);
@@ -65,7 +72,9 @@ describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
     // 等第一笔真正进入执行（in-flight）后再提交第二笔。
     await vi.waitFor(() => expect(executed).toEqual(["first"]));
     coordinator.submit({ kind: "immediate", visible: makeState("second"), saved: makeState("second") });
-    releaseFirst?.();
+    // 上一行 waitFor 已确认第一笔进入执行，releaseFirst 必然已被回调赋值；
+    // TS 的 CFA 不追踪跨层闭包赋值，这里用非空断言表达该事实。
+    releaseFirst!();
     await coordinator.waitForExplicitFlush();
     expect(executed).toEqual(["first", "second"]);
   });
@@ -74,7 +83,7 @@ describe("createSaveCoordinator (C1 serialization / latest-wins)", () => {
     const executed: string[] = [];
     const coordinator = createSaveCoordinator(async (save) => {
       if (save.kind === "explicit") {
-        const marker = (save.state as { marker: string }).marker;
+        const marker = markerOf(save.state);
         executed.push(marker);
         return marker === "first";
       }

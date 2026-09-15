@@ -6,7 +6,7 @@ import type { Locale } from "@shared/types";
 import { t } from "./i18n";
 
 export function ResourceWorkspace(props: {
-  listTitle: string;
+  listTitle?: string;
   listItems: string[];
   itemLabel?: (item: string) => string;
   renderItemLabel?: (item: string) => JSX.Element | string;
@@ -148,9 +148,6 @@ export function ResourceWorkspace(props: {
     </section>
   );
 }
-
-/** @deprecated Use ResourceWorkspace for new resource-management surfaces. */
-export const SplitLayout = ResourceWorkspace;
 
 export function EmptyState(props: { locale: Locale; hasItems?: boolean }): JSX.Element {
   return (

@@ -21,7 +21,7 @@ interface EncryptedBackupEnvelope {
 
 const BACKUP_KDF_ITERATIONS = 210_000;
 
-function backupAdditionalData(url: string, format: EncryptedBackupEnvelope["format"]): Uint8Array {
+function backupAdditionalData(url: string, format: EncryptedBackupEnvelope["format"]): Uint8Array<ArrayBuffer> {
   if (format === "kimi-code-switch-gui-encrypted-v1") {
     return new TextEncoder().encode(url);
   }
@@ -48,7 +48,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(value: string): Uint8Array {
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
@@ -100,7 +100,7 @@ async function encryptBackupContent(settings: PanelSettings, content: string, ur
   const key = await deriveBackupKey(material, salt, BACKUP_KDF_ITERATIONS);
   const additionalData = backupAdditionalData(url, format);
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv as BufferSource, additionalData },
+    { name: "AES-GCM", iv, additionalData },
     key,
     new TextEncoder().encode(content),
   );
@@ -159,9 +159,9 @@ async function decryptBackupContent(
       try {
         const key = await deriveBackupKey(material, salt, envelope.iterations);
         const plaintext = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: iv as BufferSource, additionalData },
+          { name: "AES-GCM", iv, additionalData },
           key,
-          base64ToBytes(envelope.ciphertext) as BufferSource,
+          base64ToBytes(envelope.ciphertext),
         );
         return new TextDecoder().decode(plaintext);
       } catch {

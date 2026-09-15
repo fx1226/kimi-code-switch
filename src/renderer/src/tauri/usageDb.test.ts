@@ -107,11 +107,12 @@ describe("open", () => {
       .mockResolvedValueOnce(undefined as unknown as never) // usage_exec_script canonical view
       .mockResolvedValueOnce([{ version: 2 }] as unknown as never);
     await open("/tmp/usage.db");
-    const schemaVersionInserts = mockedInvoke.mock.calls.filter((call) =>
-      call[0] === "usage_exec"
-      && typeof call[1]?.sql === "string"
-      && call[1].sql.includes("INSERT OR IGNORE INTO schema_versions"),
-    );
+    const schemaVersionInserts = mockedInvoke.mock.calls.filter((call) => {
+      const args = call[1] as { sql?: unknown } | undefined;
+      return call[0] === "usage_exec"
+        && typeof args?.sql === "string"
+        && args.sql.includes("INSERT OR IGNORE INTO schema_versions");
+    });
     expect(schemaVersionInserts).toHaveLength(0);
   });
 });

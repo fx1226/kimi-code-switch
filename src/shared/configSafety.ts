@@ -223,7 +223,7 @@ function validateModelReferences(state: AppState, issues: DoctorIssue[]): void {
       createDoctorIssue(
         `profiles.default-model.missing.${profileName}`,
         "error",
-        "profiles",
+        "panel",
         `Profile "${profileName}" references missing default model "${profile.default_model}".`,
         `profiles.${profileName}.default_model`,
         "Update the profile to use an existing model key.",
@@ -236,7 +236,7 @@ function validateModelReferences(state: AppState, issues: DoctorIssue[]): void {
       createDoctorIssue(
         "profiles.active-profile.missing",
         "error",
-        "profiles",
+        "panel",
         `Active profile "${state.activeProfile || "(empty)"}" does not exist.`,
         "activeProfile",
         "Pick an existing profile as the active profile.",

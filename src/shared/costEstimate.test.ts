@@ -19,6 +19,8 @@ describe("costEstimate", () => {
     "gpt-4o": {
       provider: "openai",
       model: "gpt-4o",
+      max_context_size: 128000,
+      capabilities: [],
       pricing: {
         input_per_mtok: 2.5,
         output_per_mtok: 10.0,
@@ -48,6 +50,11 @@ describe("costEstimate", () => {
       proxy_overhead_ms: 10,
       error_code: null,
       error_message: null,
+      http_status: 200,
+      session_hint: null,
+      cost_estimate: null,
+      pricing_version: null,
+      metadata_json: null,
     };
   }
 

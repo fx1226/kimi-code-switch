@@ -4,13 +4,12 @@ import {
   MoonStar, PenSquare, Play, RefreshCw, Sparkles, Wrench, X,
 } from "lucide-react";
 
+import { createDefaultPanelSettings } from "@shared/configStore";
 import { normalizeEntryName } from "@shared/nameRules";
-import { createDefaultShortcuts } from "@shared/shortcutStore";
 import type { SkillsScanReport } from "@shared/skillsStore";
 import type {
   AppState,
-  AppearanceMode, AppearanceTheme, BackupDestinationType, BackupFrequency, BackupStrategy,
-  CloseBehavior, ConfigDriftEntry, DisplayOpenMode, Locale,
+  AppearanceMode, AppearanceTheme, ConfigDriftEntry, Locale,
   McpServerConfig, McpTransport, ModelPricing, PermissionMode, Profile, ProfileConnectivityTestResult, UiFontSize,
   OfficialAccount,
 } from "@shared/types";
@@ -1920,34 +1919,8 @@ export function PathField(props: {
 }
 
 export function createFallbackState(): AppState {
-  const panelSettings = {
-    version: 1,
-    config_target: "kimi-code" as const,
-    config_path: "~/.kimi-code/config.toml",
-    profiles: {},
-    active_profile: "default",
-    profiles_path: "",
-    follow_config_profiles: true,
-    theme: "auto" as AppearanceMode,
-    appearance_theme: "aurora" as AppearanceTheme,
-    ui_font_size: "standard" as UiFontSize,
-    locale: "zh-CN" as Locale,
-    tray_icon: false,
-    display_open_mode: "remember-last" as DisplayOpenMode,
-    close_behavior: "quit" as CloseBehavior,
-    terminal_app: "system-terminal",
-    backup_strategy: "manual" as BackupStrategy,
-    backup_frequency: "daily" as BackupFrequency,
-    backup_retention_count: 10,
-    backup_destination_type: "local" as BackupDestinationType,
-    backup_local_path: "~/.kimi-code-switch-gui/backups",
-    backup_webdav_url: "",
-    backup_webdav_username: "",
-    backup_webdav_password: "",
-    backup_webdav_path: "",
-    shortcuts: createDefaultShortcuts(),
-    model_ui_metadata: {},
-  };
+  // 面板设置必须来自单一默认值来源：手写字面量会在 PanelSettings 增删字段时静默漂移。
+  const panelSettings = createDefaultPanelSettings();
 
   return {
     configPath: panelSettings.config_path,

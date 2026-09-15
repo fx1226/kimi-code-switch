@@ -70,11 +70,6 @@ export function getTabForShortcut(action: ShortcutAction): TabId | null {
   return NAVIGATION_ITEMS.find((item) => item.shortcutAction === action)?.id ?? null;
 }
 
-/** @deprecated Use NAVIGATION_ITEMS with its section property. */
-export const TAB_ITEMS = NAVIGATION_ITEMS.filter((item) => item.id !== "providers" && item.id !== "models");
-/** @deprecated Use NAVIGATION_ITEMS with its section property. */
-export const ASSISTANT_SUB_ITEMS = NAVIGATION_ITEMS.filter((item) => item.section === "configuration" && item.id !== "profiles");
-
 export const emptyPreview: PreviewBundle = {
   configDocument: "",
   panelSettingsDocument: "",

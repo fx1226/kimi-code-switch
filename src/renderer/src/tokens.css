@@ -65,11 +65,10 @@
     Consolas, monospace;
 
   /* ---- 语义字号 ----
-     固定像素令牌不再跟随根字号成倍缩放，避免 mini 档出现 10px 文本。 */
-  --text-2xs: 12px;
+     固定像素令牌不再跟随根字号成倍缩放，避免 mini 档出现 10px 文本。
+     标尺为 12/14/18/24 四档；历史重复的 --text-2xs/--text-md 已合并。 */
   --text-xs: 12px;
   --text-sm: 14px;
-  --text-md: 14px;
   --text-lg: 18px;
   --text-xl: 24px;
   --font-caption: var(--text-xs);

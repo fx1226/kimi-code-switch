@@ -170,7 +170,7 @@ function decodeCursor(cursor: string | null): { ts: number; id: string } | null 
   }
 }
 
-type BreakdownOrder = "tokens" | "calls" | "errors" | "avg_latency_ms" | "cache_hit_rate";
+export type BreakdownOrder = "tokens" | "calls" | "errors" | "avg_latency_ms" | "cache_hit_rate";
 const ORDER_COLUMN_MAP: Record<BreakdownOrder, string> = {
   tokens: "tokens",
   calls: "calls",
@@ -298,7 +298,7 @@ function rowToUsageEvent(row: Record<string, unknown>): UsageEvent {
     proxy_overhead_ms: num(row.proxy_overhead_ms),
     error_code: row.error_code != null ? String(row.error_code) : null,
     error_message: row.error_message != null ? String(row.error_message) : null,
-    http_status: row.http_status != null ? num(row.http_status) : null,
+    http_status: num(row.http_status),
     session_hint: row.session_hint != null ? String(row.session_hint) : null,
     cost_estimate: row.cost_estimate != null ? num(row.cost_estimate) : null,
     pricing_version: row.pricing_version != null ? String(row.pricing_version) : null,

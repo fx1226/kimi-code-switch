@@ -558,11 +558,6 @@ export interface SaveStateConflictResult {
   conflict: ExternalChangeConflict;
 }
 
-export interface ExternalChangeNotifyPayload {
-  changedFileIds: ManagedFileId[];
-  changedFileNames: string[];
-}
-
 export type RestoreFileId = ManagedFileId | "tui" | "agents";
 
 export interface RestoreDryRunFilePlan {
