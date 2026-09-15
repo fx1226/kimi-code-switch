@@ -40,6 +40,7 @@ jobs:
           elif [[ -n "${INPUT_VERSION}" ]]; then
             echo "version=v${INPUT_VERSION#v}" >> "$GITHUB_OUTPUT"
           else
+            git fetch --tags --force
             V="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.' | head -1)"
             test -n "${V}" || { echo "no v* tag found" >&2; exit 1; }
             echo "version=${V}" >> "$GITHUB_OUTPUT"
