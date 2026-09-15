@@ -2,6 +2,18 @@
 
 Diese Datei dokumentiert die wesentlichen Änderungen des Projekts. Das Format folgt Keep a Changelog; verwendet wird das `major.minor.patch`-Versionsschema.
 
+## [2.2.6] - 2026-09-15
+
+### Neu
+
+- **ChatGPT-Abonnement-Bridge**: startet einen lokalen OpenAI-kompatiblen Bridge-Dienst, der ein ChatGPT-Codex-Abonnement mit Kimi Code verbindet – mit OAuth/PKCE-Login, System-Anmeldedatenspeicher für Tokens, Abruf und Normalisierung des Modellkatalogs, Responses-API-Weiterleitung mit SSE-Streaming sowie umgebungsbezogener Bridge-Bindung und Modell-Alias-Anwendung im Einstellungsbereich.
+- **Skill-Bibliotheks-Pfaderkennung**: Skill-Erkennung und Panel unterstützen jetzt Plugin-Skill-Wurzeln (nach Plugin-id gekennzeichnet) und die native Kimi-Code-Skill-Bibliothek. Die Deduplizierung nutzt den aufgelösten physischen Pfad, während die Anzeige den logischen Pfad beibehält und den vollständigen Unterpfad zeigt.
+
+### Behoben
+
+- **Doppelte SSE-Streaming-Ausgabe**: behoben, dass bereits gesendete Frames erneut ausgegeben wurden, wenn der Upstream-Ereignisstrom in Blöcken eintrifft (z. B. sich wiederholend aufsummierter Antworttext).
+- **Legacy-Managed-Default-Home-Symlink**: Wenn `~/.kimi-code` weiterhin ein Symlink auf die GUI-verwaltete Standardumgebung ist, wird beim Start das echte Home materialisiert und Plugin-Wurzeln werden neu zugeordnet – idempotent und ohne den Start bei Fehlern abzubrechen.
+
 ## [2.2.5] - 2026-06-17
 
 ### Geändert

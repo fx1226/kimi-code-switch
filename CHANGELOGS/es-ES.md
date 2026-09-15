@@ -2,6 +2,18 @@
 
 Este archivo recoge los cambios relevantes del proyecto. El formato sigue Keep a Changelog y el proyecto adopta el esquema de versiones `major.minor.patch`.
 
+## [2.2.6] - 2026-09-15
+
+### Añadido
+
+- **Puente de suscripción ChatGPT**: inicia un servicio puente compatible con OpenAI que conecta una suscripción de ChatGPT Codex con Kimi Code, con inicio de sesión OAuth/PKCE, almacenamiento de tokens en credenciales del sistema, obtención y normalización del catálogo de modelos, reenvío de la API Responses con streaming SSE, y vinculación del puente por entorno más aplicación de alias de modelo desde el panel de configuración.
+- **Reconocimiento de rutas de bibliotecas de skills**: el descubrimiento de skills y el panel reconocen ahora las raíces de skills de plugins (etiquetadas por id de plugin) y la biblioteca nativa de Kimi Code; la deduplicación usa la ruta física resuelta mientras que la vista conserva la ruta lógica y muestra la subruta completa.
+
+### Corregido
+
+- **Salida duplicada en streaming SSE**: corregido que los frames ya enviados se reemitieran al llegar el flujo de eventos aguas arriba por fragmentos (p. ej., texto de respuesta acumulándose repetidamente).
+- **Enlace simbólico de home gestionado heredado**: cuando `~/.kimi-code` sigue siendo un enlace simbólico al entorno gestionado por defecto de la GUI, el arranque materializa el home real y reasigna las raíces de plugins, de forma idempotente y sin interrumpir el arranque ante errores.
+
 ## [2.2.5] - 2026-06-17
 
 ### Cambiado
