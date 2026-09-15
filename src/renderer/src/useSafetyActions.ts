@@ -43,6 +43,9 @@ interface SafetyActionsContext {
     cancelLabel: string;
     tone: "primary" | "danger";
     kind: "save" | "delete";
+    /** B4：以完整（不截断）可滚动 <pre> 形式展示的内容，例如危险内容完整清单；可选复制导出。 */
+    scrollableContent?: string;
+    scrollableCopyLabel?: string;
   }) => Promise<boolean>;
 }
 
@@ -140,7 +143,7 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
     }
 
     const normalizedState = normalizeStatePaths(state);
-    const expectedSnapshot = fileSnapshotRef?.current ?? fileSnapshot ?? undefined;
+    const defaultExpected = (): FileSnapshotBundle | undefined => fileSnapshotRef?.current ?? fileSnapshot ?? undefined;
     const applyRestoredState = (restored: {
       state: AppState;
       snapshot: FileSnapshotBundle;
@@ -173,6 +176,8 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
         }),
       );
     };
+    // dry-run 以当前最新快照为基线；后续各阶段只以用户确认过的具体冲突版本推进。
+    let expectedSnapshot = defaultExpected();
     const dryRun = await api.restoreBackupDryRun(normalizedState, backupName, {
       expectedSnapshot,
     });
@@ -183,6 +188,8 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
         setFileSnapshot(dryRun.snapshot);
         return;
       }
+      // 用户已确认该具体冲突版本 → 用 dry-run 返回的 snapshot 作 apply 基线。
+      expectedSnapshot = dryRun.snapshot;
     } else {
       const changedFiles = dryRun.filePlans.filter((plan) => plan.action !== "unchanged");
       const confirmed = await requestConfirm({
@@ -202,26 +209,38 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
       }
     }
 
-    const restored = await api.restoreBackupSafe(normalizedState, backupName, {
+    // ① apply 第一次：不传 allowOverwrite，保留 preflight（外部变更与危险内容授权分离）。
+    let restored = await api.restoreBackupSafe(normalizedState, backupName, {
       expectedSnapshot,
-      allowOverwrite: true,
     });
+
+    // ② 外部变更：dry-run 确认后、apply 前若外部再次修改，仍返回 external-change，
+    // 必须二次确认该具体冲突版本，绝不静默覆盖。确认后以本次 snapshot 为新 expected 重调。
     if (isExternalChangeConflict(restored)) {
-      setDoctorReport(restored.doctor);
-      setFileSnapshot(restored.snapshot);
-      throw new Error(t(locale, "externalChangeCanceled"));
+      const overwrite = await confirmExternalOverwrite(restored);
+      if (!overwrite) {
+        setDoctorReport(restored.doctor);
+        setFileSnapshot(restored.snapshot);
+        return;
+      }
+      expectedSnapshot = restored.snapshot;
+      restored = await api.restoreBackupSafe(normalizedState, backupName, {
+        expectedSnapshot,
+        allowOverwrite: true,
+      });
     }
+
+    // ③ B4：危险内容门禁——展示完整风险清单（不截断，可滚动/复制导出），
+    // 由用户显式确认后才 allowRisk:true 重调。
     if (isDangerousContentBlocked(restored)) {
-      // B4：危险内容门禁——展示完整风险清单（不截断），由用户显式确认后才允许恢复。
       const riskItems = restored.risk.items;
-      const riskPreview = riskItems.slice(0, 20).join("\n")
-        + (riskItems.length > 20 ? `\n... (共 ${riskItems.length} 项)` : "");
       const confirmed = await requestConfirm({
         title: t(locale, "backupRestoreRiskTitle"),
         description: formatMessage(t(locale, "backupRestoreRiskDescription"), {
           count: riskItems.length,
-          preview: riskPreview,
         }),
+        scrollableContent: riskItems.map((item, index) => `${index + 1}. ${item}`).join("\n"),
+        scrollableCopyLabel: t(locale, "copy"),
         confirmLabel: t(locale, "backupRestoreRiskAllow"),
         cancelLabel: t(locale, "cancel"),
         tone: "danger",
@@ -231,21 +250,32 @@ export function useSafetyActions(ctx: SafetyActionsContext) {
         setDoctorReport(restored.doctor);
         throw new Error(t(locale, "backupRestoreRiskDenied"));
       }
-      const confirmedRestore = await api.restoreBackupSafe(normalizedState, backupName, {
+      // ④ allowRisk 重调：继续传 allowRisk 前最新 snapshot、不传 allowOverwrite——
+      // preflight 始终保留；若期间又出现外部变更，再单独确认覆盖。
+      restored = await api.restoreBackupSafe(normalizedState, backupName, {
         expectedSnapshot,
-        allowOverwrite: true,
         allowRisk: true,
       });
-      if (isExternalChangeConflict(confirmedRestore)) {
-        setDoctorReport(confirmedRestore.doctor);
-        setFileSnapshot(confirmedRestore.snapshot);
-        throw new Error(t(locale, "externalChangeCanceled"));
+      if (isExternalChangeConflict(restored)) {
+        const overwrite = await confirmExternalOverwrite(restored);
+        if (!overwrite) {
+          setDoctorReport(restored.doctor);
+          setFileSnapshot(restored.snapshot);
+          return;
+        }
+        expectedSnapshot = restored.snapshot;
+        restored = await api.restoreBackupSafe(normalizedState, backupName, {
+          expectedSnapshot,
+          allowOverwrite: true,
+          allowRisk: true,
+        });
       }
-      if (isDangerousContentBlocked(confirmedRestore)) {
-        setDoctorReport(confirmedRestore.doctor);
+      if (isDangerousContentBlocked(restored)) {
+        setDoctorReport(restored.doctor);
         throw new Error(t(locale, "backupRestoreRiskDenied"));
       }
-      return applyRestoredState(confirmedRestore);
+      applyRestoredState(restored);
+      return;
     }
 
     applyRestoredState(restored);

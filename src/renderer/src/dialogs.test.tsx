@@ -31,7 +31,7 @@ function DialogShellHarness(): JSX.Element {
   );
 }
 
-function NestedDialogHarness(): JSX.Element {
+function NestedDialogHarness(): JSX.Element | null {
   const [outerOpen, setOuterOpen] = useState(true);
   const [innerOpen, setInnerOpen] = useState(false);
   return outerOpen ? (

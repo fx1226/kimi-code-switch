@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEventHandler, ReactNode, RefObject } from "react";
+import type { KeyboardEventHandler, MutableRefObject, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
-import { FileText, History, LoaderCircle, Save, Trash2, X } from "lucide-react";
+import { Copy, FileText, History, LoaderCircle, Save, Trash2, X } from "lucide-react";
 
 import type { BackupDestinationType, BackupRecord, Locale } from "@shared/types";
 
@@ -9,7 +9,7 @@ import { CodePanel } from "./codePanel";
 import { t } from "./i18n";
 
 export type ConfirmDialogTone = "primary" | "danger";
-export type ConfirmDialogKind = "save" | "delete" | "unsaved";
+export type ConfirmDialogKind = "save" | "delete" | "unsaved" | "confirm";
 export type UnsavedDecision = "save" | "discard" | "cancel";
 
 export interface ConfirmDialogState {
@@ -21,6 +21,9 @@ export interface ConfirmDialogState {
   kind: ConfirmDialogKind;
   discardLabel?: string;
   onDiscard?: () => void;
+  /** B4：完整（不截断）的可滚动内容块，如危险内容清单；项数再多也保持完整可见。 */
+  scrollableContent?: string;
+  scrollableCopyLabel?: string;
 }
 
 export type UnsavedConfirmDialogState = ConfirmDialogState & {
@@ -78,7 +81,7 @@ export function DialogShell(props: {
   onClose?: () => void;
   backdropClassName: string;
   dialogClassName: string;
-  dialogRef?: RefObject<HTMLElement | null>;
+  dialogRef?: MutableRefObject<HTMLElement | null>;
   ariaLabel?: string;
   ariaLabelledBy?: string;
   ariaDescribedBy?: string;
@@ -86,7 +89,7 @@ export function DialogShell(props: {
   onKeyDown?: KeyboardEventHandler<HTMLElement>;
   children: ReactNode;
 }): JSX.Element {
-  const internalDialogRef = useRef<HTMLElement>(null);
+  const internalDialogRef = useRef<HTMLElement | null>(null);
   useDialogEscape(props.onClose ?? (() => {}), internalDialogRef);
   useFocusTrap(internalDialogRef);
 
@@ -176,7 +179,7 @@ export function useFocusTrap(dialogRef: RefObject<HTMLElement | null>): void {
     const inertedSiblings: Array<{ element: HTMLElement; previousAriaHidden: string | null }> = [];
     let branch: HTMLElement | null = dialog;
     while (branch?.parentElement) {
-      const parent = branch.parentElement;
+      const parent: HTMLElement = branch.parentElement;
       for (const sibling of Array.from(parent.children)) {
         if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("inert")) {
           const previousAriaHidden = sibling.getAttribute("aria-hidden");
@@ -261,11 +264,19 @@ export function ConfirmDialog(
   },
 ): JSX.Element {
   const Icon = props.kind === "delete" ? Trash2 : Save;
+  const [copied, setCopied] = useState(false);
+  const copyScrollable = (): void => {
+    if (!props.scrollableContent) return;
+    void navigator.clipboard.writeText(props.scrollableContent).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    });
+  };
 
   return (
     <DialogShell
       backdropClassName="confirm-dialog-backdrop"
-      dialogClassName="confirm-dialog glass-panel"
+      dialogClassName={props.scrollableContent ? "confirm-dialog glass-panel has-scrollable" : "confirm-dialog glass-panel"}
       ariaLabelledBy="confirm-dialog-title"
       ariaDescribedBy={props.description ? "confirm-dialog-description" : undefined}
       onClose={props.onCancel}
@@ -279,6 +290,20 @@ export function ConfirmDialog(
             {props.description ? <p id="confirm-dialog-description">{props.description}</p> : null}
           </div>
         </div>
+        {props.scrollableContent ? (
+          <div className="confirm-dialog-scrollable">
+            <button
+              className="action-button compact icon-only confirm-dialog-scrollable-copy"
+              type="button"
+              aria-label={props.scrollableCopyLabel ?? "Copy"}
+              title={props.scrollableCopyLabel ?? "Copy"}
+              onClick={copyScrollable}
+            >
+              {copied ? <Save size={14} /> : <Copy size={14} />}
+            </button>
+            <pre>{props.scrollableContent}</pre>
+          </div>
+        ) : null}
         <div className="confirm-dialog-actions">
           <button className="action-button" type="button" data-dialog-initial-focus={props.tone === "danger" || props.kind === "unsaved" ? "true" : undefined} onClick={props.onCancel}>
             {props.cancelLabel}

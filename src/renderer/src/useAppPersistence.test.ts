@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import type { AppState, FileSnapshotBundle } from "@shared/types";
+import { createDefaultPanelSettings } from "@shared/configStore";
 import { createDefaultShortcuts } from "@shared/shortcutStore";
 
 vi.mock("./backupAuto", () => ({
@@ -56,29 +57,10 @@ function createState(): AppState {
     },
     activeProfile: "default",
     panelSettings: {
-      version: 1,
+      ...createDefaultPanelSettings(),
       config_path: "/tmp/config.toml",
-      profiles_path: "",
-      follow_config_profiles: true,
-      theme: "dark",
-      appearance_theme: "aurora",
-      ui_font_size: "standard",
-      locale: "zh-CN",
-      tray_icon: false,
-      sidebar_collapsed: false,
-      display_open_mode: "remember-last",
-      close_behavior: "quit",
-      terminal_app: "system-terminal",
-      backup_strategy: "manual",
-      backup_frequency: "daily",
-      backup_retention_count: 10,
-      backup_destination_type: "local",
       backup_local_path: "/tmp/backups",
-      backup_webdav_url: "",
-      backup_webdav_username: "",
-      backup_webdav_password: "",
-      backup_webdav_path: "",
-      shortcuts: createDefaultShortcuts(),
+      theme: "dark",
     },
     mcpConfig: {
       mcpServers: {},

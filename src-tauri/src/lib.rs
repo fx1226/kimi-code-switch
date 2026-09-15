@@ -51,6 +51,7 @@ pub fn run() {
             fs_access::replace_portable_directory,
             fs_access::remove_dir,
             fs_access::save_file_with_dialog,
+            fs_access::pick_backup_directory,
             fs_access::write_project_local_config,
             fs_access::reconcile_durable_grants,
             fs_access::quarantine_journal,

@@ -36,10 +36,21 @@ import { resolveNearestGitProjectRoot, scanSkills } from "@shared/skillsStore";
 import { remapInstalledPluginRoots, scanKimiPlugins } from "@shared/pluginStore";
 import { compareReleaseVersions } from "@shared/versionUtils";
 import { computeEventCost, resolveModelPricing } from "@shared/pricing";
-import type { CostSeriesPoint, TokenUsageTotals, TrendTokenPoint } from "@shared/usageTypes";
+import type { Bucket, CostSeriesPoint, EventFilter, GroupBy, TimeRange, TokenUsageTotals, TrendTokenPoint } from "@shared/usageTypes";
 import type { AppState, FullBackupBundle, KimiCodeEnvironment, KimiCodeEnvironmentPreferenceResult, ManagedFileId, McpServerConfig, ModelConfig, PanelSettings, PortableDirectoryBundle, PreviewBundle, OpenKimiTerminalRequest, FileSnapshotBundle, SaveStateConflictResult, SaveStateResult } from "@shared/types";
+import type { SaveTransactionRecord } from "@shared/configStore";
 
-import { tauriFileAccess, pathExists, recoverPendingSaveTransaction, recoverPendingRestoreTransaction, removeFile } from "./fileAccess";
+import {
+  SAVE_TRANSACTION_PATH,
+  RESTORE_TRANSACTION_PATH,
+  isSaveTransactionRecord,
+  pathExists,
+  recoverPendingRestoreTransaction,
+  recoverPendingSaveTransaction,
+  removeFile,
+  stableJson,
+  tauriFileAccess,
+} from "./fileAccess";
 import * as usageDb from "./usageDb";
 import { UsageLogWatcher } from "./usageLogWatcher";
 import * as cli from "./cli";
@@ -80,6 +91,189 @@ let pendingSaveRecovery: SaveRecoveryInfo | null = null;
 export type SaveRecoveryInfo =
   | { action: "unknown" | "unknown-restore"; journal: unknown }
   | { action: "quarantined" | "quarantined-restore"; reason?: "malformed" | "unsupported"; quarantinedPath?: string };
+
+/** C2：save journal 的人工恢复决策。 */
+export type SaveRecoveryDecision = "abandon" | "export-journal" | "apply-desired" | "restore-original";
+
+export interface SaveRecoveryFailure {
+  path: string;
+  message: string;
+}
+
+/**
+ * `resolveSaveRecovery` 的审计结果（时间/决策/路径数），供 UI 展示或 toast。
+ * 每个决策只影响 journal 里列出的路径；`ok:true` 且 `failures` 为空时才会删除 save journal，
+ * 失败（冲突/复核失败）时 journal 保留，UI 应回到只读横幅。
+ */
+export interface ResolveSaveRecoveryResult {
+  ok: boolean;
+  decision: SaveRecoveryDecision;
+  completedAt: string;
+  /** 本次实际写入（含覆盖外部修改）的文件数。 */
+  writtenFiles: number;
+  /** 本次删除的文件数（restore-original 且 original 为 null 的资源）。 */
+  removedFiles: number;
+  /** 已处于目标状态而跳过的文件数。 */
+  unchangedFiles: number;
+  /** 0 = 全部成功；非 0 = 存在失败/冲突，journal 保留。 */
+  failures: SaveRecoveryFailure[];
+  /** export-journal：null = 用户取消；string = 落盘路径。 */
+  exportedPath?: string | null;
+  /** abandon：实际删除的 journal 文件。 */
+  deletedJournals?: string[];
+}
+
+async function readCurrentSaveJournal(): Promise<SaveTransactionRecord | null> {
+  const document = await tauriFileAccess.readText(SAVE_TRANSACTION_PATH);
+  if (document === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(document);
+  } catch {
+    return null;
+  }
+  return isSaveTransactionRecord(parsed) ? parsed : null;
+}
+
+type SaveRecoveryResourceRead = {
+  file: SaveTransactionRecord["textFiles"][number];
+  current: string | null;
+  status: "original" | "desired" | "external";
+};
+
+/**
+ * C2 复核：逐资源读取当前盘上内容并分类（original / desired / external）。
+ * 任一目标文件无法读取 → 视为复核失败，整批放弃（不动任何文件），回到只读模式。
+ */
+async function preflightSaveRecovery(
+  record: SaveTransactionRecord,
+): Promise<{ reads: SaveRecoveryResourceRead[]; failures: SaveRecoveryFailure[] }> {
+  const changedFiles = record.textFiles.filter((file) => file.originalContent !== file.desiredContent);
+  const reads: SaveRecoveryResourceRead[] = [];
+  const failures: SaveRecoveryFailure[] = [];
+  for (const file of changedFiles) {
+    let current: string | null;
+    try {
+      current = await tauriFileAccess.readText(file.path);
+    } catch (error) {
+      failures.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+    let status: SaveRecoveryResourceRead["status"];
+    if (current === file.originalContent) status = "original";
+    else if (current === file.desiredContent) status = "desired";
+    else status = "external";
+    reads.push({ file, current, status });
+  }
+  return { reads, failures };
+}
+
+async function classifySavePanel(record: SaveTransactionRecord): Promise<{
+  changed: boolean;
+  status: "original" | "desired" | "unknown";
+}> {
+  const changed = record.panelDesired !== undefined
+    && stableJson(record.panelOriginal) !== stableJson(record.panelDesired);
+  if (!changed) return { changed: false, status: "original" };
+  const current = await getPanelSettings();
+  let status: "original" | "desired" | "unknown";
+  if (stableJson(current) === stableJson(record.panelOriginal)) status = "original";
+  else if (stableJson(current) === stableJson(record.panelDesired)) status = "desired";
+  else status = "unknown";
+  return { changed, status };
+}
+
+/**
+ * C2：把 save journal 朝 desired 或 original 方向收敛。
+ * - apply-desired：目标 = desiredContent（覆盖 external 修改，CAS 以当前盘上 hash 为准）。
+ * - restore-original：目标 = originalContent（original 为 null 时删除文件）。
+ * - 成功后才由调用方删除 save journal；任何失败（含 panel unknown）都保留 journal。
+ */
+async function applySaveRecoveryDecision(
+  record: SaveTransactionRecord,
+  decision: "apply-desired" | "restore-original",
+  completedAt: string,
+): Promise<ResolveSaveRecoveryResult> {
+  // 复核：逐个目标（文本文件 + panel）确认当前 revisions。任一无法确认 → 整批放弃（不动任何文件），回到只读。
+  const { reads, failures: preflightFailures } = await preflightSaveRecovery(record);
+  const panel = await classifySavePanel(record);
+  if (preflightFailures.length > 0 || (panel.changed && panel.status === "unknown")) {
+    const failures = preflightFailures.length > 0
+      ? preflightFailures
+      : [{ path: "panel", message: "Panel settings were changed externally; keep the journal for manual review." }];
+    return {
+      ok: false,
+      decision,
+      completedAt,
+      writtenFiles: 0,
+      removedFiles: 0,
+      unchangedFiles: 0,
+      failures,
+    };
+  }
+
+  const applyingDesired = decision === "apply-desired";
+  let writtenFiles = 0;
+  let removedFiles = 0;
+  let unchangedFiles = 0;
+  const writeFailures: SaveRecoveryFailure[] = [];
+
+  for (const { file, current, status } of reads) {
+    const needsWrite = applyingDesired
+      ? status !== "desired"
+      : status === "desired";
+    const target = applyingDesired ? file.desiredContent : file.originalContent;
+    const willRemove = !applyingDesired && target === null;
+    if (!needsWrite) {
+      unchangedFiles += 1;
+      continue;
+    }
+    try {
+      // CAS expected = 当前盘上内容 hash（文件不存在时为空 revision，表示创建）。
+      const expectedSha256 = await sha256Text(current);
+      if (willRemove) {
+        await tauriFileAccess.removeTextCas!(file.path, expectedSha256);
+        removedFiles += 1;
+      } else {
+        await tauriFileAccess.writeTextCas!(file.path, target ?? "", expectedSha256);
+        writtenFiles += 1;
+      }
+    } catch (error) {
+      writeFailures.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  // Panel（SQLite）资源：已在复核阶段排除 unknown；仅在明确 original/desired 状态时随决策变化。
+  if (panel.changed) {
+    if (applyingDesired && panel.status === "original" && record.panelDesired !== undefined) {
+      try {
+        await savePanelSettings(record.panelDesired);
+        writtenFiles += 1;
+      } catch (error) {
+        writeFailures.push({ path: "panel", message: error instanceof Error ? error.message : String(error) });
+      }
+    } else if (!applyingDesired && panel.status === "desired" && record.panelOriginal != null) {
+      try {
+        await savePanelSettings(record.panelOriginal);
+        writtenFiles += 1;
+      } catch (error) {
+        writeFailures.push({ path: "panel", message: error instanceof Error ? error.message : String(error) });
+      }
+    } else {
+      unchangedFiles += 1;
+    }
+  }
+
+  return {
+    ok: writeFailures.length === 0,
+    decision,
+    completedAt,
+    writtenFiles,
+    removedFiles,
+    unchangedFiles,
+    failures: writeFailures,
+  };
+}
 
 type LoadStatePaths = {
   configTarget?: AppState["configTarget"];
@@ -248,7 +442,12 @@ export async function loadProjectMcpScope(state: AppState): Promise<void> {
     { scope: "project-root" as const, path: `${projectRoot}/.mcp.json` },
     { scope: "project-local" as const, path: `${normalizedWorkingDirectory}/.kimi-code/mcp.json` },
   ].filter((source, index, all) => all.findIndex((candidate) => candidate.path === source.path) === index);
-  const sources = await Promise.all(sourceSpecs.map(async (source) => {
+  const sources = await Promise.all(sourceSpecs.map(async (source): Promise<{
+    scope: "project-root" | "project-local";
+    path: string;
+    mcpServers: Record<string, McpServerConfig>;
+    error?: string;
+  }> => {
     const document = await tauriFileAccess.readText(source.path);
     if (document === null) return { ...source, mcpServers: {} };
     try {
@@ -455,7 +654,7 @@ function nativeModelUiMetadata(value: unknown): Pick<ModelConfig, "auth_mode" | 
       ? { auth_mode: value.auth_mode }
       : {}),
     ...(value.official_account_scope === "global" ? { official_account_scope: "global" as const } : {}),
-    ...(isRecord(value.pricing) ? { pricing: value.pricing as ModelConfig["pricing"] } : {}),
+    ...(isRecord(value.pricing) ? { pricing: value.pricing as unknown as ModelConfig["pricing"] } : {}),
   };
 }
 
@@ -720,9 +919,9 @@ function ensureStoresInitialized(): Promise<void> {
     storesInitTask = (async () => {
       // 旧库由后端在打开新库后逐表合并。这里不能移动或删除任何候选
       // 文件，否则多份旧数据库共存时会丢失尚未合并的数据。
-      const { ensureDir } = await import("./fileAccess");
+      const { tauriFileAccess } = await import("./fileAccess");
       try {
-        await ensureDir(PANEL_APP_DIR);
+        await tauriFileAccess.ensureDir(PANEL_APP_DIR);
       } catch (err) {
         console.warn("Database file migration skipped:", err);
       }
@@ -885,20 +1084,75 @@ export const kimiSwitchTauri = {
   dismissSaveRecovery: (): void => {
     pendingSaveRecovery = null;
   },
-  // C2：人工选择后执行恢复决策。目前实现"放弃（删除 journal）"，original/desired 的选择
-  // 走 C3 统一 restore journal 的 recovery UI。这里返回成功与否。
-  resolveSaveRecovery: async (decision: "abandon"): Promise<void> => {
+  // C2：人工选择后执行恢复决策。
+  // - abandon：删除 save 与 restore 两个 journal（restore 共用此入口），保留现有行为。
+  // - export-journal：用 saveFile 把 save journal 原样导出留档，不自动删除；banner 保持，由用户再点放弃。
+  // - apply-desired / restore-original：先复核当前 revisions，再逐资源写回；成功后才删 save journal。
+  resolveSaveRecovery: async (decision: SaveRecoveryDecision): Promise<ResolveSaveRecoveryResult> => {
+    const completedAt = new Date().toISOString();
     if (decision === "abandon") {
-      for (const journal of [
-        "~/.kimi-code-switch-gui/pending-save-transaction.json",
-        "~/.kimi-code-switch-gui/pending-restore-transaction.json",
-      ]) {
-        await removeFile(journal).catch(() => {
-          // 不存在忽略
-        });
+      const deletedJournals: string[] = [];
+      for (const journal of [SAVE_TRANSACTION_PATH, RESTORE_TRANSACTION_PATH]) {
+        await removeFile(journal)
+          .then(() => deletedJournals.push(journal))
+          .catch(() => {
+            // 不存在忽略
+          });
       }
+      pendingSaveRecovery = null;
+      return { ok: true, decision, completedAt, writtenFiles: 0, removedFiles: 0, unchangedFiles: 0, failures: [], deletedJournals };
     }
-    pendingSaveRecovery = null;
+
+    if (decision === "export-journal") {
+      const document = await tauriFileAccess.readText(SAVE_TRANSACTION_PATH);
+      if (document === null) {
+        pendingSaveRecovery = null;
+        return {
+          ok: false,
+          decision,
+          completedAt,
+          writtenFiles: 0,
+          removedFiles: 0,
+          unchangedFiles: 0,
+          failures: [{ path: SAVE_TRANSACTION_PATH, message: "Save journal is no longer available." }],
+        };
+      }
+      const saved = await kimiSwitchTauri.saveFile(document, { defaultPath: "pending-save-transaction.json" });
+      return {
+        ok: true,
+        decision,
+        completedAt,
+        writtenFiles: 0,
+        removedFiles: 0,
+        unchangedFiles: 0,
+        failures: [],
+        exportedPath: saved.canceled ? null : saved.filePath,
+      };
+    }
+
+    // apply-desired / restore-original
+    const record = await readCurrentSaveJournal();
+    if (!record) {
+      pendingSaveRecovery = null;
+      return {
+        ok: false,
+        decision,
+        completedAt,
+        writtenFiles: 0,
+        removedFiles: 0,
+        unchangedFiles: 0,
+        failures: [{ path: SAVE_TRANSACTION_PATH, message: "Save journal is not available for recovery." }],
+      };
+    }
+    const result = await applySaveRecoveryDecision(record, decision, completedAt);
+    if (result.ok) {
+      // 成功后才删除 save journal；restore journal 的 original/desired 人工选择属 C3，不在此删除。
+      await removeFile(SAVE_TRANSACTION_PATH).catch(() => {
+        // journal 可能已被并发移除；文件已收敛到目标状态，仍视为成功。
+      });
+      pendingSaveRecovery = null;
+    }
+    return result;
   },
   saveState: async (state: AppState): Promise<SaveStateResult> => {
     // 保存前捕获快照（Kimi 标准配置 + GUI SQLite 导出）
@@ -1176,9 +1430,9 @@ export const kimiSwitchTauri = {
   defaultSettings: (): Promise<PanelSettings> => Promise.resolve(createDefaultPanelSettings()),
 
   // ── dialog / shell ──
-  pickFile: async (options?: { filters?: Array<{ name: string; extensions: string[] }>; properties?: Array<string> }) => {
+  pickFile: async (options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; properties?: Array<string> }) => {
     // 从 renderer 打开仅用于"读取"；写路径一律走 Rust 组合命令（save_file_with_dialog 等）。
-    const selected = await openDialog({ multiple: false, filters: options?.filters, directory: options?.properties?.includes("openDirectory"), canCreateDirectories: options?.properties?.includes("createDirectory") });
+    const selected = await openDialog({ title: options?.title, multiple: false, filters: options?.filters, directory: options?.properties?.includes("openDirectory"), canCreateDirectories: options?.properties?.includes("createDirectory") });
     return typeof selected === "string" ? { canceled: false, filePath: selected } : { canceled: true };
   },
   saveFile: async (content: string, options?: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
@@ -1193,8 +1447,12 @@ export const kimiSwitchTauri = {
     const content = await tauriFileAccess.readText(filePath);
     return content === null ? { ok: false, error: "File not found." } : { ok: true, content };
   },
-  // B1：Rust 仅从已保存的偏好目录重建 durable grant，renderer 不传可写路径。
+  // B1：Rust 仅从 Rust durable grant store 重建授权，不信任 SQLite/面板字符串。
   reconcileDurableGrants: () => invoke<void>("reconcile_durable_grants"),
+  // B1：目录选择必须由 Rust 原生 dialog 完成，并在 Rust 侧登记 durable 写授权。
+  // renderer 不得凭任意字符串（含 SQLite 里的 backup_local_path）扩大写授权。
+  pickBackupDirectory: (title: string, defaultPath?: string) =>
+    invoke<{ canceled: boolean; path?: string }>("pick_backup_directory", { title, defaultPath }),
   openExternal: async (url: string): Promise<{ ok: true }> => {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "mailto:") {
@@ -1263,7 +1521,7 @@ export const kimiSwitchTauri = {
     cli.upgradeTargetCli(target ?? "kimi-code", options),
   startKimiOAuthLogin: (target: AppState["configTarget"], onEvent?: (event: cli.KimiOAuthLoginEvent) => void, options?: { accountId?: string; activate?: boolean }) => {
     if (options?.accountId) requireDefaultEnvironmentForCredentialSlots();
-    return cli.startKimiOAuthLogin(target, onEvent, {
+    return cli.startKimiOAuthLogin(target ?? "kimi-code", onEvent, {
       ...options,
       homePath: activeKimiCodeEnvironmentHome(),
     });
@@ -1414,8 +1672,6 @@ export const kimiSwitchTauri = {
     }
     return { ok: true as const };
   },
-  onTrayCommand: () => () => {},
-  onExternalFileChange: () => () => {},
 
   // ── 使用统计 ──
   usageGetStatus: async () => {
@@ -1465,27 +1721,27 @@ export const kimiSwitchTauri = {
     }
     return { ok: true as const, settings: extractInsightsSettings(currentAppState) as never };
   },
-  usageQueryOverview: async (range: never) => {
+  usageQueryOverview: async (range: TimeRange) => {
     if (!usageOpen) return { ok: true as const, slice: { totalCalls: 0, totalTokens: 0, cacheHitRate: 0, reasoningTokens: 0, avgLatencyMs: 0, latencySamples: 0, errorRate: 0 } };
     return { ok: true as const, slice: await usageDb.queryOverview(range, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryTrend: async (args: { range: never; bucket: never; groupBy: never }) => {
+  usageQueryTrend: async (args: { range: TimeRange; bucket: Bucket; groupBy: GroupBy | null }) => {
     if (!usageOpen) return { ok: true as const, series: [] };
     return { ok: true as const, series: await usageDb.queryTrend(args.range, args.bucket, args.groupBy, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryBreakdown: async (args: { dim: "profile" | "model"; range: never; limit: number; orderBy: never }) => {
+  usageQueryBreakdown: async (args: { dim: "profile" | "model"; range: TimeRange; limit: number; orderBy: usageDb.BreakdownOrder }) => {
     if (!usageOpen) return { ok: true as const, rows: [] };
     return { ok: true as const, rows: await usageDb.queryBreakdown(args.dim, args.range, args.limit, args.orderBy, activeKimiCodeEnvironmentId()) };
   },
-  usageQuerySessions: async (args: { range: never; limit: number }) => {
+  usageQuerySessions: async (args: { range: TimeRange; limit: number }) => {
     if (!usageOpen) return { ok: true as const, rows: [] };
     return { ok: true as const, rows: await usageDb.queryHeaviestSessions(args.range, args.limit, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryEvents: async (args: { filter: never; cursor: string | null; pageSize: number }) => {
+  usageQueryEvents: async (args: { filter: EventFilter; cursor: string | null; pageSize: number }) => {
     if (!usageOpen) return { ok: true as const, page: { rows: [], nextCursor: null } };
     return { ok: true as const, page: await usageDb.queryEvents(args.filter, args.cursor, args.pageSize, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryCost: async (range: never) => {
+  usageQueryCost: async (range: TimeRange) => {
     const empty = { ok: true as const, total: null as number | null, byDay: {} as Record<string, number | null>, byModel: {} as Record<string, number | null> };
     if (!usageOpen) return empty;
     const models = currentAppState?.mainConfig.models ?? {};
@@ -1495,25 +1751,25 @@ export const kimiSwitchTauri = {
       usageDb.queryModelTokenSums(range, "day", environmentId),
     ]);
     const byModel = aggregateCost(modelSums, models, (r) => r.model);
-    const byDay = aggregateCost(modelDaySums, models, (r) => r.bucketMs);
+    const byDay = aggregateCost(modelDaySums, models, (r) => String(r.bucketMs));
     const totalMap = aggregateCost(modelSums, models, () => "");
     return { ok: true as const, total: totalMap[""] ?? null, byDay, byModel };
   },
-  usageQueryTokenTotals: async (range: unknown) => {
+  usageQueryTokenTotals: async (range: TimeRange) => {
     if (!usageOpen) return { ok: true as const, totals: { promptTokens: 0, completionTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 } };
-    return { ok: true as const, totals: await usageDb.queryTokenTotals(range as never, activeKimiCodeEnvironmentId()) };
+    return { ok: true as const, totals: await usageDb.queryTokenTotals(range, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryTrendTokens: async (args: { range: unknown; granularity?: "hour" | "day" }) => {
+  usageQueryTrendTokens: async (args: { range: TimeRange; granularity?: "hour" | "day" }) => {
     if (!usageOpen) return { ok: true as const, series: [] };
-    const granularity = args.granularity ?? usageDb.resolveTrendGranularity(args.range as never);
-    return { ok: true as const, series: await usageDb.queryTrendTokens(args.range as never, granularity, activeKimiCodeEnvironmentId()) };
+    const granularity = args.granularity ?? usageDb.resolveTrendGranularity(args.range);
+    return { ok: true as const, series: await usageDb.queryTrendTokens(args.range, granularity, activeKimiCodeEnvironmentId()) };
   },
-  usageQueryCostSeries: async (range: unknown) => {
+  usageQueryCostSeries: async (range: TimeRange) => {
     if (!usageOpen) return { ok: true as const, points: [], series: [] };
     const models = currentAppState?.mainConfig.models ?? {};
     const environmentId = activeKimiCodeEnvironmentId();
-    const granularity = usageDb.resolveTrendGranularity(range as never);
-    const rows = await usageDb.queryModelTokenSums(range as never, granularity, environmentId);
+    const granularity = usageDb.resolveTrendGranularity(range);
+    const rows = await usageDb.queryModelTokenSums(range, granularity, environmentId);
     const byBucket = aggregateCost(rows, models, (r) => String(r.bucketMs));
     const tokensByBucket = new Map<number, { prompt: number; completion: number; cacheCreation: number; cacheRead: number }>();
     for (const row of rows) {
@@ -1566,7 +1822,7 @@ export const kimiSwitchTauri = {
   deleteBackup: (state: AppState, backupName: string) => backup.deleteBackup(state, backupName),
   restoreBackup: (state: AppState, backupName: string) => backup.restoreBackup(state, backupName),
   restoreBackupSafe: (state: AppState, backupName: string, options?: { expectedSnapshot?: FileSnapshotBundle; allowOverwrite?: boolean; allowRisk?: boolean }) => backup.restoreBackupSafe(state, backupName, options),
-  restoreBackupDryRun: (state: AppState, backupName: string) => backup.restoreBackupDryRun(state, backupName),
+  restoreBackupDryRun: (state: AppState, backupName: string, options?: { expectedSnapshot?: FileSnapshotBundle }) => backup.restoreBackupDryRun(state, backupName, options),
   testBackupWebdav: (state: AppState) => backup.testBackupWebdav(state),
   migrateLegacyWebDavBackup: (state: AppState, backupName: string, legacyEncryptionPassword?: string) =>
     backup.migrateLegacyWebDavBackup(state, backupName, legacyEncryptionPassword),

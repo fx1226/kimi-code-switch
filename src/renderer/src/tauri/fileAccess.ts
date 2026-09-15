@@ -2,12 +2,13 @@
 // 运行在 renderer 进程，通过 Tauri command 调用 Rust 原子能力。
 import { invoke } from "@tauri-apps/api/core";
 
-import type { FileAccess, PanelSettings, SaveTransactionRecord } from "@shared/configStore";
+import type { FileAccess, SaveTransactionRecord } from "@shared/configStore";
+import type { PanelSettings } from "@shared/types";
 import { sanitizeConfigForEnvironmentClone, sanitizeMcpForEnvironmentClone } from "@shared/environmentClone";
 import { remapInstalledPluginRoots } from "@shared/pluginStore";
-import { getPanelSettings, savePanelSettings } from "./panelSettingsStore";
+import { getPanelSettings, importPanelSettings, savePanelSettings } from "./panelSettingsStore";
 
-const SAVE_TRANSACTION_PATH = "~/.kimi-code-switch-gui/pending-save-transaction.json";
+export const SAVE_TRANSACTION_PATH = "~/.kimi-code-switch-gui/pending-save-transaction.json";
 let activeSaveTransactionHash: string | null = null;
 
 export const tauriFileAccess: FileAccess = {
@@ -57,7 +58,7 @@ export const tauriFileAccess: FileAccess = {
   },
 };
 
-function isSaveTransactionRecord(value: unknown): value is SaveTransactionRecord {
+export function isSaveTransactionRecord(value: unknown): value is SaveTransactionRecord {
   return Boolean(
     value
     && typeof value === "object"
@@ -67,7 +68,7 @@ function isSaveTransactionRecord(value: unknown): value is SaveTransactionRecord
   );
 }
 
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
@@ -88,7 +89,7 @@ export interface RestoreTransactionRecord {
   panelDesired: string | null;
 }
 
-const RESTORE_TRANSACTION_PATH = "~/.kimi-code-switch-gui/pending-restore-transaction.json";
+export const RESTORE_TRANSACTION_PATH = "~/.kimi-code-switch-gui/pending-restore-transaction.json";
 let activeRestoreTransactionHash: string | null = null;
 
 function isRestoreTransactionRecord(value: unknown): value is RestoreTransactionRecord {

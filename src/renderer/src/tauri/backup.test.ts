@@ -76,7 +76,7 @@ import {
 } from "./backup";
 
 const mockedInvoke = vi.mocked(invoke);
-const fa = vi.mocked(tauriFileAccess);
+const fa = vi.mocked(tauriFileAccess, { deep: true });
 const webdav = vi.mocked(webdavMod);
 const mockedDetectConflict = vi.mocked(detectExternalChangeConflict);
 const mockedImportPanelSettings = vi.mocked(importPanelSettings);
@@ -257,6 +257,98 @@ describe("restoreBackupSafe — rollback point", () => {
     expect(restoredWrites).toHaveLength(0);
   });
 
+  it("preflight runs when allowOverwrite is not true and blocks writes (no silent overwrite)", async () => {
+    const conflictSnapshot = { capturedAt: "conflict", files: {} };
+    mockedDetectConflict.mockResolvedValueOnce({
+      conflict: { changedFiles: [{ id: "mcp" }] },
+      snapshot: conflictSnapshot,
+    } as never);
+
+    const result = await restoreBackupSafe(state("local"), "backup-x", {});
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected external-change block");
+    expect(result.reason).toBe("external-change");
+    expect(mockedDetectConflict).toHaveBeenCalledWith(expect.objectContaining({
+      targetPaths: expect.objectContaining({ config: "/cfg/config.toml" }),
+    }));
+    // preflight 挡下后一份文档都不写盘（写盘前有 crash journal）
+    expect(fa.writeTextCas).not.toHaveBeenCalled();
+    expect(fa.writeText).not.toHaveBeenCalled();
+    // 且没有触发任何“恢复”副作用（不会创建回滚备份）
+    expect(mockedInvoke).not.toHaveBeenCalledWith(expect.stringMatching(/ensure_private_dir/), expect.anything());
+  });
+
+  it("keeps re-returning external-change across apply attempts while the conflict persists", async () => {
+    // 模拟 dry-run 确认后、apply 前外部再次修改：即便以冲突 snapshot 为 expected 重试，
+    // 只要冲突仍在，apply 仍返回 external-change，绝不因 allowRisk/重试而静默覆盖。
+    const firstSnapshot = { capturedAt: "first", files: {} };
+    const secondSnapshot = { capturedAt: "second", files: {} };
+    mockedDetectConflict
+      .mockResolvedValueOnce({ conflict: { changedFiles: [{ id: "config" }] }, snapshot: firstSnapshot } as never)
+      .mockResolvedValueOnce({ conflict: { changedFiles: [{ id: "config" }] }, snapshot: secondSnapshot } as never);
+
+    const first = await restoreBackupSafe(state("local"), "backup-x", {});
+    expect(first.ok).toBe(false);
+    if (first.ok) throw new Error("expected external-change");
+    expect(first.reason).toBe("external-change");
+    expect(first.snapshot).toEqual(firstSnapshot);
+
+    // “二次确认”对应的重调：以该次返回的 snapshot 为新 expected，但故意仍不传 allowOverwrite——
+    // 意味着用户尚未对该具体版本放行，冲突未消时继续被拦。
+    const second = await restoreBackupSafe(state("local"), "backup-x", {
+      expectedSnapshot: first.snapshot,
+    });
+    expect(second.ok).toBe(false);
+    if (second.ok) throw new Error("expected external-change again");
+    expect(second.reason).toBe("external-change");
+    expect(fa.writeTextCas).not.toHaveBeenCalled();
+    expect(fa.writeText).not.toHaveBeenCalled();
+
+    // 仅当用户对该具体版本显式 allowOverwrite:true 才写盘（此时 preflight 跳过，无需再 mock conflict）。
+    const allowed = await restoreBackupSafe(state("local"), "backup-x", {
+      expectedSnapshot: first.snapshot,
+      allowOverwrite: true,
+    });
+    expect(allowed.ok).toBe(true);
+    if (!allowed.ok) return;
+    expect(fa.writeTextCas).toHaveBeenCalled();
+  });
+
+  it("allowRisk retry keeps the external-change preflight armed (no allowOverwrite)", async () => {
+    mockedAssessRisk.mockReturnValueOnce({
+      items: ["config.toml: auto-execute commands detected"],
+      tiers: { configHooks: [], stdioMcpCommands: [], remoteMcpEndpoints: [], agentsDocuments: [] },
+    } as never);
+    mockedDetectConflict.mockResolvedValueOnce({
+      conflict: { changedFiles: [{ id: "config" }] },
+      snapshot: { capturedAt: "now", files: {} },
+    } as never);
+
+    // allowRisk:true 只放行危险内容，绝不代表放行外部覆盖——preflight 依旧先执行。
+    const result = await restoreBackupSafe(state("local"), "backup-x", { allowRisk: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected external-change");
+    expect(result.reason).toBe("external-change");
+    expect(fa.writeTextCas).not.toHaveBeenCalled();
+  });
+
+  it("B4: returns the full, untruncated risk list so the UI renders every item", async () => {
+    const manyItems = Array.from({ length: 30 }, (_, index) => `item-${index + 1}: risky config detail ${index}`);
+    mockedAssessRisk.mockReturnValueOnce({
+      items: manyItems,
+      tiers: { configHooks: manyItems, stdioMcpCommands: [], remoteMcpEndpoints: [], agentsDocuments: [] },
+    } as never);
+
+    const blocked = await restoreBackupSafe(state("local"), "backup-x", { allowOverwrite: true });
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error("expected dangerous-content");
+    expect(blocked.reason).toBe("dangerous-content");
+    // 数据路径不回传截断清单；完整 30 项全部保留给确认框展示。
+    expect(blocked.risk.items).toHaveLength(30);
+    expect(blocked.risk.items).toEqual(manyItems);
+    expect(fa.writeTextCas).not.toHaveBeenCalled();
+  });
+
   it("B4: blocks dangerous restore content by default and honors explicit allowRisk", async () => {
     // 1) 默认拒绝：危险内容出现时不写盘。
     mockedAssessRisk.mockReturnValueOnce({
@@ -265,6 +357,7 @@ describe("restoreBackupSafe — rollback point", () => {
     } as never);
     const blocked = await restoreBackupSafe(state("local"), "backup-x", { allowOverwrite: true });
     expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error("expected restore to be blocked");
     expect(blocked.reason).toBe("dangerous-content");
     const writesBefore = fa.writeTextCas!.mock.calls.filter(([p]) => String(p).startsWith("/cfg/"));
     expect(writesBefore).toHaveLength(0);

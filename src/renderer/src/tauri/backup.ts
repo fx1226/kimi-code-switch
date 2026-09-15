@@ -23,6 +23,7 @@ import type {
   FileSnapshotBundle,
   ManagedFileId,
   RestoreBackupResult,
+  RestoreDryRunFilePlan,
   RestoreDryRunResult,
   RestoreRiskBlockedResult,
   SaveStateConflictResult,
@@ -134,23 +135,20 @@ async function buildMetadata(state: AppState, backupName: string, trigger: strin
 }
 
 // ── 创建备份 ──
-async function reconcileBackupPath(): Promise<void> {
-  // B1：Rust 只使用已保存的 backup_local_path 重登记 durable grant。
-  try {
-    await invoke("reconcile_durable_grants");
-  } catch (error) {
-    // 授权登记失败不应静默：返回给调用方会导致备份建目录失败，这里显式抛错。
-    throw new Error(`Cannot authorize backup directory: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 async function createLocalBackup(state: AppState, backupName: string, trigger: string): Promise<BackupResult> {
   const s = normalizeStatePaths(state);
   const backupRoot = s.panelSettings.backup_local_path;
-  await reconcileBackupPath();
   const dir = `${backupRoot}/${backupName}`;
   const files = await buildBackupFiles(s);
-  await invoke("ensure_private_dir", { path: dir });
+  try {
+    await invoke("ensure_private_dir", { path: dir });
+  } catch (error) {
+    // B1：授权只在用户通过系统目录选择器 pick、或启动时从 Rust durable grant store
+    // 重建后生效；未被授权的目录写不进备份。这里给出可理解的指引而不是静默重登记。
+    throw new Error(
+      `Backup directory is not authorized for writes (${backupRoot}). Re-choose it via the directory picker in Settings → Backup. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   for (const f of files) await tauriFileAccess.writeText(`${dir}/${f.name}`, f.content);
   await tauriFileAccess.writeText(`${dir}/${BACKUP_METADATA_FILENAME}`, await buildMetadata(s, backupName, trigger));
 
@@ -398,11 +396,25 @@ async function readCurrentDocuments(paths: Record<ManagedFileId, string>): Promi
   return { config: c ?? "", panel: pa ?? "", mcp: m ?? "" };
 }
 
-export async function restoreBackupDryRun(state: AppState, backupName: string): Promise<RestoreDryRunResult | SaveStateConflictResult> {
+export async function restoreBackupDryRun(
+  state: AppState,
+  backupName: string,
+  options?: { expectedSnapshot?: FileSnapshotBundle },
+): Promise<RestoreDryRunResult | SaveStateConflictResult> {
   const resolved = await resolveRestoreTargets(state, backupName);
   const doctor = buildConfigDoctorReport(resolved.draftState);
+  // 与 restoreBackupSafe 同口径：dry-run 也要报告外部变更冲突，
+  // 否则预览全绿、真正恢复时才暴露冲突。
+  const conflict = await detectExternalChangeConflict({
+    expectedSnapshot: options?.expectedSnapshot,
+    targetPaths: resolved.paths,
+    draftDocuments: resolved.documents,
+  });
+  if (conflict.conflict) {
+    return { ok: false, reason: "external-change", snapshot: conflict.snapshot, doctor, conflict: { changedFiles: conflict.conflict.changedFiles } };
+  }
   const current = await readCurrentDocuments(resolved.paths);
-  const filePlans = (Object.keys(resolved.paths) as ManagedFileId[]).map((id) => {
+  const filePlans: RestoreDryRunFilePlan[] = (Object.keys(resolved.paths) as ManagedFileId[]).map((id) => {
     const rawCur = current[id] ?? "";
     const rawNext = resolved.documents[id] ?? "";
     const cur = redactDocumentText(rawCur).text;

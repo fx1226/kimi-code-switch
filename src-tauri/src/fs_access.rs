@@ -4,7 +4,8 @@
 //! 安全模型（B1）：所有写/删/移命令必须通过 `authorize_mutation` 得到授权。
 //! renderer 不能仅凭字符串声明任意绝对路径可写；只能落在：
 //!   1. 固定受管根（~/.kimi、~/.kimi-code、~/.kimi-code-switch-gui）
-//!   2. 由 Rust 原生 dialog 产生的临时 grant（导出文件、备份目录）
+//!   2. 由 Rust 原生 dialog 产生的 grant（导出文件；备份目录为持久写授权，登记在
+//!      ~/.kimi-code-switch-gui/access-grants.json，重启后由 `reconcile_durable_grants` 重建）
 //!   3. 项目本地配置组合命令 `write_project_local_config`（仅 <project-root>/.kimi-code/local.toml）
 //!
 //! symlink 目标在写/删/移前会解析并复核对最终目标。
@@ -26,11 +27,46 @@ const PORTABLE_DIRECTORY_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const PORTABLE_DIRECTORY_MAX_DEPTH: usize = 32;
 const PORTABLE_PATH_MAX_LENGTH: usize = 4_096;
 
+/// 持久 durable 授权记录文件：`~/.kimi-code-switch-gui/access-grants.json`（目录 0700 / 文件 0600）。
+const DURABLE_GRANTS_FILE_NAME: &str = "access-grants.json";
+
 /// 授权目录类型：区分"单个文件路径"与"可递归创建子项的目录树"。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `serde(rename_all = "PascalCase")`：在 access-grants.json 中持久化为 `File` / `DirectoryTree`。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
 enum GrantTargetKind {
     File,
     DirectoryTree,
+}
+
+/// durable grant 来源（B1）：只有 Rust 原生 dialog 或受管根才能产生持久写授权。
+/// renderer 字符串（含 SQLite 面板设置的 backup_local_path）永不进入此来源。
+/// `serde(rename_all = "kebab-case")`：持久化为 `dialog` / `managed-root`。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum GrantSource {
+    Dialog,
+    ManagedRoot,
+}
+
+/// access-grants.json 中的一条持久 durable 授权记录。
+/// root 为 canonical 绝对路径；kind / source / created_at 供审计追溯。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DurableGrantRecord {
+    root: String,
+    kind: GrantTargetKind,
+    source: GrantSource,
+    created_at: String,
+}
+
+/// access-grants.json 顶层结构。
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DurableGrantFile {
+    version: u32,
+    #[serde(default)]
+    grants: Vec<DurableGrantRecord>,
 }
 
 /// Rust 侧管理的一次性/短时路径授权。由原生 dialog 产生，绝不来自 renderer 字符串声明。
@@ -55,6 +91,12 @@ impl PathGrantState {
     /// 登记一个持久授权（目前路径全部来自 Rust dialog；短时 grant 语义保留待 future 使用）。
     fn register_durable(&self, root: PathBuf, kind: GrantTargetKind) -> String {
         self.register_inner(root, kind, true)
+    }
+
+    /// 从一条持久授权记录登记到内存。reconcile 与 dialog 命令共用；
+    /// root 已是 canonical 绝对路径，register_inner 会再次 canonicalize（幂等，无副作用）。
+    fn register_durable_record(&self, record: &DurableGrantRecord) -> String {
+        self.register_durable(PathBuf::from(&record.root), record.kind)
     }
 
     fn register_inner(&self, root: PathBuf, kind: GrantTargetKind, durable: bool) -> String {
@@ -86,18 +128,15 @@ impl PathGrantState {
         let now = Instant::now();
         let mut grants = self.grants.lock().expect("grant lock");
         grants.retain(|_, grant| grant.durable || grant.expires_at > now);
-        grants
-            .values()
-            .any(|grant| {
-                candidate.starts_with(&grant.root)
-                    && matches!(
-                        (grant.kind, kind),
-                        (GrantTargetKind::DirectoryTree, _)
-                            | (GrantTargetKind::File, GrantTargetKind::File)
-                    )
-            })
+        grants.values().any(|grant| {
+            candidate.starts_with(&grant.root)
+                && matches!(
+                    (grant.kind, kind),
+                    (GrantTargetKind::DirectoryTree, _)
+                        | (GrantTargetKind::File, GrantTargetKind::File)
+                )
+        })
     }
-
 }
 
 /// 命令希望产生的写入目标类型。
@@ -134,17 +173,22 @@ fn resolve_final_target(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// 判断路径是否落在固定受管根内（组件级比较）。
-fn within_managed_root(path: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
+/// 判断路径是否落在固定受管根内（组件级比较；`home` 注入便于测试）。
+fn within_managed_root_at(path: &Path, home: &Path) -> bool {
     let bases = [
         home.join(".kimi"),
         home.join(".kimi-code"),
         home.join(".kimi-code-switch-gui"),
     ];
     bases.iter().any(|base| path.starts_with(base))
+}
+
+/// 判断路径是否落在固定受管根内（组件级比较）。
+fn within_managed_root(path: &Path) -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    within_managed_root_at(path, &home)
 }
 
 /// 所有写/删/移命令的唯一授权入口。
@@ -1382,6 +1426,90 @@ pub fn save_file_with_dialog(
     Err("save_file_with_dialog is only available on desktop".to_string())
 }
 
+/// 对话框起始目录需要已存在：从给定路径向上找最近已存在的目录。
+fn nearest_existing_directory(path: &Path) -> Option<PathBuf> {
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        if candidate.is_dir() {
+            return Some(candidate.to_path_buf());
+        }
+        current = candidate.parent();
+    }
+    None
+}
+
+/// `pick_backup_directory` 的返回契约：`{ canceled, path }`（camelCase）。
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickDirectoryResult {
+    pub canceled: bool,
+    pub path: Option<String>,
+}
+
+/// Rust 原生 folder picker + durable grant 组合命令（B1）。
+/// 备份目录授权只能由系统对话框产生：用户选中的目录在 Rust 侧 canonicalize 后，
+/// 登记为 DirectoryTree durable grant（内存 + 持久化到 access-grants.json，source=dialog）。
+/// renderer 无法仅凭 backup_local_path 字符串（可写入 SQLite）扩大写授权。
+#[tauri::command]
+pub fn pick_backup_directory(
+    app: tauri::AppHandle,
+    title: String,
+    default_path: Option<String>,
+    grant_state: tauri::State<'_, PathGrantState>,
+) -> Result<PickDirectoryResult, String> {
+    #[cfg(desktop)]
+    {
+        let mut builder = app.dialog().file().set_title(title);
+        if let Some(default) = default_path {
+            if !default.trim().is_empty() {
+                if let Some(starting) = nearest_existing_directory(&resolve_home(&default)) {
+                    builder = builder.set_directory(starting);
+                }
+            }
+        }
+        // properties 覆盖 openDirectory + createDirectory（folder picker，允许在对话框中新建目录）。
+        let picked = builder
+            .set_can_create_directories(true)
+            .blocking_pick_folder();
+        let Some(folder) = picked else {
+            return Ok(PickDirectoryResult {
+                canceled: true,
+                path: None,
+            });
+        };
+        let Some(path_buf) = folder.as_path() else {
+            return Err("dialog returned an invalid path".to_string());
+        };
+        let resolved = resolve_home(&path_buf.to_string_lossy());
+        let canonical = std::fs::canonicalize(&resolved).map_err(|error| {
+            format!(
+                "canonicalize picked backup directory {}: {error}",
+                resolved.display()
+            )
+        })?;
+        if !canonical.is_dir() {
+            return Err(format!(
+                "picked backup directory is not a directory: {}",
+                canonical.display()
+            ));
+        }
+        let record = DurableGrantRecord {
+            root: canonical.to_string_lossy().to_string(),
+            kind: GrantTargetKind::DirectoryTree,
+            source: GrantSource::Dialog,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        grant_state.register_durable_record(&record);
+        save_durable_grant(&record)?;
+        Ok(PickDirectoryResult {
+            canceled: false,
+            path: Some(canonical.to_string_lossy().to_string()),
+        })
+    }
+    #[cfg(not(desktop))]
+    Err("pick_backup_directory is only available on desktop".to_string())
+}
+
 /// 项目本地配置写入：仅允许写 `<project_root>/.kimi-code/local.toml`。
 /// `project_root` 必须是已存在的目录；路径在 Rust 侧拼接并校验，
 /// 不接受 renderer 直接指定任意绝对写目标。
@@ -1410,52 +1538,166 @@ pub fn write_project_local_config(
     Ok(sha256_bytes(content.as_bytes()))
 }
 
-fn durable_grant_paths_from_panel_settings(settings_json: &str) -> Result<Vec<String>, String> {
-    let settings: serde_json::Value = serde_json::from_str(settings_json)
-        .map_err(|error| format!("parse saved panel settings for grants: {error}"))?;
-    let settings = settings
-        .as_object()
-        .ok_or("saved panel settings for grants must be a JSON object")?;
-    let mut paths = Vec::new();
-    let mut add_path = |value: Option<&str>| {
-        let Some(path) = value.map(str::trim).filter(|path| !path.is_empty()) else {
-            return;
-        };
-        if !paths.iter().any(|existing| existing == path) {
-            paths.push(path.to_string());
-        }
-    };
-    add_path(settings.get("backup_local_path").and_then(serde_json::Value::as_str));
-    if let Some(environments) = settings
-        .get("kimi_code_environments")
-        .and_then(serde_json::Value::as_array)
+// ── 持久 durable grant 记录（B1）──
+// 为什么用独立 JSON（access-grants.json）而不是给 SQLite panel_settings 加列（决策记录）：
+//   - panel_settings 是结构化列 + 手写保存 SQL 的 UI 设置表（见 panel_settings_store.rs），
+//     加列需同步改 save_panel_settings / get_panel_settings 及测试，破坏面大；
+//     且 backup_local_path 就存在该表——正是本次要弱化的「renderer 字符串即授权」来源。
+//   - durable grants 属授权域（唯一产生来源：Rust 原生 dialog / 受管根），与 UI 偏好解耦，
+//     且 reconcile 在 SQLite 连接（UsageState.conn）可能尚未打开时就需要读取。
+//   - 独立文件与 backup-encryption.key 同权限模型（目录 0700 / 文件 0600），
+//     字段 root / kind / source / created_at 便于审计归属。
+
+/// durable grant store 文件路径：`~/.kimi-code-switch-gui/access-grants.json`（目录 0700）。
+fn access_grants_file() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("cannot resolve home dir")?;
+    let app_dir = home.join(".kimi-code-switch-gui");
+    std::fs::create_dir_all(&app_dir)
+        .map_err(|error| format!("create app data directory {}: {error}", app_dir.display()))?;
+    #[cfg(unix)]
     {
-        for environment in environments {
-            add_path(
-                environment
-                    .as_object()
-                    .and_then(|environment| environment.get("homePath"))
-                    .and_then(serde_json::Value::as_str),
-            );
-        }
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&app_dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod app data directory {}: {error}", app_dir.display()))?;
     }
-    Ok(paths)
+    Ok(app_dir.join(DURABLE_GRANTS_FILE_NAME))
 }
 
-/// 启动时用已持久化的用户偏好（备份目录、已注册的环境 home、项目根）重建持久授权。
-/// 路径只从 SQLite 中已保存的面板设置读取，避免 renderer 临时字符串扩大可写范围。
+/// 读取持久 durable 授权。文件缺失/损坏时退回空列表，不阻断启动。
+fn load_durable_grants_from(file_path: &Path) -> Vec<DurableGrantRecord> {
+    match std::fs::read_to_string(file_path) {
+        Ok(content) => serde_json::from_str::<DurableGrantFile>(&content)
+            .map(|file| file.grants)
+            .unwrap_or_else(|error| {
+                log::warn!("parse durable grant store {}: {error}", file_path.display());
+                Vec::new()
+            }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            log::warn!("read durable grant store {}: {error}", file_path.display());
+            Vec::new()
+        }
+    }
+}
+
+/// 追加/更新一条持久 durable 授权（同 root+kind+source 幂等替换）。
+/// 文件由 atomic_write_text 以 0600 权限原子落盘。
+fn save_durable_grant_to(file_path: &Path, record: &DurableGrantRecord) -> Result<(), String> {
+    let mut existing = load_durable_grants_from(file_path);
+    existing.retain(|current| {
+        !(current.root == record.root
+            && current.kind == record.kind
+            && current.source == record.source)
+    });
+    existing.push(record.clone());
+    let file = DurableGrantFile {
+        version: 1,
+        grants: existing,
+    };
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|error| format!("serialize durable grant store: {error}"))?;
+    atomic_write_text(file_path, &json, None)
+}
+
+/// 生产入口：写往真实 `~/.kimi-code-switch-gui/access-grants.json`。
+fn save_durable_grant(record: &DurableGrantRecord) -> Result<(), String> {
+    save_durable_grant_to(&access_grants_file()?, record)
+}
+
+/// 从面板设置读取环境 homePath 并过滤：仅保留 canonicalize 后落在受管根内的路径。
+/// `home`（受管根基准）注入便于测试；空 / 不存在 / 越界的 home 一律跳过。
+fn managed_environment_homes_from_panel_settings_at(
+    settings_json: &str,
+    home: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let settings: serde_json::Value = serde_json::from_str(settings_json)
+        .map_err(|error| format!("parse saved panel settings for environment homes: {error}"))?;
+    let settings = settings
+        .as_object()
+        .ok_or("saved panel settings for environment homes must be a JSON object")?;
+    let Some(environments) = settings
+        .get("kimi_code_environments")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    let mut homes = Vec::new();
+    for environment in environments {
+        let Some(home_path) = environment
+            .as_object()
+            .and_then(|environment| environment.get("homePath"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let home_path = home_path.trim();
+        if home_path.is_empty() {
+            continue;
+        }
+        let resolved = resolve_home(home_path);
+        let Ok(canonical) = std::fs::canonicalize(&resolved) else {
+            log::warn!(
+                "skip non-existent environment home for durable grant: {}",
+                resolved.display()
+            );
+            continue;
+        };
+        if !within_managed_root_at(&canonical, home) {
+            log::warn!(
+                "skip environment home outside managed roots for durable grant: {}",
+                canonical.display()
+            );
+            continue;
+        }
+        if !homes.iter().any(|existing| existing == &canonical) {
+            homes.push(canonical);
+        }
+    }
+    Ok(homes)
+}
+
+/// 可测试/可复用实现体：从 durable grant store 重建持久授权，并按受管根过滤环境 home。
+fn reconcile_durable_grants_inner(
+    grant_state: &PathGrantState,
+    store_file: Option<&Path>,
+    home: &Path,
+    settings_json: Option<&str>,
+) -> Result<(), String> {
+    // B1：写/删授权的重建只信任 Rust durable grant store（由 dialog 产生），
+    // 不再把 SQLite 面板设置的 backup_local_path 等 renderer 字符串当作授权来源。
+    if let Some(store_file) = store_file {
+        for record in load_durable_grants_from(store_file) {
+            grant_state.register_durable_record(&record);
+        }
+    }
+    // 环境 home 仅当 canonicalize 后落在受管根内才重建 legacy 授权，越界跳过。
+    if let Some(settings_json) = settings_json {
+        let homes = managed_environment_homes_from_panel_settings_at(settings_json, home)?;
+        for home in homes {
+            grant_state.register_durable(home, GrantTargetKind::DirectoryTree);
+        }
+    }
+    Ok(())
+}
+
+/// 启动时用 Rust durable grant store（access-grants.json）重建持久授权。
+/// store 缺失/损坏不阻断启动；面板设置的 backup_local_path 不再产生任何授权。
 #[tauri::command]
 pub fn reconcile_durable_grants(
     usage_state: tauri::State<'_, crate::usage::UsageState>,
     grant_state: tauri::State<'_, PathGrantState>,
 ) -> Result<(), String> {
-    let Some(settings_json) = crate::panel_settings_store::get_panel_settings(usage_state)? else {
+    let Some(home) = dirs::home_dir() else {
         return Ok(());
     };
-    for path in durable_grant_paths_from_panel_settings(&settings_json)? {
-        grant_state.register_durable(resolve_home(&path), GrantTargetKind::DirectoryTree);
-    }
-    Ok(())
+    let store_file = access_grants_file().ok();
+    let settings_json = crate::panel_settings_store::get_panel_settings(usage_state)?;
+    reconcile_durable_grants_inner(
+        &grant_state,
+        store_file.as_deref(),
+        &home,
+        settings_json.as_deref(),
+    )
 }
 
 /// 把损坏/未知版本的 journal 原文件原子移动到 private quarantine 目录。
@@ -1619,20 +1861,228 @@ mod tests {
     }
 
     #[test]
-    fn durable_grants_are_loaded_only_from_saved_panel_settings() {
-        let paths = durable_grant_paths_from_panel_settings(
-            r#"{
-              "backup_local_path": "~/backups",
-              "kimi_code_environments": [
-                { "homePath": "~/custom-kimi" },
+    fn panel_settings_produce_durable_grants_only_for_managed_environment_homes() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-managed-homes-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        // macOS 的 /var → /private/var 是 symlink：注入的 home 需 canonical，否则 canonical 后的 homePath
+        // 不再 starts_with 未解析的 home（生产环境 ~ 本身就是真实路径，无此问题）。
+        let home_dir = base.join("home");
+        std::fs::create_dir_all(home_dir.join(".kimi-code")).unwrap();
+        let home = std::fs::canonicalize(&home_dir).unwrap();
+        let managed = home.join(".kimi-code");
+        let out_of_bounds = base.join("custom-kimi");
+        std::fs::create_dir_all(&out_of_bounds).unwrap();
+        // B1：renderer 可自由写入的 backup_local_path 不再产生任何授权。
+        let settings = serde_json::json!({
+            "backup_local_path": base.join("backups").to_string_lossy(),
+            "kimi_code_environments": [
+                { "homePath": managed.to_string_lossy() },
+                { "homePath": out_of_bounds.to_string_lossy() },
                 { "homePath": "" }
-              ]
-            }"#,
+            ]
+        })
+        .to_string();
+        let paths = managed_environment_homes_from_panel_settings_at(&settings, &home).unwrap();
+        // 只有落在受管根内的 home 被保留；~/custom-kimi 越界、空串被跳过。
+        assert_eq!(paths, vec![std::fs::canonicalize(&managed).unwrap()]);
+        assert!(managed_environment_homes_from_panel_settings_at("[]", &home).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn backup_directory_write_requires_a_recorded_durable_grant() {
+        let grants = PathGrantState::default();
+        let base = std::env::temp_dir().join(format!(
+            "kimi-backup-dir-grant-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let backup = base.join("backups");
+        std::fs::create_dir_all(&backup).unwrap();
+
+        // pick 前：仅手输同一路径（对应只改 SQLite 里的 backup_local_path）不产生授权 → 被拒。
+        let error = authorize_mutation(
+            &grants,
+            &backup.join("config.toml"),
+            MutationKind::SingleFile,
+        )
+        .expect_err("unrecorded backup path must be rejected");
+        assert!(error.contains("outside the authorized scope"));
+
+        // 模拟 pick_backup_directory 落盘：durable store 记录 + 内存登记（command 走同一路径）。
+        let store_file = base.join("access-grants.json");
+        let record = DurableGrantRecord {
+            root: backup.to_string_lossy().to_string(),
+            kind: GrantTargetKind::DirectoryTree,
+            source: GrantSource::Dialog,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        save_durable_grant_to(&store_file, &record).unwrap();
+
+        // 「重启」后 reconcile：该目录内目录树/单文件写均放行。
+        let fresh = PathGrantState::default();
+        reconcile_durable_grants_inner(&fresh, Some(&store_file), &base, None).unwrap();
+        assert!(authorize_mutation(
+            &fresh,
+            &backup.join("2026/config.toml"),
+            MutationKind::DirectoryTree
+        )
+        .is_ok());
+        assert!(authorize_mutation(
+            &fresh,
+            &backup.join("2026/config.toml"),
+            MutationKind::SingleFile
+        )
+        .is_ok());
+        // sibling 前缀欺骗仍不匹配。
+        assert!(authorize_mutation(
+            &fresh,
+            Path::new(&(backup.display().to_string() + "_evil/backup.json")),
+            MutationKind::SingleFile
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn durable_grant_store_survives_restart_and_reconcile_is_idempotent() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-durable-store-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let store_file = base.join("access-grants.json");
+        let backup = base.join("backups");
+        std::fs::create_dir_all(&backup).unwrap();
+
+        let record = DurableGrantRecord {
+            root: std::fs::canonicalize(&backup)
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            kind: GrantTargetKind::DirectoryTree,
+            source: GrantSource::Dialog,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        save_durable_grant_to(&store_file, &record).unwrap();
+
+        // 重启 1：reconcile 从磁盘重建。
+        let grants = PathGrantState::default();
+        reconcile_durable_grants_inner(&grants, Some(&store_file), &base, None).unwrap();
+        assert!(
+            authorize_mutation(&grants, &backup.join("a.toml"), MutationKind::SingleFile).is_ok()
+        );
+
+        // 幂等：再次 reconcile 不报错、不丢授权。
+        reconcile_durable_grants_inner(&grants, Some(&store_file), &base, None).unwrap();
+        assert!(
+            authorize_mutation(&grants, &backup.join("b.toml"), MutationKind::SingleFile).is_ok()
+        );
+
+        // 重启 2：全新状态再次从磁盘重建。
+        let fresh = PathGrantState::default();
+        reconcile_durable_grants_inner(&fresh, Some(&store_file), &base, None).unwrap();
+        assert!(
+            authorize_mutation(&fresh, &backup.join("c.toml"), MutationKind::SingleFile).is_ok()
+        );
+
+        // 记录字段序列化契约：kind=PascalCase（DirectoryTree），source=kebab-case（dialog）。
+        let content = std::fs::read_to_string(&store_file).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let canonical_root = std::fs::canonicalize(&backup)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            parsed["grants"][0]["root"],
+            serde_json::Value::String(canonical_root)
+        );
+        assert_eq!(parsed["grants"][0]["kind"], "DirectoryTree");
+        assert_eq!(parsed["grants"][0]["source"], "dialog");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&store_file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn out_of_bounds_environment_home_is_skipped_by_reconcile() {
+        let base = std::env::temp_dir().join(format!(
+            "kimi-out-of-bounds-home-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        // 同上：注入的 home 需 canonical（/var 是 /private/var 的 symlink）。
+        let home_dir = base.join("home");
+        std::fs::create_dir_all(home_dir.join(".kimi-code")).unwrap();
+        let home = std::fs::canonicalize(&home_dir).unwrap();
+        let managed = home.join(".kimi-code");
+        let evil_home = base.join("custom-home");
+        std::fs::create_dir_all(&evil_home).unwrap();
+        let settings = serde_json::json!({
+            "kimi_code_environments": [
+                { "homePath": evil_home.to_string_lossy() },
+                { "homePath": managed.to_string_lossy() }
+            ]
+        })
+        .to_string();
+
+        let grants = PathGrantState::default();
+        reconcile_durable_grants_inner(
+            &grants,
+            Some(&base.join("access-grants.json")),
+            &home,
+            Some(&settings),
         )
         .unwrap();
+        // 越界 home 即使已存在也未产生授权。
+        assert!(authorize_mutation(
+            &grants,
+            &evil_home.join("config.toml"),
+            MutationKind::SingleFile
+        )
+        .is_err());
+        // 受管根内 home 放行。
+        assert!(authorize_mutation(
+            &grants,
+            &managed.join("config.toml"),
+            MutationKind::SingleFile
+        )
+        .is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
-        assert_eq!(paths, vec!["~/backups", "~/custom-kimi"]);
-        assert!(durable_grant_paths_from_panel_settings("[]").is_err());
+    #[test]
+    fn durable_grant_record_serializes_with_expected_fields() {
+        let record = DurableGrantRecord {
+            root: "/Users/example/backups".to_string(),
+            kind: GrantTargetKind::DirectoryTree,
+            source: GrantSource::Dialog,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["root"], "/Users/example/backups");
+        assert_eq!(json["kind"], "DirectoryTree");
+        assert_eq!(json["source"], "dialog");
+        // rename_all=camelCase：created_at → createdAt。
+        assert_eq!(json["createdAt"], "2026-01-01T00:00:00Z");
+        assert!(json.get("created_at").is_none());
     }
 
     #[test]
@@ -2069,10 +2519,7 @@ mod tests {
         let source = home
             .join(".kimi-code-switch-gui")
             .join("pending-save-transaction.json");
-        assert_eq!(
-            quarantine_journal_at_home(&source, &home).unwrap(),
-            ""
-        );
+        assert_eq!(quarantine_journal_at_home(&source, &home).unwrap(), "");
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::write(&source, "{bad-json").unwrap();
         let quarantined = quarantine_journal_at_home(&source, &home).unwrap();

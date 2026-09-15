@@ -15,7 +15,7 @@ import { recordStartupTiming, startupTimingNow } from "./startupTiming";
 import { createSaveCoordinator } from "./saveCoordinator";
 import type { PendingSave } from "./saveCoordinator";
 
-/** B1：把已持久化的用户偏好目录重登记为 Rust 侧 durable grant（跨重启可用）。 */
+/** B1：启动时幂等重建 Rust durable grant。仅从 Rust durable grant store（dialog/manged-root）重建，不信任 SQLite/面板字符串。 */
 function reconcileUserDirectories(
   api: NonNullable<ReturnType<typeof getApi>>,
 ): Promise<void> {
@@ -218,11 +218,9 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
           }));
         }
       }
-      // B1：把已持久化的用户偏好目录（备份目录、注册环境 home、项目根）重登记为
-      // Rust 侧 durable grant，确保非受管根的备份/项目写入在重启后仍可用。
-      if (api.reconcileDurableGrants) {
-        void reconcileUserDirectories(api);
-      }
+      // B1：启动时幂等重建 Rust durable grant（仅来自 Rust durable grant store，
+      // 含受管环境根校验），不再信任 SQLite/面板里的任意目录字符串。
+      void reconcileUserDirectories(api);
       runPostLoadTasks(normalized, api);
       recordStartupTiming("useAppPersistence.loadState.total", loadStartedAt);
     } catch (loadError) {
@@ -350,7 +348,7 @@ export function useAppPersistence(ctx: AppPersistenceContext) {
       throw new Error(message);
     }
 
-    await api.saveConfigTargetPreference(configTarget);
+    await api.saveConfigTargetPreference();
     const nextState = cloneState(state);
     nextState.configTarget = configTarget;
     nextState.panelSettings.config_target = configTarget;

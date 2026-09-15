@@ -46,7 +46,7 @@ import { ErrorBoundary } from "../ErrorBoundary";
 import { CompactSelect, Field, FontSizeSliderField, SelectField, SettingsGroup, ShortcutRecorderField } from "../formControls";
 import { t, translateError } from "../i18n";
 import { InsightsSettingsPanel, InsightsDashboard } from "../insightsComponents";
-import { EmptyState, SplitLayout } from "../layoutComponents";
+import { EmptyState, ResourceWorkspace } from "../layoutComponents";
 import { ProviderHealthBanner } from "../providerHealthBanner";
 import { OverviewDashboard } from "../overviewDashboard";
 import { SkillsWorkspace } from "../skillsWorkspace";
@@ -69,6 +69,10 @@ type TabPanelsProps = Pick<
   AppContext,
   | "state"
   | "activeTab"
+  | "activeSettingsSubTab"
+  | "setActiveSettingsSubTab"
+  | "kimiCodeSubTab"
+  | "setKimiCodeSubTab"
   | "locale"
   | "diagnostics"
   | "selectedProvider"
@@ -140,7 +144,6 @@ type TabPanelsProps = Pick<
   | "setActiveTab"
   | "setError"
   | "setNotice"
-  | "setExternalChange"
   | "setFileSnapshot"
   | "openKimiInTerminal"
   | "loadState"
@@ -348,7 +351,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
     setActiveTab,
     setError,
     setNotice,
-    setExternalChange,
     setFileSnapshot,
     openKimiInTerminal,
     loadState,
@@ -368,6 +370,30 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
     message: "",
     messageKey: "kimiOauthReady",
   });
+  // B1：备份目录只能通过 Rust 原生系统目录选择器选择并在 Rust 侧登记 durable 写授权；
+  // 手输/改 SQLite 里的 backup_local_path 字符串不得扩大授权。选中路径仅作为显示/保存值。
+  const pickBackupDirectory = async (): Promise<void> => {
+    const api = getApi();
+    if (!api || typeof api.pickBackupDirectory !== "function") {
+      setError(t(locale, "backupRuntimeOutdated"));
+      return;
+    }
+    try {
+      const result = await api.pickBackupDirectory(
+        t(locale, "backupLocalPath"),
+        state.panelSettings.backup_local_path || undefined,
+      );
+      if (result.canceled || !result.path) {
+        return;
+      }
+      setError("");
+      updateImmediateState((draft) => {
+        draft.panelSettings.backup_local_path = result.path ?? "";
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  };
   const currentConfigTarget = "kimi-code" as const;
   const currentConfigTargetLabel = "Kimi Code";
   const targetDetection = state.kimiTargetDetection;
@@ -414,7 +440,6 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       throw new Error("Kimi Switch API does not support Kimi Code environment management.");
     }
     const normalized = normalizeKimiCodeEnvironments(environments);
-    setExternalChange(null);
     setFileSnapshot(null);
     const result = await api.saveKimiCodeEnvironmentPreference(normalized, activeEnvironmentId);
     setFileSnapshot(result.snapshot);
@@ -501,11 +526,12 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       return {
         ...current,
         [id]: {
-          name: environment.name,
-          homePath: environment.homePath,
-          description: environment.description ?? "",
-          workingDirectory: environment.workingDirectory ?? "",
-          ...current[id],
+          ...(current[id] ?? {
+            name: environment.name,
+            homePath: environment.homePath,
+            description: environment.description ?? "",
+            workingDirectory: environment.workingDirectory ?? "",
+          }),
           ...patch,
         },
       };
@@ -885,7 +911,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       description: t(locale, "settingsHistoryDescription"),
     },
   ];
-  const isSplitLayoutTab = activeTab === "providers"
+  const isResourceWorkspaceTab = activeTab === "providers"
     || activeTab === "models"
     || activeTab === "profiles"
     || activeTab === "mcp"
@@ -895,7 +921,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
   return (
     <ErrorBoundary locale={locale}>
       <>
-        <div className={isSplitLayoutTab ? "tab-panel-shell tab-panel-shell-split" : "tab-panel-shell"}>
+        <div className={isResourceWorkspaceTab ? "tab-panel-shell tab-panel-shell-split" : "tab-panel-shell"}>
         {activeTab === "overview" ? (
           <OverviewDashboard
             state={state}
@@ -917,7 +943,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         ) : null}
 
         {activeTab === "providers" ? (
-          <SplitLayout
+          <ResourceWorkspace
             headerActions={
               <>
                 <button
@@ -982,9 +1008,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             addButtonClassName="action-button compact"
             addButtonTitle={t(locale, "newProvider")}
             addButtonContent={<><Plus size={15} /><span>{t(locale, "newProvider")}</span></>}
-            onAdd={() =>
+            onAdd={() => {
+              // 名字必须在 updateState 之外生成：options 里的 historySummary
+              // 与 updater 是两个独立闭包，内部声明的 name 在外面不可见。
+              const name = createUniqueName("provider", Object.keys(state.mainConfig.providers));
               updateState((draft) => {
-                const name = createUniqueName("provider", Object.keys(draft.mainConfig.providers));
                 upsertProvider(draft, name, {
                   type: "kimi",
                   base_url: "https://api.example.com/v1",
@@ -995,8 +1023,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 persist: false,
                 recordHistory: true,
                 historySummary: formatMessage(t(locale, "historyNewProvider"), { name }),
-              })
-            }
+              });
+            }}
           >
             {selectedProviderData ? (
               <ProviderForm
@@ -1042,11 +1070,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             ) : (
               <EmptyState locale={locale} hasItems={providerEntries.length > 0} />
             )}
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
 
         {activeTab === "models" ? (
-          <SplitLayout
+          <ResourceWorkspace
             listItems={modelEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
             renderItemLabel={(name) => {
@@ -1083,19 +1111,21 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             addButtonTitle={!hasProviders ? t(locale, "tooltipAddProviderFirst") : t(locale, "newModel")}
             addButtonContent={<><Plus size={15} /><span>{t(locale, "newModel")}</span></>}
             addButtonDisabled={!hasProviders}
-            onAdd={() =>
+            onAdd={() => {
+              const providerName = Object.keys(state.mainConfig.providers)[0];
+              if (!providerName) {
+                setError(t(locale, "errorCreateProviderFirst"));
+                setNotice("");
+                return;
+              }
+              const modelId = createUniqueName(
+                "new-model",
+                Object.values(state.mainConfig.models)
+                  .filter((model) => model.provider === providerName)
+                  .map((model) => model.model),
+              );
+              const name = buildModelName(providerName, modelId);
               updateState((draft) => {
-                const providerName = Object.keys(draft.mainConfig.providers)[0];
-                if (!providerName) {
-                  throw new Error(t(locale, "errorCreateProviderFirst"));
-                }
-                const modelId = createUniqueName(
-                  "new-model",
-                  Object.values(draft.mainConfig.models)
-                    .filter((model) => model.provider === providerName)
-                    .map((model) => model.model),
-                );
-                const name = buildModelName(providerName, modelId);
                 upsertModel(draft, name, {
                   provider: providerName,
                   model: modelId,
@@ -1107,8 +1137,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 persist: false,
                 recordHistory: true,
                 historySummary: formatMessage(t(locale, "historyNewModel"), { name }),
-              })
-            }
+              });
+            }}
           >
             {selectedModelData ? (
               <ModelForm
@@ -1158,11 +1188,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             ) : (
               <EmptyState locale={locale} hasItems={modelEntries.length > 0} />
             )}
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
 
         {activeTab === "profiles" ? (
-          <SplitLayout
+          <ResourceWorkspace
             listTitle={t(locale, "profiles")}
             listItems={profileEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
@@ -1321,11 +1351,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             ) : (
               <EmptyState locale={locale} hasItems={profileEntries.length > 0} />
             )}
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
 
         {activeTab === "mcp" ? (
-          <SplitLayout
+          <ResourceWorkspace
             listItems={mcpEntries.map(([name]) => name)}
             searchPlaceholder={t(locale, "searchResources")}
             renderItemLabel={(name) => {
@@ -1337,17 +1367,17 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             selectedItem={selectedMcpServerName}
             onSelect={(item) => setSelectedMcpServer(item)}
             addLabel={t(locale, "newMcpServer")}
-            onAdd={() =>
+            onAdd={() => {
+              const name = createUniqueName("mcp", Object.keys(state.mcpConfig.mcpServers));
               updateState((draft) => {
-                const name = createUniqueName("mcp", Object.keys(draft.mcpConfig.mcpServers));
                 draft.mcpConfig.mcpServers[name] = createDefaultMcpServer();
                 setSelectedMcpServer(name);
               }, {
                 persist: false,
                 recordHistory: true,
                 historySummary: formatMessage(t(locale, "historyNewMcpServer"), { name }),
-              })
-            }
+              });
+            }}
             headerActions={
               <>
                 <button
@@ -1581,11 +1611,11 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                 />
               ) : null}
             </div>
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
 
         {activeTab === "skills" ? (
-          <SplitLayout
+          <ResourceWorkspace
             listTitle={t(locale, "skillsDirectory")}
             listItems={sortedSkillPathEntries.map((path) => path.id)}
             searchPlaceholder={t(locale, "searchResources")}
@@ -1647,7 +1677,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               onSelectSkill={setSelectedSkill}
               isLoading={isSkillsLoading}
             />
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
 
         {activeTab === "insights" ? (
@@ -1662,7 +1692,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
         ) : null}
 
         {activeTab === "settings" ? (
-          <SplitLayout
+          <ResourceWorkspace
             listItems={settingsSubTabs.map((tab) => tab.id)}
             selectedItem={activeSettingsSubTab}
             itemLabel={(item) => settingsSubTabs.find((tab) => tab.id === item)?.label ?? item}
@@ -1679,8 +1709,8 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
             addLabel={t(locale, "settings")}
           >
           <section className="glass-panel form-panel settings-grid settings-detail-panel">
-            <div className="section-title">
-              {settingsSubTabs.find((tab) => tab.id === activeSettingsSubTab)?.label ?? t(locale, "settings")}
+            <div className="section-title section-title-with-hint">
+              <span>{settingsSubTabs.find((tab) => tab.id === activeSettingsSubTab)?.label ?? t(locale, "settings")}</span>
               <span className="autosave-status">{t(locale, "changesAutoSaved")}</span>
             </div>
             {activeSettingsSubTab === "kimi-code" ? (
@@ -2602,12 +2632,16 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   locale={locale}
                   label={t(locale, "backupLocalPath")}
                   value={state.panelSettings.backup_local_path}
-                  pickerProperties={["openDirectory", "createDirectory"]}
-                  onChange={(value) =>
-                    updateImmediateState((draft) => {
-                      draft.panelSettings.backup_local_path = value;
-                    })
-                  }
+                  readOnly
+                  onChange={() => {}}
+                  extraActions={[
+                    {
+                      key: "pick-backup-directory",
+                      label: t(locale, "browse"),
+                      icon: <FolderOpen size={16} />,
+                      onClick: () => void pickBackupDirectory(),
+                    },
+                  ]}
                 />
               ) : (
                 <>
@@ -2762,7 +2796,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
               <InsightsSettingsPanel locale={locale} onStateChange={() => void loadState()} />
             ) : null}
           </section>
-          </SplitLayout>
+          </ResourceWorkspace>
         ) : null}
         {activeTab === "about" ? <AboutPage locale={locale} /> : null}
         {providerCatalogDialog.open ? (
