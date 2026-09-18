@@ -129,6 +129,6 @@ npm run check:performance -- --kimi /absolute/path/to/kimi
 
 本项目起源于 [sunhao-java/kimi-code-switch-gui](https://github.com/sunhao-java/kimi-code-switch-gui)，保留原 Git 历史、版权声明和 [MIT License](LICENSE)。项目名称为 `kimi-code-switch`，显示名称为 `Kimi Code Switch`，后续开发使用独立仓库 [fx1226/kimi-code-switch](https://github.com/fx1226/kimi-code-switch)。
 
-迁移方案保留 [旧仓库 fx1226/kimi-code-switch-gui](https://github.com/fx1226/kimi-code-switch-gui) 及其桌面 Release、安装包和历史 tag；新仓库完成源码推送与 CI 验证后，旧仓库将添加迁移说明并归档。旧仓库不改名、不解除 fork 关系，也不删除重建。迁移进度见 [仓库迁移记录](docs/repository-detach-review.md)。
+源码已迁入本独立仓库并通过 CI。[旧仓库 fx1226/kimi-code-switch-gui](https://github.com/fx1226/kimi-code-switch-gui) 已添加迁移说明并归档，保留旧桌面 Release、全部 6 个资产和 28 个历史 tag。旧仓库名称和 fork 关系保留；新的 Web 版本尚未正式发布。验收记录见 [仓库迁移记录](docs/repository-detach-review.md)。
 
 这是独立维护的配置工具，不是 Kimi 官方客户端。旧桌面实现、旧截图和早期调研保留在历史记录中，不代表当前 Web 版本的功能或验证结果。

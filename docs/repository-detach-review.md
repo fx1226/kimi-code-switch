@@ -8,14 +8,18 @@
 
 **原先的改名与解除 fork 方案已被取代。** 下文关于 detach 的影响与出口条件仅为历史记录，不是当前待办。Wiki/Projects 的原核查缺口仍如实保留；本方案不删除旧仓库或迁移这些平台对象，因此不以补齐 detach 损失清单作为当前迁移的前置条件。
 
-新仓库已创建，API 确认 `full_name=fx1226/kimi-code-switch`、public、`fork=false`，当前账号具有 admin 权限。本地 `origin` 已指向新仓库，旧 `origin` 改名为 `legacy`，`upstream` 保留来源引用。仓库尚未推送代码，空仓库的默认分支占位为 `main`；首次推送后需要显式设为 `master`。其余验收项待完成，具体流程见 [维护者工作流](maintainer-workflow.md)。后续用实际仓库状态、提交 SHA 和 CI 结果补充记录：
+迁移已完成。API 确认新仓库 `full_name=fx1226/kimi-code-switch`、public、`fork=false`、默认分支 `master`。本地 `origin` 指向新仓库，`legacy` 保留旧仓库，`upstream` 保留来源引用。重构提交 `81571f336721ca7b89dca13fa39de495e4b8550f` 已推送，远端 SHA 与本地一致；GitHub compare 确认原 HEAD `f98fd7f958773af5f2456c795819a8f16b77cb5b` 为其祖先。具体流程见 [维护者工作流](maintainer-workflow.md)。
 
 - [x] 新建 `fx1226/kimi-code-switch`，核实为 public 独立仓库，`fork=false`。
 - [x] 更新本地远端：`origin` 指向新仓库、`legacy` 保留旧仓库、`upstream` 保留来源引用。
-- [ ] 保留本地历史，核对 remote 后只推送 `master`，核对远端提交 SHA，并设置默认分支为 `master`。
-- [ ] 对实际推送提交的 CI 验证通过；不创建新 Release、不推送历史 tags。
-- [ ] 在旧仓库原 README 顶部添加中英迁移说明，确认链接指向新仓库且说明 Web 尚未正式发布。
-- [ ] 归档旧仓库，复核旧 Release、全部 6 个资产及既有 refs 保留。
+- [x] 保留本地历史，只推送 `master`，核对远端提交 SHA，并设置默认分支为 `master`。
+- [x] 对实际推送提交的 CI 验证通过；未创建新 Release、未推送历史 tags。
+- [x] 在旧仓库原 README 顶部添加中英迁移说明，确认链接指向新仓库且说明 Web 尚未正式发布。
+- [x] 归档旧仓库，复核旧 Release、全部 6 个资产及 28 个历史 tag 保留。
+
+[首次 CI 35318635825](https://github.com/fx1226/kimi-code-switch/actions/runs/35318635825) 对应上述重构提交：Ubuntu / Node 22 上类型检查、58 个文件共 925 项测试、Web 与服务端构建通过。package、release 两个 job 按分支推送规则跳过；此次未执行远端发版。
+
+旧仓库 README 更新提交为 [`97f38ed7ab143efc0d9feba527de00200e03c1ee`](https://github.com/fx1226/kimi-code-switch-gui/commit/97f38ed7ab143efc0d9feba527de00200e03c1ee)，已读回确认只在原文前增加迁移说明。随后 API 确认 `archived=true`、`fork=true`。归档前后对比确认：原 `v2.2.7` Release 的 ID、正文和发布时间未变，6 个资产的 ID、名称、大小、digest 和下载 URL 未变，28 个 tag 的 SHA 未变。旧 `master` 仅前进到 README 提交。公开核查摘要见 [repository-transition.json](../output/refactor-qa/repository-transition.json)；完整平台响应保留于本机未入库归档。
 
 ## 迁移前的仓库与平台快照
 

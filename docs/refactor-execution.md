@@ -2,7 +2,7 @@
 
 日期：2026-09-18。本记录首次整理时，已实现独立 Web 架构并形成 macOS Apple Silicon 本地候选，尚未提交、推送或发布新版本，远端仓库名称和 fork 关系未变。候选版本为 `2.2.7`，本地压缩包不是 GitHub 已发布的旧桌面 v2.2.7。以下各轮验证保留各自执行时的状态与产物身份，不将历史结果视为后续候选的验收。
 
-同日，仓库方案已改为保留本地 Git 历史，新建 `fx1226/kimi-code-switch`，推送 `master` 并等待 CI 通过，再给旧 fork 添加 README 迁移说明并归档。该方案已获批准；新仓库已创建并确认 `fork=false`，本地 `origin` 已指向新仓库，旧远端保留为 `legacy`、来源引用 `upstream` 保留。代码推送、默认分支设置、CI 与旧仓库归档尚待完成。旧仓库和其 Release、资产、历史 tags 保留，不执行解除 fork、改名或删除重建，不发布新版本或推送旧 tags。实际迁移验收另见 [仓库迁移记录](repository-detach-review.md)。
+同日，仓库方案改为保留本地 Git 历史、新建独立仓库，并已按授权完成：`fx1226/kimi-code-switch` 确认为 public、`fork=false`，重构提交 `81571f3` 已推送 `master` 并通过远端 CI，默认分支为 `master`。旧 fork 已添加 README 迁移说明并归档，旧 Release、6 个资产与 28 个历史 tags 核对保留。本地 `origin` 指向新仓库，旧远端保留为 `legacy`、来源引用 `upstream` 保留。未解除旧 fork、改名或删除重建，未发布新版本或推送旧 tags。实际证据见 [仓库迁移记录](repository-detach-review.md)。
 
 本地最终汇总见 [acceptance-summary.json](../output/refactor-qa/acceptance-summary.json)：正确性与规定的性能 P95 门槛通过，Safari 完整矩阵与官方桌面运行验收仍待完成。首轮失败记录原样保留，扩样结果另行记录，合并统计包含全部长尾样本。
 
@@ -22,7 +22,7 @@
 | P1 配置内核 | 完成 | 局部补丁、未知字段/注释/缺省保留、官方与本地规则验证、强制恢复点、CAS、原子替换、读回、多文件恢复日志、人工恢复总闸 |
 | P2 独立后端 | 完成 | Node 业务层、显式方法与参数校验、异步 HTTP/SSE、持久操作查询、路径授权、真实 HTTP 与进程生命周期验证 |
 | P3 新界面 | 本地浏览器流程通过 | 五个一级入口、独立偏好、资源草稿、目标及作用域、显式应用；Chrome 与 WebKit 完整流程通过，Safari 成品保存与备份恢复通过；Safari 完整布局矩阵待验 |
-| P4 清理与迁移 | 本地实现完成 | Tauri/Rust/shim 与桌面构建链移除；显式私有数据迁移、旧路径引用与中断事务保留；新建独立仓库及旧 fork 归档已批准，远端执行待验收 |
+| P4 清理与迁移 | 本地实现与仓库迁移完成 | Tauri/Rust/shim 与桌面构建链移除；显式私有数据迁移、旧路径引用与中断事务保留；独立仓库已接收代码并通过 CI，旧 fork 已归档 |
 | P5 发行验收 | 本地候选验证，尚非正式发布 | 自包含包与性能记录见下文；Safari 完整布局矩阵、官方 Desktop 运行验证仍待完成；远端 CI 及仓库迁移另行记录 |
 
 ## 实现内容
@@ -39,7 +39,7 @@
 
 ## 验证方法与结果
 
-迁移入口补齐前的完整候选执行 `npm test`：**55 个测试文件、856 项测试全部通过**。覆盖率 statements / lines 为 85.31%，branches 79.58%，functions 87.63%，未降低原门槛。`npm run typecheck`、`npm run build`、`npm run check:package` 均通过。完整命令、日志与机器可读记录在 [final-gates.json](../output/refactor-qa/final-gates.json)。
+迁移入口补齐前的完整候选执行 `npm test`：**55 个测试文件、856 项测试全部通过**。覆盖率 statements / lines 为 85.31%，branches 79.58%，functions 87.63%，未降低原门槛。`npm run typecheck`、`npm run build`、`npm run check:package` 均通过。命令与机器可读结果见 [final-gates.json](../output/refactor-qa/final-gates.json)；报告中的原始日志文件名仅作本机保全索引，日志不随公开资料入库。
 
 自包含程序在独立目录、临时 HOME、无系统 Node 的 PATH、无外部 dist 下验证了启动、内嵌页面、鉴权、状态与退出；真实进程测试另覆盖端口占用、重复启动、6 个并发启动只产生一个服务、SIGKILL 后接管。生产依赖报告 `forbiddenRuntimeModules=[]`。Homebrew formula 使用最终压缩包哈希，Ruby 语法检查通过，未发布。
 
@@ -73,8 +73,8 @@
 
 - Safari 27.0 已以本机原生界面完成保存与恢复核心流程；未重复完整尺寸、200% 缩放、键盘及异常场景矩阵。远程自动化保持未启用，Chrome/WebKit 的完整矩阵不能直接移作 Safari 结论。
 - 官方 Desktop 1.0.1 只完成安装包静态检查。其单实例和 shell 环境合并行为使临时 HOME 不能单独证明运行隔离，需独立 macOS 用户会话或专用测试机验收共享范围，见 [Desktop 验证记录](desktop-compatibility-validation.md)。
-- GitHub refs、Release 正文与全部 6 个资产已保全并实际验证恢复。已批准的新方案保留旧 fork 及其平台对象，在新建独立仓库的 `master` 通过 CI 后，为旧仓库添加迁移说明并归档；远端操作待验收。原 detach 核查中的 Wiki/Projects 缺口保留为历史证据，不再是迁移前置条件，见 [仓库迁移记录](repository-detach-review.md)。
-- 本地门禁已执行，新仓库远端 CI 尚未运行。此次源码迁移不推送旧 tags，也不创建新 Release。Homebrew formula 已由实际压缩包 SHA-256 生成，尚未发布 tap；新版本号、六语言 changelog 和正式发布在另行授权发布时完成。当前版本号不会作为新版本自动重复发布。
+- GitHub 独立仓库迁移与旧 fork 归档已完成，旧 Release、6 个资产和 28 个 tag 的元数据及 SHA 复核保留。原 detach 核查中的 Wiki/Projects 缺口保留为历史证据，不再是迁移前置条件，见 [仓库迁移记录](repository-detach-review.md)。
+- 本地门禁与新仓库首次 CI 均通过；远端 58 个测试文件、925 项测试，以及类型检查、Web/服务端构建成功。此次源码迁移未推送旧 tags，也未创建新 Release。Homebrew formula 已由实际压缩包 SHA-256 生成，尚未发布 tap；新版本号、六语言 changelog 和正式发布在另行授权发布时完成。当前版本号不会作为新版本自动重复发布。
 
 以上待办未被静态源码、成功提示或单元测试替代，当前候选不声明完成全部发行验收。
 

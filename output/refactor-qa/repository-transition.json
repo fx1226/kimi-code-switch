@@ -1,0 +1,30 @@
+{
+  "verifiedAt": "2026-09-18T07:19:52.202Z",
+  "newRepository": {
+    "name": "fx1226/kimi-code-switch",
+    "url": "https://github.com/fx1226/kimi-code-switch",
+    "fork": false,
+    "defaultBranch": "master",
+    "refactorCommit": "81571f336721ca7b89dca13fa39de495e4b8550f",
+    "firstCI": {
+      "url": "https://github.com/fx1226/kimi-code-switch/actions/runs/35318635825",
+      "conclusion": "success",
+      "tests": 925
+    }
+  },
+  "legacyRepository": {
+    "name": "fx1226/kimi-code-switch-gui",
+    "url": "https://github.com/fx1226/kimi-code-switch-gui",
+    "archived": true,
+    "fork": true,
+    "readmeCommit": "97f38ed7ab143efc0d9feba527de00200e03c1ee",
+    "originalReadmeBodyPreserved": true,
+    "releaseCount": 1,
+    "assets": 6,
+    "releaseIdsAndAssetMetadataUnchanged": true,
+    "tags": 28,
+    "tagShasUnchanged": true
+  },
+  "publishedNewRelease": false,
+  "pushedHistoricalTags": false
+}
