@@ -5,12 +5,20 @@ import { DEFAULT_SERVER_PORT, parseServerArgs } from "./args";
 describe("parseServerArgs", () => {
   it("returns defaults for an empty argv", () => {
     expect(parseServerArgs([])).toEqual({
+      command: "start",
       port: DEFAULT_SERVER_PORT,
       noOpen: false,
       dataDir: null,
       help: false,
     });
     expect(DEFAULT_SERVER_PORT).toBe(8417);
+  });
+
+  it("supports lifecycle commands", () => {
+    for (const command of ["start", "open", "status", "stop"] as const) {
+      expect(parseServerArgs([command, "--data-dir", "/tmp/panel"]).command).toBe(command);
+    }
+    expect(() => parseServerArgs(["status", "stop"])).toThrow(/unknown option/);
   });
 
   it("parses --port with a separate value", () => {

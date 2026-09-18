@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
   existsSync,
 } from "node:fs";
@@ -11,7 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { usageCommands } from "./usage";
-import { parseToml, setNativeTestDirs, storesCommands } from "./stores";
+import { captureSnapshot, cleanupOldSnapshots, parseToml, restoreSnapshot, setNativeTestDirs, storesCommands } from "./stores";
+
+// Retired history writers are tested directly and are deliberately absent from
+// the production command registry. New writes/restores use the configuration kernel.
+function captureLegacySnapshot(args: { fileId: string; filePath: string; description: string; kimiCodeEnvironmentId: string }): number | null {
+  return captureSnapshot(args.fileId, args.filePath, args.description, args.kimiCodeEnvironmentId);
+}
 
 let tmpDir: string;
 let dbPath: string;
@@ -31,11 +39,10 @@ beforeEach(() => {
   mkdirSync(credentialsDir, { recursive: true });
   mkdirSync(envHome, { recursive: true });
 
-  setNativeTestDirs({ historyDir, accountsRoot, credentialsDir });
+  setNativeTestDirs({ historyDir });
   usageCommands.usage_open({ dbPath, schemaSql: "SELECT 1" });
   storesCommands.init_panel_settings_store({});
   storesCommands.init_config_history({});
-  storesCommands.init_official_accounts_store({});
 });
 
 afterEach(() => {
@@ -44,7 +51,7 @@ afterEach(() => {
   } catch {
     // ignore
   }
-  setNativeTestDirs({ historyDir: null, accountsRoot: null, credentialsDir: null });
+  setNativeTestDirs({ historyDir: null });
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -67,7 +74,7 @@ describe("config_history full chain", () => {
 
     const targetPath = join(envHome, "config.toml");
     writeFileSync(targetPath, "version-A");
-    const id = storesCommands.capture_snapshot({
+    const id = captureLegacySnapshot({
       fileId: "config",
       filePath: targetPath,
       description: "first",
@@ -76,7 +83,7 @@ describe("config_history full chain", () => {
     expect(id).toBeGreaterThan(0);
 
     // dedupe: same content returns null
-    const dedupe = storesCommands.capture_snapshot({
+    const dedupe = captureLegacySnapshot({
       fileId: "config",
       filePath: targetPath,
       description: "dup",
@@ -100,7 +107,7 @@ describe("config_history full chain", () => {
 
     // modify then restore -> writes snapshot back + creates rollback point
     writeFileSync(targetPath, "version-B");
-    storesCommands.restore_snapshot({ snapshotId: id });
+    restoreSnapshot(id);
     expect(readFileSync(targetPath, "utf8")).toBe("version-A");
 
     const afterRestore = storesCommands.list_snapshots({
@@ -115,7 +122,7 @@ describe("config_history full chain", () => {
       sql: "UPDATE config_history SET snapshot_at = @t WHERE id = @id",
       params: { t: new Date(Date.now() - 40 * 86400000).toISOString(), id },
     });
-    const deleted = storesCommands.cleanup_old_snapshots({}) as number;
+    const deleted = cleanupOldSnapshots();
     expect(deleted).toBeGreaterThanOrEqual(1);
     const remaining = storesCommands.list_snapshots({
       kimiCodeEnvironmentId: "default",
@@ -130,7 +137,7 @@ describe("config_history full chain", () => {
     storesCommands.save_panel_settings({
       settingsJson: JSON.stringify({ version: 1, config_path: "~/.kimi-code/config.toml", theme: "dark", shortcuts: {} }),
     });
-    const id = storesCommands.capture_snapshot({
+    const id = captureLegacySnapshot({
       fileId: "panel",
       filePath: "",
       description: "panel",
@@ -139,6 +146,30 @@ describe("config_history full chain", () => {
     expect(id).toBeGreaterThan(0);
     const content = storesCommands.get_snapshot_content({ snapshotId: id }) as string;
     expect(JSON.parse(content).theme).toBe("dark");
+  });
+
+  it("restores a config snapshot with private permissions and no temp leftovers", () => {
+    registerEnvironment(envHome);
+    const targetPath = join(envHome, "config.toml");
+    writeFileSync(targetPath, "version-A");
+    const id = captureLegacySnapshot({
+      fileId: "config",
+      filePath: targetPath,
+      description: "secrets",
+      kimiCodeEnvironmentId: "default",
+    }) as number;
+    expect(id).toBeGreaterThan(0);
+
+    // 删除目标再恢复：原子写以全新文件落盘，必须带私有权限（provider secrets）；
+    // 临时文件落在目标同目录而非 tmpdir，避免跨设备 rename（EXDEV），且回收干净。
+    rmSync(targetPath, { force: true });
+    restoreSnapshot(id);
+    expect(readFileSync(targetPath, "utf8")).toBe("version-A");
+    if (process.platform !== "win32") {
+      expect(statSync(targetPath).mode & 0o777).toBe(0o600);
+    }
+    const leftovers = readdirSync(envHome).filter((name) => name.includes(".tmp-"));
+    expect(leftovers).toEqual([]);
   });
 });
 
@@ -228,93 +259,10 @@ homePath = "~/.kimi-code"
   });
 });
 
-describe("official_accounts lifecycle", () => {
-  it("creates, renames, captures, activates, and deletes accounts", () => {
-    // 标准凭据目录放入 kimi-code.json，供 capture/activate 复制
-    writeFileSync(join(credentialsDir, "kimi-code.json"), "{}");
-
-    const created = storesCommands.create_official_account({ displayName: "  第一账号  " }) as Record<string, any>;
-    expect(created.display_name).toBe("第一账号");
-    expect(created.status).toBe("empty");
-    expect(created.is_active).toBe(false);
-
-    const renamed = storesCommands.rename_official_account({
-      id: created.id,
-      displayName: "renamed",
-    }) as Record<string, any>;
-    expect(renamed.display_name).toBe("renamed");
-
-    // 捕获当前账号 -> active + logged-in，凭据复制进槽位
-    const captured = storesCommands.capture_current_official_account({
-      displayName: "Current",
-    }) as Record<string, any>;
-    expect(captured.credentials_present).toBe(true);
-    expect(captured.account.status).toBe("logged-in");
-    expect(captured.account.is_active).toBe(true);
-    expect(captured.active_account_id).toBe(captured.account.id);
-
-    // 状态聚合
-    const status = storesCommands.get_official_account_credentials_status({}) as Record<string, any>;
-    expect(status.active_account_id).toBe(captured.account.id);
-    expect(status.credentials_present).toBe(true);
-
-    // 列表
-    const list = storesCommands.list_official_accounts({}) as Record<string, any>[];
-    expect(list.find((a) => a.id === captured.account.id)?.is_active).toBe(true);
-
-    // prepare login：清空当前凭据
-    storesCommands.prepare_official_account_login({ id: captured.account.id });
-    expect(existsSync(join(credentialsDir, "kimi-code.json"))).toBe(false);
-
-    // complete login 重新物化
-    writeFileSync(join(credentialsDir, "kimi-code.json"), "{}");
-    const completed = storesCommands.complete_official_account_login({
-      id: captured.account.id,
-      activate: true,
-    }) as Record<string, any>;
-    expect(completed.credentials_present).toBe(true);
-
-    // activate 已激活账号
-    const activated = storesCommands.activate_official_account({
-      id: captured.account.id,
-    }) as Record<string, any>;
-    expect(activated.account.is_active).toBe(true);
-
-    // delete
-    storesCommands.delete_official_account({ id: captured.account.id });
-    const after = storesCommands.list_official_accounts({}) as Record<string, any>[];
-    expect(after.find((a) => a.id === captured.account.id)).toBeUndefined();
-  });
-
-  it("rejects unsafe account ids", () => {
-    expect(() => storesCommands.rename_official_account({ id: "../bad", displayName: "x" })).toThrow(
-      /may only contain/,
-    );
-  });
-});
-
-describe("desktop placeholders", () => {
-  it("returns no-side-effect success for tray/window/shortcut commands", () => {
-    expect(storesCommands.set_tray({})).toBeUndefined();
-    expect(storesCommands.show_main_window({})).toBeUndefined();
-    expect(storesCommands.set_dock_icon_visibility({ visible: true })).toBeUndefined();
-    expect(storesCommands.sync_window_toggle_shortcut({})).toBeUndefined();
-  });
-
-  it("throws explicit not-implemented for bridge commands", () => {
-    for (const command of [
-      "bridge_start",
-      "bridge_stop",
-      "bridge_status",
-      "bridge_login",
-      "bridge_wait_login",
-      "bridge_logout",
-      "bridge_refresh_models",
-      "bridge_probe_connectivity",
-    ]) {
-      expect(() => (storesCommands[command] as (a: Record<string, unknown>) => unknown)({})).toThrow(
-        "ChatGPT subscription bridge is not implemented in the server runtime",
-      );
+describe("retired native capabilities", () => {
+  it("has no account credential rotation, desktop or bridge mutation commands", () => {
+    for (const command of ["activate_official_account", "capture_current_official_account", "prepare_official_account_login", "delete_official_account", "bridge_start", "set_tray", "show_main_window", "sync_window_toggle_shortcut"]) {
+      expect(storesCommands[command]).toBeUndefined();
     }
   });
 });

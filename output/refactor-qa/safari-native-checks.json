@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-18",
+  "browser": "Safari",
+  "version": "27.0",
+  "method": "Native accessibility UI via cua_repl; no remote automation setting changed. Final packaged binary with isolated HOME/KIMI_CODE_HOME/data-dir.",
+  "artifactSha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+  "checks": [
+    "Authenticated page loaded; fragment token removed from address bar.",
+    "Provider base_url edited using native UI; preview reported real official doctor success; apply returned written and reread.",
+    "Native config changed only intended URL and retained original comment.",
+    "Created a backup through Safari UI, externally changed the temporary config, reviewed and applied restore through Safari UI.",
+    "Restored config bytes equal backup content; MCP unknown field retained; two durable operation records succeeded.",
+    "Closed only the created test tab; original tab remains."
+  ],
+  "configSha256": "a4302c882b1f905382d88607c1143b4febfc20a6f103bdc82ffe448bcccccdea",
+  "fullLayoutMatrixVerified": false,
+  "remoteAutomationEnabled": false,
+  "testDataCleaned": true
+}

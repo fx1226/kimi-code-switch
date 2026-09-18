@@ -1,0 +1,326 @@
+{
+  "product": {
+    "package": "@moonshot-ai/kimi-code",
+    "version": "2.0.0",
+    "release_tag": "@moonshot-ai/kimi-code@2.0.0",
+    "release_commit": "1b89e4b039f052d10f258464413b2047acca12ba",
+    "release_date": "2026-09-17"
+  },
+  "contract": {
+    "data_home_env": "KIMI_CODE_HOME",
+    "default_data_home": "~/.kimi-code",
+    "doctor_targets": [
+      "config.toml",
+      "tui.toml"
+    ],
+    "mcp_precedence_low_to_high": [
+      "$KIMI_CODE_HOME/mcp.json",
+      "<nearest-git-root-or-cwd>/.mcp.json",
+      "<cwd>/.kimi-code/mcp.json"
+    ],
+    "skill_precedence_low_to_high": [
+      "built-in",
+      "extra",
+      "user",
+      "project"
+    ],
+    "tui_defaults": {
+      "disable_feedback_survey": false,
+      "markdown.mermaid": "final"
+    }
+  },
+  "evidence": {
+    "source_review": "pinned-source-and-documentation",
+    "official_doctor": "run scripts/verify-kimi-contract.mjs for an installation-specific result",
+    "mcp_skills_plugins_runtime": "full-cli-desktop-runtime-not-executed",
+    "desktop": {
+      "version": "1.0.1",
+      "bundled_server_version": "2.0.0",
+      "evidence": "Local product bundle static inspection only; no runtime round-trip.",
+      "private_state": "excluded"
+    },
+    "local_doctor_acceptance": {
+      "date": "2026-09-18",
+      "platform": "macOS",
+      "reported_cli_version": "2.0.0",
+      "command": "node scripts/verify-kimi-contract.mjs <absolute-cli-path>",
+      "valid_config_and_tui": "passed",
+      "invalid_config_type": "rejected",
+      "invalid_tui_type": "rejected",
+      "malformed_toml": "rejected",
+      "candidate_contents_unchanged": true,
+      "limitations": "CLI doctor parsing only. Binary version was reported by --version; no binary-to-source reproducible-build assertion."
+    },
+    "local_source_consumption": {
+      "date": "2026-09-18",
+      "platform": "macOS",
+      "node_version": "26.8.2",
+      "command": "node scripts/verify-kimi-native-consumption.mjs",
+      "result": "passed",
+      "native_transactions_written_by_project_core": 6,
+      "unchanged_upstream_source_files_verified": 26,
+      "source_inventory": "upstream/sources.json",
+      "dependencies": [
+        "pathe@2.0.3",
+        "zod@4.3.6",
+        "js-yaml@4.1.1"
+      ],
+      "checks": {
+        "mcp": [
+          "three-layer overrides and origin paths",
+          "project-root stdio cwd",
+          "includeProject=false",
+          "no-git fallback",
+          "invalid schema rejection"
+        ],
+        "skills": [
+          "directory and flat forms",
+          "explicit project/user roots and same-name priority",
+          "invalid frontmatter rejection"
+        ],
+        "plugins": [
+          "PluginManager.load reads actual restored plugin roots",
+          "source/originalSource/github metadata retention",
+          "enabled/disabled filtering",
+          "MCP runtime environment derivation without launching",
+          "manifest precedence and symlink escape rejection"
+        ]
+      },
+      "isolation": "Temporary HOME/KIMI_CODE_HOME/XDG/cwd/private metadata; lifecycle scripts disabled; no inherited credentials; no model/MCP/plugin execution; temporary files removed.",
+      "limitations": "Official source consumer functions with documented DI/bootstrap/error adapters and blocked plugin network paths; not full CLI/Desktop startup or a reproducible binary-to-source assertion."
+    }
+  },
+  "sources": [
+    {
+      "id": "config",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/config-files.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/docs/en/configuration/config-files.md",
+      "sha256": "163dbc512940d182e75a1e6fff650ef2a2b9bc2ef388fbeb8439b78a85f627f3"
+    },
+    {
+      "id": "data-locations",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/configuration/data-locations.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/docs/en/configuration/data-locations.md",
+      "sha256": "44cfadd5a185754fc3924799ce7133a6929b8c9922a77b17dc86dd496125380b"
+    },
+    {
+      "id": "config-schema",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/kosongConfig/configSection.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/kosongConfig/configSection.ts",
+      "sha256": "9e91930401db387f7899c601e8c61830d3a9ed6912ef8462ca4e8a32fc277eb8"
+    },
+    {
+      "id": "config-loader",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/config/config.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/config/config.ts",
+      "sha256": "c016c7ebe21d603e6f2f5328fb1b7ed30d04b219d35d7bd81b6c86fe0c247a71"
+    },
+    {
+      "id": "tui",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/apps/kimi-code/src/tui/config.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/tui/config.ts",
+      "sha256": "1b6a15df7df1391f9077b126975dfa5edd72c724b8634cf914a94d3c4f563e42"
+    },
+    {
+      "id": "mcp",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/mcp.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/docs/en/customization/mcp.md",
+      "sha256": "fff74dfb23a421843dd43e3a6dbca57e154e403431b4f73ce0497d2753d44bae"
+    },
+    {
+      "id": "mcp-loader",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/mcpConfig/configLoader.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/mcpConfig/configLoader.ts",
+      "sha256": "ed30b684f8592466b6d485b5048156012bab8ae1b355cda572a1acdb03f35fc3"
+    },
+    {
+      "id": "mcp-schema",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/mcpCore/config-schema.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/mcpCore/config-schema.ts",
+      "sha256": "d22fcf6ac07f87029b8923e7e84314027b7ed0057eddf99d3ce51347dd0561b0"
+    },
+    {
+      "id": "skills",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/customization/skills.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/docs/en/customization/skills.md",
+      "sha256": "adc5073f477e4ac43e61f8750960dfd5c23cfc0187ebbe37d022503f0d4c8ce1"
+    },
+    {
+      "id": "skills-loader",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/features/skill/catalog/fileSkillDiscovery.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/features/skill/catalog/fileSkillDiscovery.ts",
+      "sha256": "647d3a4a91873a45a973fd408c19d0df279bedd18340565c3c3188771c416b74"
+    },
+    {
+      "id": "plugin-store",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/plugin/store.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/plugin/store.ts",
+      "sha256": "a24dcacc40f9c76a11cbd8af5188d6261df0d6d5250e79342930902cc3ddf232"
+    },
+    {
+      "id": "plugin-datasource",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/plugins/official/kimi-datasource/kimi.plugin.json",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/plugins/official/kimi-datasource/kimi.plugin.json",
+      "sha256": "e51afaef9e33f4aa49e5dd3027d801e63c973b59232ff828db5a70a792aa4c95"
+    },
+    {
+      "id": "command",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/reference/kimi-command.md",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/docs/en/reference/kimi-command.md",
+      "sha256": "935ef72db7e08773379b44c2d4e8695114ae21e067d1285591ff7ee42c2a25e6"
+    },
+    {
+      "id": "doctor",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/apps/kimi-code/src/cli/sub/doctor.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/cli/sub/doctor.ts",
+      "sha256": "c688709d910033153c49c2e8a1faa803493f2eea100244c87ffab0766e62fb8c"
+    },
+    {
+      "id": "doctor-config",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/apps/kimi-code/src/cli/v2/validate-config.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/apps/kimi-code/src/cli/v2/validate-config.ts",
+      "sha256": "95f7146e9d6d7de46a933daa418fff7d669f4a33df023e230076bd3c314af292"
+    },
+    {
+      "id": "skills-parser",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/features/skill/catalog/parser.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/features/skill/catalog/parser.ts",
+      "sha256": "06ba976b1941a7e1db9b7879ea1a1fd13cfdbbc9f90f78b80b244da9f6993ad0"
+    },
+    {
+      "id": "plugin-manager",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/plugin/manager.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/plugin/manager.ts",
+      "sha256": "214440d3e0bc69b83f37110878923ff427cff3f898ad5c14ca6999af5e266316"
+    },
+    {
+      "id": "plugin-manifest",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/plugin/manifest.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/plugin/manifest.ts",
+      "sha256": "c757889716b444663f0c783e949a97425e27d6a5da6718b000279783be45aaa7"
+    },
+    {
+      "id": "plugin-source",
+      "canonical_url": "https://github.com/MoonshotAI/kimi-code/blob/main/packages/agent-core-v2/src/app/plugin/source.ts",
+      "immutable_url": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/packages/agent-core-v2/src/app/plugin/source.ts",
+      "sha256": "a621a55794225d858cf700b8d4bf2614709bdf2c373bcd75bc46f8bdf968a4be"
+    }
+  ],
+  "fixtures": {
+    "config.toml": {
+      "sources": [
+        "config",
+        "config-schema"
+      ],
+      "derivation": "Verbatim Complete example TOML block in the pinned configuration documentation; placeholders only, no credentials.",
+      "sha256": "9929b7aca5185ba80b0738bda3bcd5c213afda173894cba5cc3a24e3d362e2ee"
+    },
+    "tui.toml": {
+      "sources": [
+        "config",
+        "tui"
+      ],
+      "derivation": "Pinned documentation tui.toml example plus explicit [markdown].mermaid = final from DEFAULT_MARKDOWN_CONFIG.",
+      "sha256": "70e079fdec1f1aa5643c5671d1258995efb4761dc49976efdebf76052751c4b0"
+    },
+    "mcp.json": {
+      "sources": [
+        "mcp",
+        "mcp-loader",
+        "mcp-schema"
+      ],
+      "derivation": "Verbatim first JSON example from pinned MCP documentation; not executed.",
+      "sha256": "10161163fdbc4cbcba43e928be6c7247e4f94dc9a21fdc50e0a6a4d5a0063ca7"
+    },
+    "skills/review-pr/SKILL.md": {
+      "sources": [
+        "skills",
+        "skills-loader"
+      ],
+      "derivation": "Verbatim Complete Example Markdown block; not invoked.",
+      "sha256": "cb65468e4cb061dcacda8998b29f7370ce5863c60aace37ee7f9f688c3060f77"
+    },
+    "skills/commit.md": {
+      "sources": [
+        "skills",
+        "skills-loader"
+      ],
+      "derivation": "Synthetic flat-form fallback fixture following official filename and first-body-line rules.",
+      "sha256": "14c08b93bf8bdb7fcd7a5327cb9150df6d5efd4dadf043858cdaeaa5a5701a9d"
+    },
+    "plugins/installed.json": {
+      "sources": [
+        "plugin-store"
+      ],
+      "derivation": "Synthetic InstalledFile example, disabled, with an isolated placeholder root. Not an actual install.",
+      "sha256": "bf398845a9ddbe234e405de89d9c8e5bc96067828bb9d353014a3137810d2f48"
+    },
+    "plugins/managed/kimi-datasource/kimi.plugin.json": {
+      "sources": [
+        "plugin-datasource"
+      ],
+      "derivation": "Verbatim official manifest bytes; no plugin implementation is included or executed.",
+      "sha256": "e51afaef9e33f4aa49e5dd3027d801e63c973b59232ff828db5a70a792aa4c95"
+    }
+  },
+  "validation_entrypoints": {
+    "config": {
+      "source": "doctor-config",
+      "symbol": "validateConfigTomlV2",
+      "command": [
+        "doctor",
+        "config",
+        "<candidate-path>"
+      ],
+      "limits": [
+        "registered section schema only",
+        "unknown keys may only warn",
+        "default_model references are not established by doctor"
+      ]
+    },
+    "tui": {
+      "source": "tui",
+      "symbol": "parseTuiConfig",
+      "command": [
+        "doctor",
+        "tui",
+        "<candidate-path>"
+      ]
+    },
+    "mcp": {
+      "sources": [
+        "mcp-loader",
+        "mcp-schema"
+      ],
+      "symbols": [
+        "resolveMcpJsonPaths",
+        "loadMcpServersDetailed",
+        "McpServerConfigSchema"
+      ]
+    },
+    "skills": {
+      "sources": [
+        "skills-loader",
+        "skills-parser"
+      ],
+      "symbols": [
+        "discoverFileSkills",
+        "parseSkillText"
+      ]
+    },
+    "plugins": {
+      "sources": [
+        "plugin-store",
+        "plugin-manager",
+        "plugin-manifest",
+        "plugin-source"
+      ],
+      "symbols": [
+        "readInstalled",
+        "PluginManager.load",
+        "parseManifest",
+        "resolveInstallSource"
+      ]
+    }
+  }
+}

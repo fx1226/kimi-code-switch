@@ -2,18 +2,15 @@
 .claude
 node_modules
 dist
-dist-bridge
 dist-server
-out
-release
+dist-release
+# Retired generated output that may remain in an existing checkout.
+/dist-bridge/
 coverage
 *.log
 .deepseek
 spec-analytics.jsonl
 .sisyphus
-src-tauri/target
-src-tauri/gen
-src-tauri/binaries
 .codegraph/daemon.pid
 *.tsbuildinfo
 
@@ -35,3 +32,9 @@ demo/
 
 # CodeGraph/Qoder 生成产物
 /.qoder/
+
+# Generated from resources/icon.svg
+/src/renderer/public/favicon.svg
+
+# Local repository preservation archives; do not publish binary backups.
+/output/repository-preservation-*/

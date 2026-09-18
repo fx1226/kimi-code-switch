@@ -1,14 +1,4 @@
-// Wave 2：配置历史 / 面板设置 / 官方账号槽位 / 托盘 / 全局快捷键 / ChatGPT 桥接
-// （对齐 src-tauri/src/config_history.rs、panel_settings_store.rs、
-//   official_accounts.rs、tray.rs、shortcuts.rs、bridge.rs）。
-//
-// 连接策略：与 usage.ts 共用模块级单例 DatabaseSync 连接（getDb()）。
-// 桌面专属命令（set_tray/show_main_window/set_dock_icon_visibility/
-//   sync_window_toggle_shortcut）在服务端无托盘/全局快捷键能力，按浏览器形态期望
-//   返回无副作用成功。
-// ChatGPT 桥接（bridge_*）延后为后续 Wave：本模块仅注册为抛明确错误的占位，
-//   避免 registry-contract 出现 unsupported command（chatgptBridgePanel 会 catch
-//   错误渲染 signed-out 状态）。
+// Private settings and configuration history. Native credentials belong to the official CLI.
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -16,40 +6,28 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readFileSync,
-  readdirSync,
   renameSync,
   rmSync,
-  statSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 
-import { fsCommands } from "./fs";
-import { expandHome } from "./paths";
+import { atomicWriteText, fsCommands } from "./fs";
+import { expandHome, getAppPaths } from "./paths";
 import { getDb, run, queryRows, queryRow, scalar } from "./usage";
 import type { CommandHandlers } from "./index";
 
-// 测试缝：允许把受管目录（history / official-accounts / credentials）重定向到临时目录，
-// 避免测试污染真实 ~/.kimi-code-switch-gui 与 ~/.kimi-code。生产默认不设置，走真实路径。
+// Tests isolate history under temporary directories; production uses AppPaths.
 let testHistoryDir: string | null = null;
-let testAccountsRoot: string | null = null;
-let testCredentialsDir: string | null = null;
 
 /** 仅供测试调用：覆盖受管目录根；传 null 恢复默认。 */
 export function setNativeTestDirs(dirs: {
   historyDir?: string | null;
-  accountsRoot?: string | null;
-  credentialsDir?: string | null;
 }): void {
   if (dirs.historyDir !== undefined) testHistoryDir = dirs.historyDir;
-  if (dirs.accountsRoot !== undefined) testAccountsRoot = dirs.accountsRoot;
-  if (dirs.credentialsDir !== undefined) testCredentialsDir = dirs.credentialsDir;
 }
 
 // ─────────────────────────── 配置历史 ───────────────────────────
@@ -74,14 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_history_file
 `;
 
 function historyDir(): string {
-  return testHistoryDir ?? expandHome("~/.kimi-code-switch-gui/history");
-}
-
-function legacyHistoryDirs(): string[] {
-  return [
-    expandHome("~/.kimi-code/.panel/history"),
-    expandHome("~/.kimi/.panel/history"),
-  ];
+  return testHistoryDir ?? getAppPaths().historyDir;
 }
 
 function ensureHistoryDir(): string {
@@ -256,86 +227,6 @@ function backfillHistoryTargetPaths(): void {
   }
 }
 
-function normalizeLegacyDefaultHistoryTargets(): void {
-  const retiredPrefix = "%/.kimi-code-switch-gui/.env/default/%";
-  for (const [fileId, targetPath] of [
-    ["config", "~/.kimi-code/config.toml"],
-    ["mcp", "~/.kimi-code/mcp.json"],
-    ["tui", "~/.kimi-code/tui.toml"],
-    ["agents", "~/.kimi-code/AGENTS.md"],
-    ["skills", "~/.kimi-code/skills"],
-  ] as const) {
-    run(
-      "UPDATE config_history SET target_path = ?1 " +
-        "WHERE kimi_code_environment_id = 'default' AND file_id = ?2 AND target_path LIKE ?3",
-      [targetPath, fileId, retiredPrefix],
-    );
-  }
-}
-
-function moveSnapshot(source: string, destination: string): void {
-  try {
-    renameSync(source, destination);
-    return;
-  } catch {
-    // 跨设备回退到复制
-  }
-  copyFileSync(source, destination);
-  rmSync(source, { force: true });
-}
-
-function migrateHistorySnapshotPaths(): void {
-  const target = historyDir();
-  for (const legacy of legacyHistoryDirs()) {
-    const rows = queryRows("SELECT id, snapshot_path FROM config_history");
-    for (const row of rows) {
-      const id = Number(row.id);
-      const snapshotPath = String(row.snapshot_path ?? "");
-      if (!snapshotPath.startsWith(legacy)) continue;
-      const fileName = basename(snapshotPath);
-      const next = join(target, fileName);
-      let migrated = false;
-      if (existsSync(snapshotPath)) {
-        if (existsSync(next)) {
-          if (readFileSync(snapshotPath).equals(readFileSync(next))) {
-            try {
-              rmSync(snapshotPath, { force: true });
-              migrated = true;
-            } catch {
-              migrated = false;
-            }
-          }
-        } else {
-          try {
-            moveSnapshot(snapshotPath, next);
-            migrated = true;
-          } catch {
-            migrated = false;
-          }
-        }
-      } else if (existsSync(next)) {
-        migrated = true;
-      }
-      if (!migrated) continue;
-      run("UPDATE config_history SET snapshot_path = ?1 WHERE id = ?2", [next, id]);
-    }
-
-    // 迁移未索引的快照文件
-    if (!existsSync(legacy)) continue;
-    for (const entry of readdirSync(legacy)) {
-      const source = join(legacy, entry);
-      if (!statSync(source).isFile()) continue;
-      const destination = join(target, entry);
-      if (existsSync(destination)) continue;
-      try {
-        moveSnapshot(source, destination);
-      } catch {
-        // 忽略单个失败
-      }
-    }
-  }
-}
-
 function captureSnapshotContent(
   fileId: string,
   filePath: string,
@@ -398,7 +289,7 @@ function registeredEnvironmentTarget(
   return join(expandHome(homePath), fileName);
 }
 
-function captureSnapshot(
+export function captureSnapshot(
   fileId: string,
   filePath: string,
   description: string | null,
@@ -507,7 +398,7 @@ function getSnapshotContent(snapshotId: number): string {
   return gzipDecompress(compressed);
 }
 
-function restoreSnapshot(snapshotId: number): void {
+export function restoreSnapshot(snapshotId: number): void {
   const row = queryRow(
     "SELECT file_id, snapshot_path, kimi_code_environment_id, target_path FROM config_history WHERE id = ?1",
     [snapshotId],
@@ -581,7 +472,7 @@ function restoreSnapshot(snapshotId: number): void {
     }
   }
 
-  atomicWriteText(resolvedTarget, snapshotContent, expectedTargetHash || undefined);
+  atomicWriteText(resolvedTarget, snapshotContent, expectedTargetHash);
 }
 
 function restoreSkillsSnapshot(
@@ -646,29 +537,10 @@ function resolveSnapshotRestoreTarget(environmentId: string, targetPath: string)
   return expandHome(targetPath);
 }
 
-function atomicWriteText(path: string, content: string, expectedSha256?: string): void {
-  if (expectedSha256) {
-    const currentHash = existsSync(path) ? sha256Hex(readFileSync(path, "utf8")) : "";
-    if (currentHash !== expectedSha256) {
-      throw new Error(`config file conflict: expected ${expectedSha256}, found ${currentHash}`);
-    }
-  }
-  const dir = mkdtempSync(join(tmpdir(), "kimi-atomic-"));
-  const tempPath = join(dir, "tmp");
-  writeFileSync(tempPath, content, "utf8");
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    renameSync(tempPath, path);
-  } finally {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // ignore
-    }
-  }
-}
+// 原子写复用 fs.ts 的 atomicWriteText：临时文件落在目标同目录（不跨设备 rename）、
+// fsync + 父目录 fsync、保留既有权限、新文件 0600 私密（provider secrets 落盘保护）。
 
-function cleanupOldSnapshots(): number {
+export function cleanupOldSnapshots(): number {
   const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
   const paths = queryRows("SELECT snapshot_path FROM config_history WHERE snapshot_at < ?1", [cutoff]).map(
     (r) => String(r.snapshot_path),
@@ -716,9 +588,7 @@ function initConfigHistory(): void {
   getDb().exec(CONFIG_HISTORY_SCHEMA_SQL);
   ensureConfigHistoryEnvironmentColumn();
   backfillHistoryTargetPaths();
-  normalizeLegacyDefaultHistoryTargets();
   ensureHistoryDir();
-  migrateHistorySnapshotPaths();
 }
 
 // ─────────────────────────── 面板设置 ───────────────────────────
@@ -945,31 +815,6 @@ function getPanelSettingsJson(): string | null {
   });
 }
 
-function isRetiredDefaultEnvironmentHome(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.endsWith("/.kimi-code-switch-gui/.env/default");
-}
-
-function normalizeRetiredDefaultEnvironmentPaths(settings: Record<string, unknown>): void {
-  if (typeof settings.config_path === "string") {
-    const p = settings.config_path.replace(/\\/g, "/").replace(/\/+$/, "");
-    if (p.endsWith("/.kimi-code-switch-gui/.env/default/config.toml")) {
-      settings.config_path = "~/.kimi-code/config.toml";
-    }
-  }
-  if (!Array.isArray(settings.kimi_code_environments)) return;
-  for (const environment of settings.kimi_code_environments) {
-    if (typeof environment !== "object" || environment === null) continue;
-    const entry = environment as Record<string, unknown>;
-    if (entry.id !== "default") continue;
-    const homePath = typeof entry.homePath === "string" ? entry.homePath : "";
-    if (isRetiredDefaultEnvironmentHome(homePath)) {
-      entry.homePath = "~/.kimi-code";
-    }
-    entry.kind = "default";
-  }
-}
-
 function modelUiMetadataJson(settings: Record<string, unknown>): string {
   const metadata = settings["model_ui_metadata"];
   if (metadata === undefined || metadata === null) return "{}";
@@ -1053,7 +898,6 @@ function savePanelSettingsRaw(settingsJson: string): void {
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     throw new Error("panel settings must be a JSON object");
   }
-  normalizeRetiredDefaultEnvironmentPaths(settings);
 
   const now = new Date().toISOString();
   const getStr = (key: string): string => (typeof settings[key] === "string" ? settings[key] : "");
@@ -1410,412 +1254,12 @@ export function parseToml(text: string): Record<string, unknown> {
   return root;
 }
 
-// ─────────────────────────── 官方账号槽位 ───────────────────────────
-
-const OFFICIAL_ACCOUNTS_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS official_accounts (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL,
-  account_hint TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL,
-  is_active INTEGER NOT NULL DEFAULT 0,
-  credentials_slot_path TEXT NOT NULL,
-  last_login_at TEXT NOT NULL DEFAULT '',
-  last_checked_at TEXT NOT NULL DEFAULT '',
-  last_used_at TEXT NOT NULL DEFAULT '',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_official_accounts_active
-  ON official_accounts(is_active)
-  WHERE is_active = 1;
-`;
-
-const KIMI_CODE_CREDENTIAL_FILENAMES = [
-  "kimi-code.json",
-  "managed:kimi-code.json",
-  "kimi.json",
-  "moonshot.json",
-  "oauth.json",
-  "auth.json",
-  "credentials.json",
-];
-
-function officialAccountsRoot(): string {
-  return testAccountsRoot ?? expandHome("~/.kimi-code-switch-gui/official-accounts");
-}
-
-function standardCredentialsDir(): string {
-  return testCredentialsDir ?? expandHome("~/.kimi-code/credentials");
-}
-
-function safeAccountId(id: string): string {
-  const trimmed = id.trim();
-  if (trimmed === "") throw new Error("Official account id cannot be empty.");
-  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) return trimmed;
-  throw new Error("Official account id may only contain letters, numbers, '-' and '_'.");
-}
-
-// 进程内自增后缀避免同一毫秒内多次调用撞 id（Rust 用 timestamp_millis，Node 单线程更快更易碰撞）。
-let accountIdCounter = 0;
-function createAccountId(): string {
-  accountIdCounter += 1;
-  return `acct-${Date.now()}-${accountIdCounter}`;
-}
-
-function accountSlotDir(id: string): string {
-  const safeId = safeAccountId(id);
-  return join(officialAccountsRoot(), safeId, "credentials");
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function pathToTilde(path: string): string {
-  const home = process.env.HOME || "";
-  if (home && path.startsWith(home)) {
-    return `~/${path.slice(home.length).replace(/^[/\\]+/, "")}`;
-  }
-  return path;
-}
-
-function credentialsFilesIn(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  const files: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (!statSync(path).isFile()) continue;
-    if (KIMI_CODE_CREDENTIAL_FILENAMES.includes(entry)) files.push(path);
-  }
-  return files;
-}
-
-function hasCredentials(dir: string): boolean {
-  return credentialsFilesIn(dir).length > 0;
-}
-
-function ensurePrivateDir(dir: string): void {
-  mkdirSync(dir, { recursive: true });
-  try {
-    chmodSync(dir, 0o700);
-  } catch {
-    // 非 POSIX 忽略
-  }
-}
-
-function removeKimiCodeCredentials(dir: string): void {
-  if (!existsSync(dir)) return;
-  for (const file of credentialsFilesIn(dir)) {
-    rmSync(file, { force: true });
-  }
-}
-
-function copyKimiCodeCredentials(from: string, to: string): boolean {
-  ensurePrivateDir(to);
-  removeKimiCodeCredentials(to);
-  const files = credentialsFilesIn(from);
-  for (const file of files) {
-    const fileName = basename(file);
-    copyFileSync(file, join(to, fileName));
-    try {
-      chmodSync(join(to, fileName), 0o600);
-    } catch {
-      // 非 POSIX 忽略
-    }
-  }
-  return files.length > 0;
-}
-
-function ensureOfficialAccountsSchema(): void {
-  getDb().exec(OFFICIAL_ACCOUNTS_SCHEMA_SQL);
-}
-
-function rowToAccount(row: Record<string, unknown>): Record<string, unknown> {
-  return {
-    id: String(row.id ?? ""),
-    display_name: String(row.display_name ?? ""),
-    account_hint: String(row.account_hint ?? ""),
-    status: String(row.status ?? ""),
-    is_active: Number(row.is_active ?? 0) !== 0,
-    credentials_slot_path: String(row.credentials_slot_path ?? ""),
-    last_login_at: String(row.last_login_at ?? ""),
-    last_checked_at: String(row.last_checked_at ?? ""),
-    last_used_at: String(row.last_used_at ?? ""),
-    metadata_json: String(row.metadata_json ?? ""),
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  };
-}
-
-function getAccount(id: string): Record<string, unknown> | null {
-  const row = queryRow(
-    "SELECT id, display_name, account_hint, status, is_active, credentials_slot_path, " +
-      "last_login_at, last_checked_at, last_used_at, metadata_json, created_at, updated_at " +
-      "FROM official_accounts WHERE id = ?1",
-    [id],
-  );
-  return row ? rowToAccount(row) : null;
-}
-
-function getActiveAccount(): Record<string, unknown> | null {
-  const row = queryRow(
-    "SELECT id, display_name, account_hint, status, is_active, credentials_slot_path, " +
-      "last_login_at, last_checked_at, last_used_at, metadata_json, created_at, updated_at " +
-      "FROM official_accounts WHERE is_active = 1 LIMIT 1",
-  );
-  return row ? rowToAccount(row) : null;
-}
-
-function insertAccount(
-  id: string,
-  displayName: string,
-  accountHint: string,
-  status: string,
-  isActive: boolean,
-  slotPath: string,
-): Record<string, unknown> {
-  const now = nowIso();
-  run(
-    "INSERT INTO official_accounts (" +
-      "id, display_name, account_hint, status, is_active, credentials_slot_path, " +
-      "last_login_at, last_checked_at, last_used_at, metadata_json, created_at, updated_at" +
-      ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, '{}', ?9, ?10)",
-    [
-      id,
-      displayName,
-      accountHint,
-      status,
-      isActive ? 1 : 0,
-      slotPath,
-      status === "logged-in" ? now : "",
-      isActive ? now : "",
-      now,
-      now,
-    ],
-  );
-  const account = getAccount(id);
-  if (!account) throw new Error("Official account was not saved.");
-  return account;
-}
-
-function initOfficialAccountsStore(): void {
-  ensureOfficialAccountsSchema();
-}
-
-function listOfficialAccounts(): Record<string, unknown>[] {
-  ensureOfficialAccountsSchema();
-  const rows = queryRows(
-    "SELECT id, display_name, account_hint, status, is_active, credentials_slot_path, " +
-      "last_login_at, last_checked_at, last_used_at, metadata_json, created_at, updated_at " +
-      "FROM official_accounts " +
-      "ORDER BY is_active DESC, updated_at DESC, display_name COLLATE NOCASE ASC",
-  );
-  return rows.map(rowToAccount);
-}
-
-function createOfficialAccount(displayName: string): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const id = createAccountId();
-  const slotDir = accountSlotDir(id);
-  ensurePrivateDir(slotDir);
-  const name = displayName.trim() === "" ? "Kimi Official Account" : displayName.trim();
-  return insertAccount(id, name, "", "empty", false, pathToTilde(slotDir));
-}
-
-function renameOfficialAccount(id: string, displayName: string): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const safeId = safeAccountId(id);
-  const name = displayName.trim();
-  if (name === "") throw new Error("Official account display name cannot be empty.");
-  run("UPDATE official_accounts SET display_name = ?1, updated_at = ?2 WHERE id = ?3", [
-    name,
-    nowIso(),
-    safeId,
-  ]);
-  const account = getAccount(safeId);
-  if (!account) throw new Error("Official account not found.");
-  return account;
-}
-
-function officialOperationResult(
-  account: Record<string, unknown>,
-  activeAccountId: string,
-  credentialsPresent: boolean,
-): Record<string, unknown> {
-  return { account, active_account_id: activeAccountId, credentials_present: credentialsPresent };
-}
-
-function captureCurrentOfficialAccount(displayName: string): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const id = createAccountId();
-  const slotDir = accountSlotDir(id);
-  ensurePrivateDir(slotDir);
-  const credentialsPresent = copyKimiCodeCredentials(standardCredentialsDir(), slotDir);
-  const name = displayName.trim() === "" ? "Current Kimi Account" : displayName.trim();
-  run("UPDATE official_accounts SET is_active = 0", []);
-  const account = insertAccount(
-    id,
-    name,
-    "",
-    credentialsPresent ? "logged-in" : "empty",
-    true,
-    pathToTilde(slotDir),
-  );
-  return officialOperationResult(account, String(account.id), credentialsPresent);
-}
-
-function prepareOfficialAccountLogin(id: string): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const safeId = safeAccountId(id);
-  const account = getAccount(safeId);
-  if (!account) throw new Error("Official account not found.");
-  const active = getActiveAccount();
-  if (active) {
-    copyKimiCodeCredentials(standardCredentialsDir(), expandHome(String(active.credentials_slot_path)));
-  }
-  clearCurrentCredentials();
-  return officialOperationResult(account, String(account.id), false);
-}
-
-function clearCurrentCredentials(): void {
-  const dir = standardCredentialsDir();
-  ensurePrivateDir(dir);
-  removeKimiCodeCredentials(dir);
-}
-
-function completeOfficialAccountLogin(id: string, activate: boolean): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const safeId = safeAccountId(id);
-  const account = getAccount(safeId);
-  if (!account) throw new Error("Official account not found.");
-  const slotDir = expandHome(String(account.credentials_slot_path));
-  const credentialsPresent = copyKimiCodeCredentials(standardCredentialsDir(), slotDir);
-  const now = nowIso();
-  if (activate) {
-    run("UPDATE official_accounts SET is_active = 0", []);
-  } else {
-    const active = getActiveAccount();
-    if (active) {
-      copyKimiCodeCredentials(expandHome(String(active.credentials_slot_path)), standardCredentialsDir());
-    }
-  }
-  run(
-    "UPDATE official_accounts " +
-      "SET status = ?1, is_active = ?2, last_login_at = ?3, last_checked_at = ?4, " +
-      "last_used_at = CASE WHEN ?2 = 1 THEN ?5 ELSE last_used_at END, updated_at = ?6 " +
-      "WHERE id = ?7",
-    [
-      credentialsPresent ? "logged-in" : "empty",
-      activate ? 1 : 0,
-      credentialsPresent ? now : "",
-      now,
-      now,
-      now,
-      safeId,
-    ],
-  );
-  const updated = getAccount(safeId);
-  if (!updated) throw new Error("Official account not found.");
-  const activeAccountId = activate
-    ? String(updated.id)
-    : getActiveAccount()
-      ? String(getActiveAccount()!.id)
-      : "";
-  return officialOperationResult(updated, activeAccountId, credentialsPresent);
-}
-
-function activateOfficialAccount(id: string): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const safeId = safeAccountId(id);
-  const target = getAccount(safeId);
-  if (!target) throw new Error("Official account not found.");
-  const previous = getActiveAccount();
-  if (previous) {
-    copyKimiCodeCredentials(standardCredentialsDir(), expandHome(String(previous.credentials_slot_path)));
-  }
-  const backupDir = join(officialAccountsRoot(), ".switch-backup");
-  ensurePrivateDir(backupDir);
-  const hadBackup = copyKimiCodeCredentials(standardCredentialsDir(), backupDir);
-  let materializeError: unknown = null;
-  try {
-    copyKimiCodeCredentials(expandHome(String(target.credentials_slot_path)), standardCredentialsDir());
-  } catch (error) {
-    materializeError = error;
-  }
-  if (materializeError !== null) {
-    if (hadBackup) {
-      try {
-        copyKimiCodeCredentials(backupDir, standardCredentialsDir());
-      } catch {
-        // ignore
-      }
-    }
-    throw new Error(String(materializeError));
-  }
-  const credentialsPresent = hasCredentials(standardCredentialsDir());
-  const now = nowIso();
-  run("UPDATE official_accounts SET is_active = 0", []);
-  run(
-    "UPDATE official_accounts SET is_active = 1, status = ?1, last_checked_at = ?2, last_used_at = ?3, updated_at = ?4 WHERE id = ?5",
-    [credentialsPresent ? "logged-in" : "empty", now, now, now, safeId],
-  );
-  const account = getAccount(safeId);
-  if (!account) throw new Error("Official account not found.");
-  return officialOperationResult(account, String(account.id), credentialsPresent);
-}
-
-function deleteOfficialAccount(id: string): void {
-  ensureOfficialAccountsSchema();
-  const safeId = safeAccountId(id);
-  const account = getAccount(safeId);
-  if (!account) throw new Error("Official account not found.");
-  run("DELETE FROM official_accounts WHERE id = ?1", [safeId]);
-  const slot = expandHome(String(account.credentials_slot_path));
-  if (existsSync(slot)) {
-    rmSync(slot, { recursive: true, force: true });
-  }
-  if (account.is_active === true) {
-    clearCurrentCredentials();
-  }
-}
-
-function getOfficialAccountCredentialsStatus(): Record<string, unknown> {
-  ensureOfficialAccountsSchema();
-  const active = getActiveAccount();
-  const currentDir = standardCredentialsDir();
-  return {
-    active_account_id: active ? String(active.id) : "",
-    credentials_present: hasCredentials(currentDir),
-    standard_credentials_path: pathToTilde(currentDir),
-  };
-}
-
-// ─────────────────────────── 桌面/桥接占位 ───────────────────────────
-
-function noopDesktop(): void {
-  // 服务端无托盘/全局快捷键/主窗口能力；返回无副作用成功（对齐浏览器形态期望）。
-}
-
-function bridgeNotImplemented(): never {
-  throw new Error("ChatGPT subscription bridge is not implemented in the server runtime");
-}
-
 // ─────────────────────────── 命令注册 ───────────────────────────
 
 export const storesCommands: CommandHandlers = {
   // 配置历史
   init_config_history(): void {
     initConfigHistory();
-  },
-  capture_snapshot(args: Record<string, unknown>): number | null {
-    return captureSnapshot(
-      String(args.fileId ?? ""),
-      String(args.filePath ?? ""),
-      args.description == null ? null : String(args.description),
-      args.kimiCodeEnvironmentId == null ? null : String(args.kimiCodeEnvironmentId),
-    );
   },
   list_snapshots(args: Record<string, unknown>): Record<string, unknown>[] {
     return listSnapshots(
@@ -1824,30 +1268,9 @@ export const storesCommands: CommandHandlers = {
       Number(args.limit ?? 100),
     );
   },
-  assign_legacy_snapshot_environment(args: Record<string, unknown>): void {
-    getDb().exec("BEGIN IMMEDIATE;");
-    try {
-      assignLegacySnapshot(Number(args.snapshotId), String(args.kimiCodeEnvironmentId ?? ""));
-      getDb().exec("COMMIT;");
-    } catch (error) {
-      try {
-        getDb().exec("ROLLBACK;");
-      } catch {
-        // ignore
-      }
-      throw error;
-    }
-  },
   get_snapshot_content(args: Record<string, unknown>): string {
     return getSnapshotContent(Number(args.snapshotId));
   },
-  restore_snapshot(args: Record<string, unknown>): void {
-    restoreSnapshot(Number(args.snapshotId));
-  },
-  cleanup_old_snapshots(): number {
-    return cleanupOldSnapshots();
-  },
-
   // 面板设置
   init_panel_settings_store(): void {
     initPanelSettingsStore();
@@ -1866,81 +1289,6 @@ export const storesCommands: CommandHandlers = {
   import_panel_settings(args: Record<string, unknown>): void {
     savePanelSettingsRaw(String(args.settingsJson ?? ""));
   },
-  migrate_panel_settings_from_toml(args: Record<string, unknown>): void {
-    migratePanelSettingsFromToml(String(args.tomlPath ?? ""));
-  },
 
-  // 官方账号
-  init_official_accounts_store(): void {
-    initOfficialAccountsStore();
-  },
-  list_official_accounts(): Record<string, unknown>[] {
-    return listOfficialAccounts();
-  },
-  get_official_account_credentials_status(): Record<string, unknown> {
-    return getOfficialAccountCredentialsStatus();
-  },
-  create_official_account(args: Record<string, unknown>): Record<string, unknown> {
-    return createOfficialAccount(String(args.displayName ?? ""));
-  },
-  rename_official_account(args: Record<string, unknown>): Record<string, unknown> {
-    return renameOfficialAccount(String(args.id ?? ""), String(args.displayName ?? ""));
-  },
-  capture_current_official_account(args: Record<string, unknown>): Record<string, unknown> {
-    return captureCurrentOfficialAccount(String(args.displayName ?? ""));
-  },
-  prepare_official_account_login(args: Record<string, unknown>): Record<string, unknown> {
-    return prepareOfficialAccountLogin(String(args.id ?? ""));
-  },
-  complete_official_account_login(args: Record<string, unknown>): Record<string, unknown> {
-    return completeOfficialAccountLogin(String(args.id ?? ""), args.activate === true);
-  },
-  activate_official_account(args: Record<string, unknown>): Record<string, unknown> {
-    return activateOfficialAccount(String(args.id ?? ""));
-  },
-  delete_official_account(args: Record<string, unknown>): void {
-    deleteOfficialAccount(String(args.id ?? ""));
-  },
 
-  // 托盘（桌面专属，服务端无副作用占位）
-  set_tray(): void {
-    noopDesktop();
-  },
-  show_main_window(): void {
-    noopDesktop();
-  },
-  set_dock_icon_visibility(): void {
-    noopDesktop();
-  },
-
-  // 全局快捷键（桌面专属，服务端无副作用占位）
-  sync_window_toggle_shortcut(): void {
-    noopDesktop();
-  },
-
-  // ChatGPT 订阅桥接（后续 Wave；抛明确错误占位，registry 完整性保持注册）
-  bridge_start(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_stop(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_status(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_login(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_wait_login(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_logout(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_refresh_models(): never {
-    return bridgeNotImplemented();
-  },
-  bridge_probe_connectivity(): never {
-    return bridgeNotImplemented();
-  },
 };

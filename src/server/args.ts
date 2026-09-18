@@ -1,14 +1,17 @@
 // 服务端 CLI 参数解析：--port（默认 8417）/--no-open/--data-dir（测试用，覆盖 panel 数据目录根）。
 export const DEFAULT_SERVER_PORT = 8417;
 
+export type ServerCommand = "start" | "open" | "status" | "stop";
+
 export interface ServerCliArgs {
+  command: ServerCommand;
   port: number;
   noOpen: boolean;
   dataDir: string | null;
   help: boolean;
 }
 
-export const SERVER_USAGE = "usage: server.mjs [--port <port>] [--no-open] [--data-dir <dir>]";
+export const SERVER_USAGE = "usage: kimi-code-switch [start|open|status|stop] [--port <port>] [--no-open] [--data-dir <dir>]";
 
 /** 拆分 --name=value 形式；返回 [name, value?]，value 为 undefined 表示没有内联值。 */
 function splitInlineOption(arg: string): [name: string, inlineValue: string | undefined] {
@@ -18,6 +21,7 @@ function splitInlineOption(arg: string): [name: string, inlineValue: string | un
 
 export function parseServerArgs(argv: readonly string[]): ServerCliArgs {
   const args: ServerCliArgs = {
+    command: "start",
     port: DEFAULT_SERVER_PORT,
     noOpen: false,
     dataDir: null,
@@ -25,6 +29,10 @@ export function parseServerArgs(argv: readonly string[]): ServerCliArgs {
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
+    if (index === 0 && ["start", "open", "status", "stop"].includes(arg)) {
+      args.command = arg as ServerCommand;
+      continue;
+    }
     const [name, inlineValue] = splitInlineOption(arg);
     const nextValue = (): string => {
       if (inlineValue !== undefined) return inlineValue;

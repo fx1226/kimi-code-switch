@@ -1,0 +1,185 @@
+{
+  "forbiddenRuntimeModules": [],
+  "included": [
+    {
+      "path": "src/server/http/auth.ts",
+      "bytes": 2106
+    },
+    {
+      "path": "src/server/lock.ts",
+      "bytes": 3603
+    },
+    {
+      "path": "src/server/native/paths.ts",
+      "bytes": 2530
+    },
+    {
+      "path": "src/server/events.ts",
+      "bytes": 507
+    },
+    {
+      "path": "src/server/native/system.ts",
+      "bytes": 16870
+    },
+    {
+      "path": "src/server/native/usage.ts",
+      "bytes": 4134
+    },
+    {
+      "path": "src/server/native/stores.ts",
+      "bytes": 29584
+    },
+    {
+      "path": "src/server/native/index.ts",
+      "bytes": 694
+    },
+    {
+      "path": "src/server/native/fs.ts",
+      "bytes": 41999
+    },
+    {
+      "path": "src/server/migration/legacy.ts",
+      "bytes": 14064
+    },
+    {
+      "path": "src/server/http/sse.ts",
+      "bytes": 1552
+    },
+    {
+      "path": "src/server/http/static.ts",
+      "bytes": 2760
+    },
+    {
+      "path": "src/shared/mcpStore.ts",
+      "bytes": 6877
+    },
+    {
+      "path": "src/shared/kimiCompatibility.ts",
+      "bytes": 2574
+    },
+    {
+      "path": "src/shared/documentPatch.ts",
+      "bytes": 24181
+    },
+    {
+      "path": "src/shared/configTarget.ts",
+      "bytes": 1374
+    },
+    {
+      "path": "src/shared/currency.ts",
+      "bytes": 143
+    },
+    {
+      "path": "src/shared/nameRules.ts",
+      "bytes": 131
+    },
+    {
+      "path": "src/shared/pluginStore.ts",
+      "bytes": 11508
+    },
+    {
+      "path": "src/shared/shortcutStore.ts",
+      "bytes": 3875
+    },
+    {
+      "path": "src/shared/tuiStore.ts",
+      "bytes": 6431
+    },
+    {
+      "path": "src/shared/configStore.ts",
+      "bytes": 46457
+    },
+    {
+      "path": "src/shared/configSafety.ts",
+      "bytes": 3282
+    },
+    {
+      "path": "src/server/native/targetLock.ts",
+      "bytes": 2481
+    },
+    {
+      "path": "src/server/configuration/portable.ts",
+      "bytes": 3294
+    },
+    {
+      "path": "src/server/configuration/candidateValidation.ts",
+      "bytes": 8636
+    },
+    {
+      "path": "src/server/configuration/index.ts",
+      "bytes": 34749
+    },
+    {
+      "path": "src/server/officialValidation.ts",
+      "bytes": 8716
+    },
+    {
+      "path": "src/server/runtime.ts",
+      "bytes": 134
+    },
+    {
+      "path": "src/shared/versionUtils.ts",
+      "bytes": 75
+    },
+    {
+      "path": "src/server/services/cli.ts",
+      "bytes": 18301
+    },
+    {
+      "path": "src/shared/skillsStore.ts",
+      "bytes": 22200
+    },
+    {
+      "path": "src/server/services/panelSettingsStore.ts",
+      "bytes": 747
+    },
+    {
+      "path": "src/server/services/kimiSwitch.ts",
+      "bytes": 13628
+    },
+    {
+      "path": "src/server/services/terminal.ts",
+      "bytes": 4915
+    },
+    {
+      "path": "src/server/services/officialAccount.ts",
+      "bytes": 8559
+    },
+    {
+      "path": "src/server/services/webBackup.ts",
+      "bytes": 29666
+    },
+    {
+      "path": "src/server/metadata.ts",
+      "bytes": 13307
+    },
+    {
+      "path": "src/server/application.ts",
+      "bytes": 14290
+    },
+    {
+      "path": "src/server/http/validation.ts",
+      "bytes": 8690
+    },
+    {
+      "path": "src/server/http/publicError.ts",
+      "bytes": 16977
+    },
+    {
+      "path": "src/server/http/routes.ts",
+      "bytes": 4767
+    },
+    {
+      "path": "src/server/main.ts",
+      "bytes": 9545
+    },
+    {
+      "path": "src/server/args.ts",
+      "bytes": 1826
+    },
+    {
+      "path": "src/server/messages.ts",
+      "bytes": 1635
+    }
+  ]
+}

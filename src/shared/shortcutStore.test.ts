@@ -1,14 +1,12 @@
 import {
   createDefaultShortcuts,
-  formatAcceleratorForPlatform,
   getShortcutConflicts,
   isValidAccelerator,
   normalizeShortcuts,
-  resetShortcutBinding,
   sanitizeAccelerator,
 } from "./shortcutStore";
 
-describe("shortcutStore", () => {
+describe("legacy shortcut metadata compatibility", () => {
   it("creates complete default shortcuts", () => {
     const shortcuts = createDefaultShortcuts();
     expect(Object.keys(shortcuts)).not.toContain("window.show");
@@ -68,15 +66,6 @@ describe("shortcutStore", () => {
     expect(shortcuts["window.toggle"].enabled).toBe(true);
   });
 
-  it("resets a shortcut binding to its default value", () => {
-    expect(resetShortcutBinding("app.reloadConfig")).toEqual({
-      action: "app.reloadConfig",
-      accelerator: "CommandOrControl+R",
-      enabled: true,
-      scope: "window",
-    });
-  });
-
   it("detects conflicts within the same scope", () => {
     const shortcuts = createDefaultShortcuts();
     shortcuts["tab.overview"] = {
@@ -108,11 +97,4 @@ describe("shortcutStore", () => {
     expect(getShortcutConflicts(shortcuts)).toEqual([]);
   });
 
-  it("formats accelerators for macOS and non-macOS platforms", () => {
-    expect(formatAcceleratorForPlatform("Command+Shift+H", "darwin")).toBe("⌘+⇧+H");
-    expect(formatAcceleratorForPlatform("CommandOrControl+Shift+K", "win32")).toBe("Ctrl+Shift+K");
-    expect(formatAcceleratorForPlatform("Super+Shift+K", "win32")).toBe("Win+Shift+K");
-    expect(formatAcceleratorForPlatform("Super+Shift+K", "linux")).toBe("Super+Shift+K");
-    expect(formatAcceleratorForPlatform("Command+Shift+K", "darwin")).toBe("⌘+⇧+K");
-  });
 });

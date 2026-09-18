@@ -1,0 +1,37 @@
+{
+  "browser": "153.0.8010.52",
+  "method": "Service was restarted immediately before this process. Navigation start to visible overview, enabled target selector and enabled config.toml source button; MutationObserver in page, no mocked/skipped configuration reads. Browser launch excluded. Warm samples reload same browser context.",
+  "samples": [
+    {
+      "kind": "cold-service-first-bootstrap",
+      "ms": 2178.199999988079,
+      "requests": 8
+    },
+    {
+      "kind": "warm-reload",
+      "ms": 68.39999997615814,
+      "requests": 8
+    },
+    {
+      "kind": "warm-reload",
+      "ms": 61.80000001192093,
+      "requests": 8
+    },
+    {
+      "kind": "warm-reload",
+      "ms": 62.39999997615814,
+      "requests": 8
+    },
+    {
+      "kind": "warm-reload",
+      "ms": 60.799999952316284,
+      "requests": 8
+    },
+    {
+      "kind": "warm-reload",
+      "ms": 60,
+      "requests": 8
+    }
+  ],
+  "coldBudgetMs": 1500
+}

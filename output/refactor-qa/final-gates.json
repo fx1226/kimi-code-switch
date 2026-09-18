@@ -1,0 +1,68 @@
+{
+  "recordedAt": "2026-09-18T05:35:56.566Z",
+  "status": "budget-exceeded",
+  "version": "2.2.7",
+  "tests": {
+    "files": 55,
+    "tests": 856,
+    "coverage": {
+      "statements": 85.31,
+      "branches": 79.58,
+      "functions": 87.63,
+      "lines": 85.31
+    },
+    "log": "final-tests.log"
+  },
+  "typecheck": {
+    "status": "passed",
+    "log": "final-typecheck.log"
+  },
+  "build": {
+    "status": "passed",
+    "command": "PKG_CACHE_PATH=/private/tmp/kimi-code-switch-pkg-cache npm run build",
+    "log": "final-build.log",
+    "cacheNote": "Temporary writable copy of existing pkg Node22 cache; no new runtime download"
+  },
+  "package": {
+    "status": "passed",
+    "log": "final-package.log",
+    "metrics": "final-package-metrics.json",
+    "binary": "dist-release/kimi-code-switch",
+    "binaryBytes": 63178000,
+    "binarySha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "archive": "dist-release/kimi-code-switch-2.2.7-macos-arm64.tar.gz",
+    "archiveBytes": 22597864,
+    "archiveSha256": "5ac1464ded24eca475d85d4b7f475fc5fb6c90596797ab3fd5b3a2ec79882c3d"
+  },
+  "dependencies": {
+    "forbiddenRuntimeModules": [],
+    "report": "final-package-dependencies.json"
+  },
+  "formula": {
+    "status": "ruby-syntax-passed",
+    "path": "dist-release/kimi-code-switch.rb",
+    "log": "final-formula.log",
+    "published": false
+  },
+  "performance": {
+    "status": "budget-exceeded",
+    "report": "final-performance-metrics.json",
+    "log": "final-performance.log",
+    "binarySha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "startupP95Ms": 556.11,
+    "idleCpuPercent": 0.36,
+    "peakRssMiB": 53.63,
+    "agentsPlanApplyP95Ms": 159.13,
+    "configPlanApplyP95Ms": 1347.12,
+    "configOverBudgetSamples": 2,
+    "saveBudgetMs": 1000,
+    "operationCorrectness": "40/40 native commits verified against file content, revision hash and parsed readback",
+    "limitation": "The config save time budget is not met for this measured final artifact; previous passing measurements are not substituted."
+  },
+  "release": {
+    "committed": false,
+    "tagged": false,
+    "pushed": false,
+    "published": false
+  }
+}

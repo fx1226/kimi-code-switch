@@ -54,6 +54,8 @@ describe("tuiStore", () => {
         disable_paste_burst: true,
         renderLatex: false,
         cacheExpiryHint: true,
+        disableFeedbackSurvey: true,
+        markdownMermaid: "off" as const,
         editorCommand: "vim",
         notificationsEnabled: true,
         notificationCondition: "unfocused" as const,
@@ -79,6 +81,19 @@ items = ["model", "unknown", "cwd"]
       expect(parseTuiConfigDocument("")).toEqual({});
       expect(parseTuiConfigDocument("  \n ")).toEqual({});
       expect(parseTuiConfigDocument("theme = ")).toEqual({});
+    });
+
+    it("falls back on unknown Mermaid values without overwriting their source", () => {
+      const document = 'disable_feedback_survey = true\n[markdown]\nmermaid = "future-mode"\ncustom = "keep"\n';
+      const parsed = parseTuiConfigDocumentWithDiagnostics(document);
+      expect(parsed.config.disableFeedbackSurvey).toBe(true);
+      expect(parsed.config.markdownMermaid).toBeUndefined();
+      expect(parsed.effective.markdownMermaid).toBe("final");
+      expect(parsed.warnings).toContain("Unknown markdown.mermaid value ignored: future-mode");
+      expect(mergeTuiConfigDocument(document, {})).toBe(document);
+      const changed = mergeTuiConfigDocument(document, { markdownMermaid: "off", disableFeedbackSurvey: false });
+      expect(changed).toContain('custom = "keep"');
+      expect(parseTuiConfigDocument(changed)).toMatchObject({ markdownMermaid: "off", disableFeedbackSurvey: false });
     });
 
     it("leaves missing fields undefined", () => {
@@ -241,6 +256,8 @@ items = ["model", "unknown", "cwd"]
         disablePasteBurst: false,
         renderLatex: true,
         cacheExpiryHint: true,
+        disableFeedbackSurvey: false,
+        markdownMermaid: "final",
         editorCommand: null,
         notificationsEnabled: true,
         notificationCondition: "unfocused",

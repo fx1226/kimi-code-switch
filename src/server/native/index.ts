@@ -1,7 +1,4 @@
-// 服务端 invoke 分发中心：按命令名查 commandRegistry。
-// Wave 0 只搭骨架：四个存根模块均为空注册表，未注册命令调用时抛
-// `unsupported command <name> in server runtime`。
-// Wave 2 将按 src-tauri/src/lib.rs:31-126 注册的命令名逐组移植实现。
+// Explicit internal native capabilities. HTTP exposes its own narrower typed API.
 export type CommandHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
 
 export type CommandHandlers = Record<string, CommandHandler>;
@@ -19,7 +16,7 @@ export const commandRegistry: CommandHandlers = {
 };
 
 export async function invokeCommand<T = unknown>(command: string, args: Record<string, unknown> = {}): Promise<T> {
-  const handler = commandRegistry[command];
+  const handler = Object.hasOwn(commandRegistry, command) ? commandRegistry[command] : undefined;
   if (!handler) {
     throw new Error(`unsupported command ${command} in server runtime`);
   }

@@ -1,0 +1,22 @@
+{
+  "browser": "26.6",
+  "checks": [
+    "Tab arrow keys switch the resource panel and move focus.",
+    "Escape closes the native modal and returns focus to the initiating review button.",
+    "Saving provider alpha changed only alpha; beta remained an in-page draft and its native bytes stayed unchanged.",
+    "Provider editor fits 1024px without horizontal document overflow.",
+    "Provider editor fits 768px without horizontal document overflow.",
+    "200% reflow emulation: 720 CSS px at DPR 2 (1440 physical px), no horizontal overflow. Native browser-menu zoom was not controlled.",
+    "MCP graphical edit preserved unknown top-level and server fields.",
+    "Default target accepted a project directory; working-directory MCP displays its independent empty file.",
+    "Malformed backup appears beside healthy and earlier v1 backups; restore is disabled, browser download preserves its original bytes.",
+    "Created a real local backup through the browser.",
+    "Browser backup restoration reviewed a real change and restored config.toml byte-for-byte.",
+    "Dark theme renders using the existing dark logo and system fonts."
+  ],
+  "errors": [],
+  "fixtureRoot": "/var/folders/y3/3l9jtb5s12s96lbq1l9svl0c0000gn/T/kimi-switch-ui-qa-faw5arj0",
+  "engine": "Playwright WebKit",
+  "safariProductVerified": false,
+  "fixtureCleaned": true
+}

@@ -43,9 +43,10 @@ export const BACKUP_DIRECTORY_NAME = "backups";
 export const DEFAULT_PROFILE_NAME = "default";
 export const DEFAULT_KIMI_CODE_ENVIRONMENT_ID = "default";
 export const DEFAULT_KIMI_CODE_ENVIRONMENT_NAME = "默认环境";
-export const PANEL_APP_DIRECTORY = "~/.kimi-code-switch-gui";
+export const PANEL_APP_DIRECTORY = "~/.kimi-code-switch";
+export const LEGACY_PANEL_APP_DIRECTORY = "~/.kimi-code-switch-gui";
 export const KIMI_CODE_ENVIRONMENTS_DIRECTORY = `${PANEL_APP_DIRECTORY}/.env`;
-export const LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME = `${KIMI_CODE_ENVIRONMENTS_DIRECTORY}/${DEFAULT_KIMI_CODE_ENVIRONMENT_ID}`;
+export const LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME = `${LEGACY_PANEL_APP_DIRECTORY}/.env/${DEFAULT_KIMI_CODE_ENVIRONMENT_ID}`;
 
 /**
  * 根据目标获取默认配置路径
@@ -401,6 +402,7 @@ export async function loadAppState(
   );
   const environmentMcpServers = getEnvironmentMcpServers(activeEnvironment, panelSettings, fileMcpConfig.mcpServers);
   const mcpConfig = {
+    ...(fileMcpConfig.extra ? { extra: fileMcpConfig.extra } : {}),
     mcpServers: environmentMcpServers,
   };
 
@@ -1986,12 +1988,6 @@ function mergeInstalledPluginDocuments(
     : { value: currentDocument, changed: false };
 }
 
-function isLegacyManagedDefaultKimiCodeHome(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  const legacySuffix = "/.kimi-code-switch-gui/.env/default";
-  return normalized === LEGACY_MANAGED_DEFAULT_KIMI_CODE_HOME || normalized.endsWith(legacySuffix);
-}
-
 function isEmptyRecordValue(value: unknown): boolean {
   return isRecord(value) && Object.keys(value).length === 0;
 }
@@ -3088,20 +3084,16 @@ function parseKimiCodeEnvironments(
       ? defaultKimiCodeHomePath()
       : getKimiCodeEnvironmentHomePath(id);
     const requestedHomePath = sanitizePath(asString(item.homePath, ""), fallbackHomePath);
-    // Older GUI releases stored the default environment inside the GUI data
-    // directory. It is never a valid active default home: the one-time file
-    // migration runs before state loading, then this prevents the stale panel
-    // record from ever routing Kimi back to the retired location.
-    const homePath = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
-      && isLegacyManagedDefaultKimiCodeHome(requestedHomePath)
-      ? defaultKimiCodeHomePath()
-      : requestedHomePath;
-    const inferredKind: KimiCodeEnvironment["kind"] = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+    // A product rename must never reroute an existing target. Legacy homes are
+    // relocated only by an explicit, separately reviewed migration.
+    const homePath = requestedHomePath;
+    const isNativeDefault = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID && homePath === defaultKimiCodeHomePath();
+    const inferredKind: KimiCodeEnvironment["kind"] = isNativeDefault
       ? "default"
       : homePath === getKimiCodeEnvironmentHomePath(id)
         ? "managed"
         : "external";
-    const kind = id === DEFAULT_KIMI_CODE_ENVIRONMENT_ID
+    const kind = isNativeDefault
       ? "default"
       : item.kind === "managed" || item.kind === "external"
         ? item.kind

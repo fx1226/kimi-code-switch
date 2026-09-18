@@ -1,0 +1,668 @@
+{
+  "measuredAt": "2026-09-18T05:35:38.834Z",
+  "status": "budget-exceeded",
+  "platform": "darwin",
+  "arch": "arm64",
+  "artifact": {
+    "file": "<workspace>/dist-release/kimi-code-switch",
+    "sha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "bytes": 63178000
+  },
+  "writeValidationMode": "Version evidence is reusable only while each write rechecks original-path realpath plus dev/ino/size/mtimeNs/ctimeNs/mode identity; changes invalidate it. Every config candidate still invokes real official doctor. Native transaction and recovery records remain enabled.",
+  "methodology": {
+    "startup": "Five new processes with separate fresh HOME, KIMI_CODE_HOME and app data directories; each native directory is seeded with the same credential-free default_plan_mode=false fixture. Measure spawn to successful HTTP /api/ping. Filesystem caches are not flushed; this is not a disk-cold or browser first-paint measurement.",
+    "idle": "After authenticated bootstrap and a 500 ms settling period, sample ps process CPU time and RSS for 10 seconds per process. Average CPU is cumulative process CPU time delta / measured wall time, where 100% means one fully occupied core. CLI child CPU is excluded after bootstrap.",
+    "saves": "Twenty sequential 1024-byte AGENTS.md changes through authenticated HTTP planChange then applyChange, including initial creation, with the application's current version gate. Each result must succeed and match the native file content and SHA-256 revision. No doctor is claimed for this text resource.",
+    "configSaves": "Twenty config.toml default_plan_mode boolean toggles through authenticated HTTP planChange then applyChange. Every plan must report a real official doctor success, and every commit must match the native file, SHA-256 revision and parsed readback. The 1000 ms save budget includes the full HTTP plan plus apply path, including version checks, doctor, transaction and recovery records; apply alone is reported only as a component.",
+    "cliTimings": "Five isolated real --version and five doctor config fixture calls provide independent subprocess timing for attribution. They are outside the measured HTTP saves and never replace or bypass the application's checks.",
+    "percentile": "Nearest-rank percentile, rank ceil(p * sample count)."
+  },
+  "officialCli": {
+    "requestedPath": "<official-cli>",
+    "resolvedPath": "<official-cli>",
+    "version": "2.0.0",
+    "status": "verified"
+  },
+  "startupBudgetMs": 2000,
+  "saveBudgetMs": 1000,
+  "idleCpuBudgetPercent": 1,
+  "peakRssBudgetMiB": 120,
+  "binaryBudgetMiB": 90,
+  "previousRun": {
+    "measuredAt": "2026-09-18T05:16:02.560Z",
+    "status": "passed",
+    "artifactSha256": "2a065f24f1ef4a7cedd56e70f5150aa05707d3f46ac36282c380a7d237370706",
+    "agentsApplyMs": {
+      "samples": 20,
+      "min": 87.49,
+      "mean": 91.4,
+      "p50": 90.74,
+      "p95": 95.88,
+      "max": 97.5
+    },
+    "agentsPlanAndApplyMs": {
+      "samples": 20,
+      "min": 136.88,
+      "mean": 142.42,
+      "p50": 140.31,
+      "p95": 148.49,
+      "max": 175.11
+    },
+    "configApplyMs": {
+      "samples": 20,
+      "min": 90.95,
+      "mean": 95.62,
+      "p50": 94.72,
+      "p95": 101.33,
+      "max": 106.01
+    },
+    "configPlanAndApplyMs": {
+      "samples": 20,
+      "min": 584.78,
+      "mean": 607.12,
+      "p50": 590.91,
+      "p95": 613.73,
+      "max": 858.69
+    },
+    "configOverBudgetSamples": 0,
+    "writeValidationMode": "Version evidence is reusable only while each write rechecks original-path realpath plus dev/ino/size/mtimeNs/ctimeNs/mode identity; changes invalidate it. Every config candidate still invokes real official doctor. Native transaction and recovery records remain enabled.",
+    "limitation": "This is the immediately preceding artifact measurement. Compare its recorded policy and artifact hash; never present it as a result for the current binary."
+  },
+  "previousAttempt": {
+    "measuredAt": "2026-09-18T05:33:09.511Z",
+    "status": "interrupted",
+    "artifactSha256": "2ecf6882c4e5e3e7a88374aa060259eaa22fba78f5fbfdd207cdcac4d2a9a240",
+    "completedStartupRounds": 2,
+    "limitation": "This incomplete attempt is not a completed performance result; the last completed comparison remains in previousRun."
+  },
+  "rounds": [
+    {
+      "index": 1,
+      "readyMs": 556.11,
+      "bootstrapMs": 499.76,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10007.3,
+        "cpuTimeSeconds": 0.04,
+        "averageCpuPercent": 0.4,
+        "rssMiB": {
+          "first": 53.63,
+          "last": 51.06,
+          "mean": 52.93,
+          "peak": 53.63
+        }
+      }
+    },
+    {
+      "index": 2,
+      "readyMs": 86.11,
+      "bootstrapMs": 526.43,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10006.74,
+        "cpuTimeSeconds": 0.03,
+        "averageCpuPercent": 0.3,
+        "rssMiB": {
+          "first": 53.33,
+          "last": 50.75,
+          "mean": 52.63,
+          "peak": 53.33
+        }
+      }
+    },
+    {
+      "index": 3,
+      "readyMs": 90.82,
+      "bootstrapMs": 528.48,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10007.49,
+        "cpuTimeSeconds": 0.04,
+        "averageCpuPercent": 0.4,
+        "rssMiB": {
+          "first": 53.5,
+          "last": 50.98,
+          "mean": 52.81,
+          "peak": 53.5
+        }
+      }
+    },
+    {
+      "index": 4,
+      "readyMs": 91.2,
+      "bootstrapMs": 543.86,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10006.66,
+        "cpuTimeSeconds": 0.04,
+        "averageCpuPercent": 0.4,
+        "rssMiB": {
+          "first": 53.44,
+          "last": 50.84,
+          "mean": 52.74,
+          "peak": 53.47
+        }
+      }
+    },
+    {
+      "index": 5,
+      "readyMs": 88.4,
+      "bootstrapMs": 531.34,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10005.26,
+        "cpuTimeSeconds": 0.03,
+        "averageCpuPercent": 0.3,
+        "rssMiB": {
+          "first": 53.52,
+          "last": 44.48,
+          "mean": 49.16,
+          "peak": 53.52
+        }
+      }
+    }
+  ],
+  "saves": {
+    "status": "passed",
+    "resource": "agents",
+    "samples": [
+      {
+        "index": 1,
+        "bytes": 1024,
+        "planMs": 76.1,
+        "applyMs": 101.08,
+        "planAndApplyMs": 177.18,
+        "withinBudget": true
+      },
+      {
+        "index": 2,
+        "bytes": 1024,
+        "planMs": 50.43,
+        "applyMs": 96.1,
+        "planAndApplyMs": 146.53,
+        "withinBudget": true
+      },
+      {
+        "index": 3,
+        "bytes": 1024,
+        "planMs": 47.86,
+        "applyMs": 91.45,
+        "planAndApplyMs": 139.3,
+        "withinBudget": true
+      },
+      {
+        "index": 4,
+        "bytes": 1024,
+        "planMs": 48.75,
+        "applyMs": 91.14,
+        "planAndApplyMs": 139.89,
+        "withinBudget": true
+      },
+      {
+        "index": 5,
+        "bytes": 1024,
+        "planMs": 49.06,
+        "applyMs": 92.59,
+        "planAndApplyMs": 141.65,
+        "withinBudget": true
+      },
+      {
+        "index": 6,
+        "bytes": 1024,
+        "planMs": 49.05,
+        "applyMs": 93.24,
+        "planAndApplyMs": 142.29,
+        "withinBudget": true
+      },
+      {
+        "index": 7,
+        "bytes": 1024,
+        "planMs": 48.5,
+        "applyMs": 89.81,
+        "planAndApplyMs": 138.31,
+        "withinBudget": true
+      },
+      {
+        "index": 8,
+        "bytes": 1024,
+        "planMs": 48.23,
+        "applyMs": 87.81,
+        "planAndApplyMs": 136.03,
+        "withinBudget": true
+      },
+      {
+        "index": 9,
+        "bytes": 1024,
+        "planMs": 51.26,
+        "applyMs": 96.31,
+        "planAndApplyMs": 147.57,
+        "withinBudget": true
+      },
+      {
+        "index": 10,
+        "bytes": 1024,
+        "planMs": 49.4,
+        "applyMs": 90.67,
+        "planAndApplyMs": 140.07,
+        "withinBudget": true
+      },
+      {
+        "index": 11,
+        "bytes": 1024,
+        "planMs": 47.59,
+        "applyMs": 91.39,
+        "planAndApplyMs": 138.98,
+        "withinBudget": true
+      },
+      {
+        "index": 12,
+        "bytes": 1024,
+        "planMs": 46.09,
+        "applyMs": 90.2,
+        "planAndApplyMs": 136.3,
+        "withinBudget": true
+      },
+      {
+        "index": 13,
+        "bytes": 1024,
+        "planMs": 48,
+        "applyMs": 90.74,
+        "planAndApplyMs": 138.75,
+        "withinBudget": true
+      },
+      {
+        "index": 14,
+        "bytes": 1024,
+        "planMs": 48.38,
+        "applyMs": 88.3,
+        "planAndApplyMs": 136.68,
+        "withinBudget": true
+      },
+      {
+        "index": 15,
+        "bytes": 1024,
+        "planMs": 50.71,
+        "applyMs": 99.54,
+        "planAndApplyMs": 150.25,
+        "withinBudget": true
+      },
+      {
+        "index": 16,
+        "bytes": 1024,
+        "planMs": 54.58,
+        "applyMs": 89.74,
+        "planAndApplyMs": 144.31,
+        "withinBudget": true
+      },
+      {
+        "index": 17,
+        "bytes": 1024,
+        "planMs": 47.38,
+        "applyMs": 100.08,
+        "planAndApplyMs": 147.46,
+        "withinBudget": true
+      },
+      {
+        "index": 18,
+        "bytes": 1024,
+        "planMs": 66.23,
+        "applyMs": 92.9,
+        "planAndApplyMs": 159.13,
+        "withinBudget": true
+      },
+      {
+        "index": 19,
+        "bytes": 1024,
+        "planMs": 52.19,
+        "applyMs": 95.34,
+        "planAndApplyMs": 147.54,
+        "withinBudget": true
+      },
+      {
+        "index": 20,
+        "bytes": 1024,
+        "planMs": 55.79,
+        "applyMs": 102.47,
+        "planAndApplyMs": 158.26,
+        "withinBudget": true
+      }
+    ],
+    "planMs": {
+      "samples": 20,
+      "min": 46.09,
+      "mean": 51.78,
+      "p50": 49.05,
+      "p95": 66.23,
+      "max": 76.1
+    },
+    "applyMs": {
+      "samples": 20,
+      "min": 87.81,
+      "mean": 93.54,
+      "p50": 91.45,
+      "p95": 101.08,
+      "max": 102.47
+    },
+    "planAndApplyMs": {
+      "samples": 20,
+      "min": 136.03,
+      "mean": 145.32,
+      "p50": 141.65,
+      "p95": 159.13,
+      "max": 177.18
+    },
+    "withinBudget": true,
+    "p95WithinBudget": true,
+    "overBudgetSamples": 0
+  },
+  "configSaves": {
+    "status": "passed",
+    "resource": "config",
+    "samples": [
+      {
+        "index": 1,
+        "bytes": 25,
+        "planMs": 647.67,
+        "applyMs": 91.55,
+        "planAndApplyMs": 739.22,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 2,
+        "bytes": 26,
+        "planMs": 505.58,
+        "applyMs": 90.48,
+        "planAndApplyMs": 596.07,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 3,
+        "bytes": 25,
+        "planMs": 486.21,
+        "applyMs": 93.71,
+        "planAndApplyMs": 579.92,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 4,
+        "bytes": 26,
+        "planMs": 508.24,
+        "applyMs": 92.5,
+        "planAndApplyMs": 600.74,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 5,
+        "bytes": 25,
+        "planMs": 508.56,
+        "applyMs": 838.56,
+        "planAndApplyMs": 1347.12,
+        "withinBudget": false,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 6,
+        "bytes": 26,
+        "planMs": 847.53,
+        "applyMs": 99.42,
+        "planAndApplyMs": 946.95,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 7,
+        "bytes": 25,
+        "planMs": 548.85,
+        "applyMs": 100.18,
+        "planAndApplyMs": 649.03,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 8,
+        "bytes": 26,
+        "planMs": 513.12,
+        "applyMs": 96.49,
+        "planAndApplyMs": 609.61,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 9,
+        "bytes": 25,
+        "planMs": 526.89,
+        "applyMs": 96.31,
+        "planAndApplyMs": 623.21,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 10,
+        "bytes": 26,
+        "planMs": 524.13,
+        "applyMs": 95.24,
+        "planAndApplyMs": 619.36,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 11,
+        "bytes": 25,
+        "planMs": 559.65,
+        "applyMs": 94.87,
+        "planAndApplyMs": 654.52,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 12,
+        "bytes": 26,
+        "planMs": 512.63,
+        "applyMs": 100.98,
+        "planAndApplyMs": 613.6,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 13,
+        "bytes": 25,
+        "planMs": 559.88,
+        "applyMs": 102.99,
+        "planAndApplyMs": 662.88,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 14,
+        "bytes": 26,
+        "planMs": 1499.74,
+        "applyMs": 112.61,
+        "planAndApplyMs": 1612.36,
+        "withinBudget": false,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 15,
+        "bytes": 25,
+        "planMs": 735.96,
+        "applyMs": 104.28,
+        "planAndApplyMs": 840.24,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 16,
+        "bytes": 26,
+        "planMs": 579.18,
+        "applyMs": 106.6,
+        "planAndApplyMs": 685.78,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 17,
+        "bytes": 25,
+        "planMs": 568.18,
+        "applyMs": 100.38,
+        "planAndApplyMs": 668.56,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 18,
+        "bytes": 26,
+        "planMs": 555.51,
+        "applyMs": 106.38,
+        "planAndApplyMs": 661.89,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 19,
+        "bytes": 25,
+        "planMs": 553.17,
+        "applyMs": 95.15,
+        "planAndApplyMs": 648.32,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 20,
+        "bytes": 26,
+        "planMs": 515.81,
+        "applyMs": 99.42,
+        "planAndApplyMs": 615.22,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      }
+    ],
+    "planMs": {
+      "samples": 20,
+      "min": 486.21,
+      "mean": 612.82,
+      "p50": 548.85,
+      "p95": 847.53,
+      "max": 1499.74
+    },
+    "applyMs": {
+      "samples": 20,
+      "min": 90.48,
+      "mean": 135.91,
+      "p50": 99.42,
+      "p95": 112.61,
+      "max": 838.56
+    },
+    "planAndApplyMs": {
+      "samples": 20,
+      "min": 579.92,
+      "mean": 748.73,
+      "p50": 649.03,
+      "p95": 1347.12,
+      "max": 1612.36
+    },
+    "withinBudget": false,
+    "p95WithinBudget": false,
+    "overBudgetSamples": 2
+  },
+  "officialCliTimings": {
+    "versionMs": {
+      "samples": 5,
+      "min": 331.44,
+      "mean": 338.07,
+      "p50": 333.04,
+      "p95": 353.74,
+      "max": 353.74
+    },
+    "doctorConfigMs": {
+      "samples": 5,
+      "min": 331.27,
+      "mean": 341.73,
+      "p50": 342.58,
+      "p95": 356.27,
+      "max": 356.27
+    },
+    "fixture": "default_plan_mode = false\n"
+  },
+  "startupMs": {
+    "samples": 5,
+    "min": 86.11,
+    "mean": 182.53,
+    "p50": 90.82,
+    "p95": 556.11,
+    "max": 556.11
+  },
+  "startupWithinBudget": true,
+  "idleAverageCpuPercent": {
+    "samples": 5,
+    "min": 0.3,
+    "mean": 0.36,
+    "p50": 0.4,
+    "p95": 0.4,
+    "max": 0.4
+  },
+  "idleRssMiB": {
+    "samples": 5,
+    "min": 44.48,
+    "mean": 49.62,
+    "p50": 50.84,
+    "p95": 51.06,
+    "max": 51.06
+  },
+  "idleCpuMeasuredPercent": 0.36,
+  "idleCpuWithinBudget": true,
+  "peakRssMiB": 53.63,
+  "peakRssWithinBudget": true,
+  "binaryMiB": 60.25,
+  "binaryWithinBudget": true,
+  "saveBudgetWithinLimit": false,
+  "sanitizedForPublication": true
+}

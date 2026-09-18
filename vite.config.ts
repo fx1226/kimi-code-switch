@@ -1,38 +1,20 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-
-// Vite 配置：构建 renderer（前端），后端由 src-tauri 的 Rust 提供。
+const root = import.meta.dirname;
+const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as { version: string };
 export default defineConfig({
-  root: resolve(__dirname, "src/renderer"),
+  root: resolve(root, "src/renderer"),
   plugins: [react()],
-  define: {
-    global: "globalThis",
-  },
-  resolve: {
-    alias: {
-      "@renderer": resolve(__dirname, "src/renderer/src"),
-      "@shared": resolve(__dirname, "src/shared"),
-    },
-  },
-  // Tauri 期望固定端口，且失败时不要回退
+  define: { "import.meta.env.VITE_APP_VERSION": JSON.stringify(pkg.version) },
+  resolve: { alias: { "@renderer": resolve(root, "src/renderer/src"), "@shared": resolve(root, "src/shared") } },
   clearScreen: false,
   server: {
+    host: "127.0.0.1",
     port: 1420,
     strictPort: true,
-    // dev 联调：浏览器形态经 Vite 代理访问本地 Node 服务的 /api。
-    proxy: {
-      "/api": "http://127.0.0.1:8417",
-    },
+    proxy: { "/api": { target: process.env.KIMI_DEV_SERVER_URL ?? "http://127.0.0.1:8417", changeOrigin: true } },
   },
-  build: {
-    outDir: resolve(__dirname, "dist"),
-    emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        index: resolve(__dirname, "src/renderer/index.html"),
-      },
-    },
-  },
+  build: { outDir: resolve(root, "dist"), emptyOutDir: true },
 });

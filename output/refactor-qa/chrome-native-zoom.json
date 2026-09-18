@@ -1,0 +1,12 @@
+{
+  "browser": "Chrome",
+  "zoomSetting": "200%",
+  "mechanism": "Chrome Settings > Appearance > Page zoom, isolated headed profile",
+  "metrics": {
+    "width": 720,
+    "outerWidth": 1440,
+    "devicePixelRatio": 2,
+    "scroll": 712,
+    "client": 712
+  }
+}

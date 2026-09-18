@@ -16,18 +16,51 @@ export function verifyBearerToken(authorizationHeader: string | undefined, expec
   return presented.length === expectedBuffer.length && timingSafeEqual(presented, expectedBuffer);
 }
 
-/** Host 白名单：仅允许 127.0.0.1:port | localhost:port（防 DNS rebinding）。 */
+/** 提取 Authorization: Bearer <token> 中的 token 原文（非 Bearer 或缺失时返回 null）。 */
+export function extractBearerToken(authorizationHeader: string | undefined): string | null {
+  const match = /^Bearer (.+)$/.exec(authorizationHeader ?? "");
+  return match ? match[1] : null;
+}
+
+interface DevOrigin {
+  origin: string;
+  host: string;
+}
+
+/** 开发联调白名单：KIMI_DEV_ORIGINS（逗号分隔的 origin，如 http://localhost:1420），仅显式设置时生效，生产保持严格。 */
+function readDevOrigins(): readonly DevOrigin[] {
+  const raw = process.env.KIMI_DEV_ORIGINS;
+  if (!raw) return [];
+  const devOrigins: DevOrigin[] = [];
+  for (const part of raw.split(",")) {
+    const candidate = part.trim().toLowerCase();
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate.includes("://") ? candidate : `http://${candidate}`);
+      devOrigins.push({ origin: url.origin, host: url.host });
+    } catch {
+      // 无法解析的条目忽略，保持默认严格校验。
+    }
+  }
+  return devOrigins;
+}
+
+/** Host 白名单：127.0.0.1:port | localhost:port，以及 KIMI_DEV_ORIGINS 声明的 dev host（防 DNS rebinding）。 */
 export function isHostAllowed(hostHeader: string | undefined, port: number): boolean {
   if (!hostHeader) return false;
   const host = hostHeader.trim().toLowerCase();
-  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+  return host === `127.0.0.1:${port}`
+    || host === `localhost:${port}`
+    || readDevOrigins().some((dev) => dev.host === host);
 }
 
 /** Origin 若存在必须同源；非浏览器客户端（curl 等）不带 Origin，放行。 */
 export function isOriginAllowed(originHeader: string | undefined, port: number): boolean {
   if (!originHeader) return true;
   const origin = originHeader.trim().toLowerCase().replace(/\/+$/, "");
-  return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+  return origin === `http://127.0.0.1:${port}`
+    || origin === `http://localhost:${port}`
+    || readDevOrigins().some((dev) => dev.origin === origin);
 }
 
 export type RequestGuardResult =

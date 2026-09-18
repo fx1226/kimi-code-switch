@@ -25,8 +25,8 @@ import {
 } from "node:fs";
 
 import type { CommandHandlers } from "./index";
-import { expandHome } from "./paths";
-import { emitTauriEvent } from "./tauriShims/event";
+import { expandHome, getAppPaths } from "./paths";
+import { emitServerEvent } from "../events";
 
 const ALLOWED_COMMANDS = [
   "kimi",
@@ -243,7 +243,7 @@ const GOOGLE_ADC_ALLOWED_ENV = [
   "GOOGLE_CLOUD_QUOTA_PROJECT",
 ];
 
-async function getGoogleAdcAccessToken(args: Record<string, unknown>): Promise<string> {
+export async function getGoogleAdcAccessToken(args: Record<string, unknown>): Promise<string> {
   const env =
     args.env && typeof args.env === "object"
       ? (args.env as Record<string, unknown>)
@@ -419,7 +419,7 @@ async function validateProviderRemoteResolution(value: string): Promise<void> {
   }
 }
 
-async function runKimiProviderCommand(args: Record<string, unknown>): Promise<ExecResult> {
+export async function runKimiProviderCommand(args: Record<string, unknown>): Promise<ExecResult> {
   const homePath = String(args.homePath);
   const request =
     args.request && typeof args.request === "object"
@@ -559,7 +559,7 @@ async function httpRequest(args: Record<string, unknown>): Promise<HttpResponseR
 
 // ── 命令 7：file_stat ──
 
-function fileStat(args: Record<string, unknown>): FileStatResult | null {
+export function fileStat(args: Record<string, unknown>): FileStatResult | null {
   const resolved = expandHome(String(args.path));
   let stat: ReturnType<typeof statSync>;
   try {
@@ -635,7 +635,7 @@ export function writeExecutable(args: Record<string, unknown>): void {
   const content = String(args.content);
 
   const tempDir = tmpdir();
-  const panelTmp = join(homedir(), ".kimi-code-switch-gui/tmp");
+  const panelTmp = getAppPaths().tmpDir;
   const inAllowedDir = resolved.startsWith(tempDir) || resolved.startsWith(panelTmp);
   if (!inAllowedDir) {
     throw new Error(`write_executable only allowed in temp directories, got: ${resolved}`);
@@ -806,8 +806,7 @@ export function findKimiCodeLoginCommand(): OAuthLoginCommand {
   return { program: "kimi", args: ["login"] };
 }
 
-function oauthTargetLabel(target: string): string {
-  const _ = target;
+function oauthTargetLabel(): string {
   return "Kimi Code";
 }
 
@@ -825,13 +824,13 @@ async function startKimiOauthLogin(args: Record<string, unknown>): Promise<ExecR
     throw new Error("Kimi OAuth login is already running.");
   }
   kimiOauthLoginRunning = true;
-  const targetLabel = oauthTargetLabel(target);
+  const targetLabel = oauthTargetLabel();
 
   let finalEmitted = false;
   const emitFinal = (kind: string, message: string): void => {
     if (finalEmitted) return;
     finalEmitted = true;
-    emitTauriEvent<OAuthLoginEvent>("kimi-oauth-login", {
+    emitServerEvent<OAuthLoginEvent>("kimi-oauth-login", {
       kind,
       target,
       stream: null,
@@ -844,7 +843,7 @@ async function startKimiOauthLogin(args: Record<string, unknown>): Promise<ExecR
   };
 
   try {
-    emitTauriEvent<OAuthLoginEvent>("kimi-oauth-login", {
+    emitServerEvent<OAuthLoginEvent>("kimi-oauth-login", {
       kind: "start",
       target,
       stream: null,
@@ -869,7 +868,7 @@ async function startKimiOauthLogin(args: Record<string, unknown>): Promise<ExecR
     const streamEvent = (streamName: string, line: string): void => {
       const event = parseDeviceLoginLine(target, line);
       event.stream = streamName;
-      emitTauriEvent<OAuthLoginEvent>("kimi-oauth-login", event);
+      emitServerEvent<OAuthLoginEvent>("kimi-oauth-login", event);
     };
 
     if (child.stdout) {
@@ -1064,6 +1063,7 @@ export async function runMcpStdioSession(args: Record<string, unknown>): Promise
     try {
       child = spawn(program, cmdArgs, {
         env: { ...process.env, PATH: augmentedPath(), ...envExpanded },
+        cwd: typeof args.cwd === "string" && args.cwd ? expandHome(args.cwd) : undefined,
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (error) {
@@ -1115,7 +1115,7 @@ export async function runMcpStdioSession(args: Record<string, unknown>): Promise
         if (request.id !== undefined && request.id !== null) payload.id = request.id;
         if (request.params !== undefined) payload.params = request.params;
         await new Promise<void>((res, rej) => {
-          child.stdin.write(`${JSON.stringify(payload)}\n`, (error) =>
+          child.stdin!.write(`${JSON.stringify(payload)}\n`, (error) =>
             error ? rej(error) : res(),
           );
         });
@@ -1164,13 +1164,8 @@ export async function runMcpStdioSession(args: Record<string, unknown>): Promise
 export const systemCommands: CommandHandlers = {
   exec_command: execCommand,
   read_environment_variable: readEnvironmentVariable,
-  get_google_adc_access_token: getGoogleAdcAccessToken,
-  run_kimi_provider_command: runKimiProviderCommand,
-  start_kimi_oauth_login: startKimiOauthLogin,
   write_executable: writeExecutable,
-  file_stat: fileStat,
   resolve_workspace_directory: resolveWorkspaceDirectory,
-  read_file_slice: readFileSlice,
   http_request: httpRequest,
   run_mcp_stdio_session: runMcpStdioSession,
 };

@@ -1,335 +1,134 @@
-# Kimi Code Switch GUI
+# Kimi Code Switch
 
-面向 `kimi-code-cli` 的桌面配置工作台。它把 Provider、Model、Profile、MCP、Skills、快捷键、备份和面板偏好集中到一个可视化界面里，减少手写 TOML / JSON 配置的风险。
+轻量的本机 Kimi Code 配置工具。浏览器是唯一界面，本地服务直接读取和修改 Kimi Code 原生文件，帮助你检查变更、处理冲突、备份和恢复配置。
 
-![总览](docs/images/overview.png)
+本项目由 `kimi-code-switch-gui` 演进而来，由 **fx1226** 独立维护，保留原项目的 MIT 许可、Git 历史和来源说明。**Web 版本尚未正式发布**，本 README 描述待发行的 Web 实现；旧仓库中的桌面 Release 不提供这里所述的 Web 程序。
 
-> 文档截图使用内置的本地开发 fixture 生成，只展示脱敏的示例 Profile、端点与用量数据。
+![Kimi Code Switch 浏览器概览](docs/images/web-overview.png)
 
-## 为什么需要它
+截图来自隔离的本机测试环境，使用示例模型与目录。
 
-`kimi-code-cli` 的能力很强，但长期维护多套 Provider、模型和 Profile 时，配置文件会逐渐变复杂。这个工具的目标是把“改配置文件”变成明确、可预览、可回滚的桌面操作。
+## 功能入口
 
-- 不再手动修改多个配置文件，降低格式错误和引用错误。
-- 一处维护 Provider、Model、Profile、MCP Server 和 Skills。
-- 写入前可预览、看 Diff、做配置体检，避免覆盖外部修改。
-- 支持本地 / WebDAV 备份，出错时可以恢复。
-- 支持状态栏、快捷键、主题、语言、更新检查和在终端打开 Kimi。
+| 入口 | 内容 |
+| --- | --- |
+| 概览 | 当前 Kimi 数据目录、项目工作目录、CLI 版本、默认模型与兼容状态 |
+| 模型与连接 | Provider、模型、配置预设，以及启动官方 CLI 和官方登录的入口 |
+| 扩展 | MCP 配置；Skills、Plugins 的来源、覆盖关系与诊断清单 |
+| 配置 | Kimi 原生设置、CLI 终端设置、用户 AGENTS、项目本地配置 |
+| 诊断与恢复 | 文件检查、配置历史、本地备份、恢复计划与未完成操作处理 |
 
-## 核心页面
+本工具的语言和浅色／深色／跟随系统外观位于独立的偏好设置。保留简体中文、繁体中文、英文、日文、德文和西班牙文。
 
-### 总览
+原生配置保留在各自的编辑草稿中，检查变更后显式应用。应用某个资源时不会顺带提交其他资源的草稿。只有本工具的偏好自动保存。配置预设属于本工具，应用预设时会列出实际要修改的原生字段。
 
-进入应用后的首页，集中展示当前激活配置的运行时概览：默认模型、Thinking / YOLO / Plan Mode 等开关状态、配置文件路径，以及 Profile、Provider、Model 列表的快速入口。顶部还提供 Kimi Code 环境切换、语言和外观模式切换。
+Skills 与 Plugins 首版以发现、来源和诊断展示为主；Plugins 不提供未经验证的私有安装或启停协议。用量洞察、WebDAV、订阅桥接和复制凭据实现的账号轮换不在此版范围。官方账号凭据由 Kimi Code 自行维护。
 
-![总览](docs/images/overview.png)
+## 本地运行
 
-### 模型配置 · Profile
+首个 Web 发行目标是 **macOS Apple Silicon**。自包含压缩包内的 `kimi-code-switch` 包含 Node 运行时与 Web 静态资源，用户无需安装 Node。其他平台尚未作发行验收。
 
-`模型配置` 分组下的 Profile 页用于管理不同工作场景下的默认模型、Thinking、YOLO、Plan Mode、Thinking Stream 和 Skills 合并策略。激活 Profile 后会同步更新 `kimi-code-cli` 主配置。
-
-![Profile](docs/images/profile.png)
-
-常用能力：
-
-- 新增、克隆、删除、重命名 Profile。
-- 一键激活 Profile。
-- 测试当前 Profile 连通性。
-- 在顶部“当前激活”区域直接用已激活 Profile 打开 Kimi。
-- 在列表行悬浮后，可用被点击的 Profile 打开 Kimi，不会改变当前激活状态。
-
-### 模型配置 · 提供商
-
-集中维护所有模型供应方，例如 Kimi 官方 API、OpenAI 兼容网关、内部代理或其他兼容服务。
-
-![提供商](docs/images/providers.png)
-
-常用能力：
-
-- 配置 Provider 类型、Base URL 和 API Key。
-- 支持新增、克隆、删除和重命名。
-- 删除前检查是否仍被 Model 引用。
-
-### 模型配置 · 模型
-
-将模型定义从 Provider 中拆出来独立维护，便于多个 Profile 复用同一模型。
-
-![模型](docs/images/models.png)
-
-常用能力：
-
-- 配置 Provider、模型 ID、上下文长度、能力标签和定价。
-- 自动维护模型命名规则。
-- 删除前检查是否仍被 Profile 或当前默认模型引用。
-
-### MCP
-
-可视化维护 `~/.kimi-code/mcp.json`，支持远程 MCP 和本地命令式 MCP。
-
-![MCP](docs/images/mcp.png)
-
-常用能力：
-
-- 支持 `streamable-http`、`sse`、`stdio`。
-- 支持导入 MCP JSON。
-- 支持工具解析、入参表单和测试连接、触发授权、重置授权。
-- 支持 headers、command、args、env 等配置。
-- 支持启用 / 禁用：禁用的 MCP 不会写入配置文件。
-
-### Skills
-
-扫描本机 Skills 来源，查看启用状态、覆盖关系和具体内容。
-
-![Skills](docs/images/skills.png)
-
-常用能力：
-
-- 支持技能名称、描述检索。
-- 支持网格 / 列表视图。
-- 所有匹配 Skills 在自适应网格或列表中自然滚动；窗口、语言与字体大小变化不会改变数据可达性。
-- 可查看 Skill 内容、路径来源和覆盖关系。
-
-### 洞察
-
-按 Kimi Code 环境采集并展示用量数据，包含总览、趋势、分组统计和会话三个工作区。
-
-![洞察](docs/images/insights.png)
-
-常用能力：
-
-- 总览：调用次数、Token 量、缓存命中率、推理 Token、平均延迟、错误率和预估花费。
-- 趋势：按小时 / 天 / 周分桶，可按 Profile / Model / Provider 分组。
-- 分组统计与会话：按维度排序查看 Token、调用、错误、延迟和缓存命中。
-- 支持显示币种换算、按天保留清理和磁盘占用告警。
-
-### 设置
-
-设置页收纳 Kimi Code 实例与环境、界面偏好、快捷键、备份、配置体检等全局能力。
-
-![设置](docs/images/settings.png)
-
-常用能力：
-
-- Kimi Code 实例检测、官方账号登录、多环境托管（创建 / 复制 / 激活 / 删除）。
-- 语言、外观模式、主题配色、字体大小。
-- 状态栏图标、关闭按钮行为、启动显示器策略。
-- 终端应用选择：系统终端或 iTerm2。
-- 全局快捷键和窗口内快捷键录制、启停、冲突提示。
-- 本地 / WebDAV 备份，支持手动、定时、修改后备份。
-- 配置体检，发现缺失引用、风险配置和路径问题。
-- 配置的全量导出与导入（覆盖所有环境，含真实密钥，可完整还原）。
-
-## 配置文件
-
-应用会维护下面几类文件：
-
-```text
-~/.kimi-code/config.toml
-~/.kimi-code/mcp.json
-~/.kimi-code/tui.toml
-~/.kimi-code/AGENTS.md
-~/.kimi-code/skills/
-~/.kimi-code-switch-gui/app.db
-```
-
-说明：
-
-- `config.toml`：Kimi Code 标准主配置，保存当前生效的默认模型、Provider、Model 和其他 CLI 配置。
-- `mcp.json`：Kimi Code 标准 MCP Server 定义。
-- `tui.toml`：Kimi Code 终端界面设置。
-- `AGENTS.md`：Kimi Code 用户级代理指令。
-- `skills/`：Kimi Code 标准 Skills 目录。
-- `~/.kimi-code-switch-gui/app.db`：GUI 自身 SQLite 数据库，只保存 Profile、语言、主题、快捷键、备份策略、禁用项归档和用量/历史索引等面板私有数据；活动 Provider、Model 和 MCP 以 Kimi 标准文件为准。默认环境固定使用 `~/.kimi-code`；只有额外命名环境才使用 `~/.kimi-code-switch-gui/.env/<id>`。
-
-每个环境还可配置独立“项目工作目录”。GUI 从该目录启动 Kimi，并向上查找最近的 `.git` 根，以展示项目级 `.kimi-code/skills`、`.agents/skills`、项目根 `.mcp.json` 与 cwd 本地 `.kimi-code/mcp.json`。MCP 按“用户 < 项目根 < cwd 本地”覆盖；只有存在可解析的官方 workspace-trust marker 时项目 MCP 才标为有效，未信任时仅显示声明且不会写回用户 `mcp.json`。
-
-Provider 页面通过官方 `kimi provider catalog list/add` 与 `kimi provider add` 接入 models.dev 和自定义 `api.json` registry：离线快照回退、协议判断、模型过滤及 `source` 刷新生命周期均由当前环境中的 Kimi Code CLI 负责。Kimi Code 设置页还会读取 `plugins/installed.json` 与 plugin manifest，以只读方式展示 plugin Skills、MCP、hooks 和诊断；MCP 运行名遵循 `plugin-<plugin>:<server>`。
-
-MCP 表单结构化支持 `cwd`、`bearerTokenEnvVar`、`auth: oauth`、启动/工具超时及工具 allow/deny 列表。OAuth 登录按钮会在活动环境和项目工作目录中启动官方 `/mcp-config login <server>` 流程。TUI 高级设置支持 LaTeX、cache hint、通知、自动升级、paste-burst 与 status line，并继续保留未知 `tui.toml` 字段。
-
-`config.profiles.toml` 不是 Kimi Code 标准配置文件。旧版本生成过该文件时，GUI 会在启动时读取其中的 Profile 数据并迁移到 SQLite，后续不会继续写入该文件。
-
-## 终端启动
-
-应用支持从界面直接打开 Kimi：
-
-- 顶部“当前激活”卡片里的终端按钮：使用当前已激活的 Profile。
-- Profiles 列表行里的终端按钮：使用鼠标悬浮行对应的 Profile，不改变当前激活 Profile。
-- 终端类型可在设置页选择 `系统终端` 或 `iTerm2`。
-
-启动时显式指定当前环境的 `KIMI_CODE_HOME`，Profile 设置通过公开 CLI 参数传入：
+以下命令适用于从源码构建得到的候选包，以及未来正式发布的 Web 压缩包。在解压后的目录运行：
 
 ```bash
-KIMI_CODE_HOME=<环境目录> kimi -m <模型> [--yolo|--auto] [--plan]
+./kimi-code-switch
+./kimi-code-switch open
+./kimi-code-switch status
+./kimi-code-switch stop
 ```
 
-命令会先 `cd` 到环境配置的项目工作目录。环境切换只影响 GUI 启动的 Kimi 进程，不再搬迁或切换全局 `~/.kimi-code` 软链接。新环境复制包含配置、MCP、TUI、AGENTS、Skills 和已安装 Plugins（托管 root 会重映射到新环境），不复制 credentials、sessions、logs、updates 或 bin；目标目录非空时拒绝创建，避免继承孤儿 credentials/session。
+默认命令启动服务并打开默认浏览器；`open` 打开已有服务，没有服务时会启动。重复启动复用同一私有数据目录下的已有实例。首次启动在当前终端运行，关闭网页不会停止服务；使用 `stop` 或终端的 `Ctrl+C` 退出。程序默认不注册开机启动。
 
-## 备份与恢复
-
-支持两类备份目标：
-
-- 本地目录。
-- WebDAV 远端目录。
-
-支持三种备份策略：
-
-- 手动备份。
-- 定时自动备份。
-- 修改后自动备份。
-
-普通备份优先保存标准文件原文，包含主配置、MCP、TUI、AGENTS 和面板设置（含 Profiles、当前激活 Profile、快捷键等 GUI 私有配置）；全量 JSON 备份还包含所有环境，以及二进制安全的 Skills 与 Plugins 目录（保留可执行位并重映射 managed plugin roots）。默认不复制 credentials、sessions、logs 或 CLI 二进制。恢复前会创建回滚点，标准文本文件与可移植目录使用 CAS 防止覆盖预览后的并发修改。
-
-WebDAV 必须使用 HTTPS。新版备份使用独立随机恢复密钥派生 AES-GCM 密钥，WebDAV 密码只用于服务器认证，因此后续修改登录密码不会影响新版历史备份。本机密钥位于 `~/.kimi-code-switch-gui/backup-encryption.key`（权限 0600）；设置页提供恢复密钥导出/导入，替换时旧密钥会保留为 `backup-encryption.key.previous`。迁移设备或重装前应离线保存恢复密钥。旧版明文 WebDAV 备份不会被普通恢复接受，只能在备份记录中经单独确认后执行一次性加密迁移；早期 v1/v2 密文迁移时仍需创建它们时使用的旧 WebDAV 密码。
-
-## 配置历史
-
-自动版本控制系统，每次保存配置时自动创建快照，支持查看历史版本和一键回滚。
-
-**核心特性：**
-
-- **自动快照** — 每次保存配置时自动捕获 Kimi 标准配置（config.toml、mcp.json、tui.toml、AGENTS.md、Skills）和 GUI SQLite 面板设置快照
-- **环境内去重** — 以环境 ID、文件类型和 SHA256 联合去重
-- **gzip 压缩** — 快照文件 gzip 压缩存储，5KB 配置压缩后约 500B
-- **版本查询** — 按环境和文件类型过滤、时间倒序查询历史快照
-- **一键回滚** — 回滚前自动创建"回滚点"快照，支持撤销回滚操作
-- **旧记录分配** — 升级前缺少环境归属的 config/MCP/TUI/AGENTS 快照可先在历史页显式分配到已注册环境，再恢复到由环境注册表推导的安全目标
-- **自动清理** — 每次保存后自动清理 30 天前的旧快照，释放磁盘空间
-- **崩溃恢复** — 跨 config/MCP/panel/TUI 保存前写入私有 transaction journal；启动时只在 revision 可证明时提交或 CAS 回滚半完成事务
-
-**存储位置：**
-
-- 元数据：`~/.kimi-code-switch-gui/app.db`（SQLite `config_history` 表）
-- 快照文件：`~/.kimi-code-switch-gui/history/{timestamp}-{environment_id}-{file_id}.toml.gz`
-
-**API 调用：**
-
-```typescript
-import {
-  captureSnapshot,
-  listSnapshots,
-  getSnapshotContent,
-  restoreSnapshot,
-  cleanupOldSnapshots,
-} from "@renderer/tauri/configHistory";
-
-// 捕获快照
-const snapshotId = await captureSnapshot("config", "~/.kimi-code/config.toml", "手动备份", "default");
-
-// 查询历史（最近 50 条）
-const snapshots = await listSnapshots("default", "config", 50);
-
-// 获取快照内容
-const content = await getSnapshotContent(snapshotId);
-
-// 回滚到指定快照
-const success = await restoreSnapshot(snapshotId);
-
-// 清理 30 天前的快照
-const deleted = await cleanupOldSnapshots();
+```bash
+./kimi-code-switch --no-open --port 8417
+./kimi-code-switch --data-dir /absolute/path/to/private-data
+./kimi-code-switch status --data-dir /absolute/path/to/private-data
+./kimi-code-switch stop --data-dir /absolute/path/to/private-data
 ```
 
-## 安装与运行
+服务只监听 `127.0.0.1`，默认端口 `8417`，占用时向后查找可用端口。API 使用本机 Bearer token、Host 与 Origin 校验。首次打开的地址会携带连接凭证，浏览器接收后将其从地址栏移除；连接失效时运行 `open` 重新进入。
 
-### 环境要求
+Homebrew **formula 生成脚本已提供**，会使用压缩包的实际 SHA-256 生成公式；Web 版本尚未发布公式或新的 tap 安装入口。这里暂不提供尚不可验证的 `brew install` 命令。
 
-- Node.js 22+
-- npm 10+
-- macOS 或 Windows
+## 原生文件与工具数据
 
-### 本地开发
+默认 Kimi 数据目录仍为 `~/.kimi-code`，也可选择已有目录或使用 `KIMI_CODE_HOME`。项目改名不会移动官方目录。
+
+| 路径 | 用途 |
+| --- | --- |
+| `$KIMI_CODE_HOME/config.toml` | Provider、模型和原生配置 |
+| `$KIMI_CODE_HOME/mcp.json` | 用户级 MCP 声明 |
+| `$KIMI_CODE_HOME/tui.toml` | **CLI 终端界面**设置 |
+| `$KIMI_CODE_HOME/AGENTS.md` | 用户级指令 |
+| `$KIMI_CODE_HOME/skills/`、`plugins/` | 官方扩展目录 |
+| `<项目根>/.kimi-code/local.toml` | 项目本地配置；未识别 Git 根时使用工作目录 |
+| `<项目根>/.mcp.json` | 项目级 MCP；同名项覆盖用户级声明 |
+| `<工作目录>/.kimi-code/mcp.json` | 当前工作目录 MCP；同名项覆盖前两层声明 |
+| `~/.kimi-code-switch/` | 本工具的偏好、预设、目录引用、历史、备份和恢复记录 |
+
+SQLite 不维护第二套活动 Provider、模型或 MCP 配置。切换目录只改变本工具的管理目标，以及由本工具启动的 CLI 参数；它不会切换已经运行的官方桌面客户端。
+
+项目 MCP 与 Skills 的来源按官方规则分别展示。用户、Git 根和工作目录中的配置不能合并后整体写回用户文件。`--data-dir` 统一改变本工具的数据库、服务锁、历史、备份与恢复数据位置，不改变 `KIMI_CODE_HOME`。原生目标的短时写入锁使用系统临时目录中按用户隔离的固定位置，使不同私有目录的本工具实例仍能协调同一个原生文件；这些锁不存储配置正文。
+
+保存流程为：读取原文和版本 → 计算局部变更 → 校验 → 保存恢复点 → 复核版本 → 写入 → 重新读取确认。未修改内容不写入；未知字段、注释和未设置状态尽可能原样保留，不能安全定位的结构会拒绝自动改写。外部编辑产生冲突时需要重新检查，不能绕过版本校验。
+
+多文件操作通过恢复日志处理，不是文件系统级原子事务。恢复状态不明时服务端阻止写入，先在“诊断与恢复”核对文件和记录。备份可能包含原生配置中的 API key，导出文件应按敏感数据保管；备份不复制官方账号凭据、会话或日志。
+
+## 旧版私有数据迁移
+
+检测到 `~/.kimi-code-switch-gui` 后，先展示迁移清单，再由用户执行一次性复制与校验。普通启动不会自动搬迁原生配置。
+
+- 迁移偏好、预设、目录引用和历史；延期功能的数据保留在归档中。
+- 保留旧目录及旧版托管的 `.env/<id>` 原生目录引用，不因改名删除它们。
+- 清单内容变化时重新检查；旧版仍运行时阻止同时写入。
+- 中断后保留迁移记录，按记录恢复；不会用新数据覆盖已有不同内容。
+
+## 兼容依据
+
+当前可编辑基线固定为 **Kimi Code CLI 2.0.0**，官方提交为 `1b89e4b039f052d10f258464413b2047acca12ba`。未检测到 CLI 或版本未经验证时，原生配置以只读方式打开，不通过“高于最低版本”推断兼容。
+
+`kimi doctor` 只参与 `config.toml` 和 `tui.toml` 的候选文件验证；MCP、Skills 和 Plugins 使用各自的解析与发现验证。文件写入成功、配置校验通过、客户端实际读取是不同结果。桌面版共享配置的静态核查不能替代桌面运行验证，桌面专属设置不在管理范围。来源、样本和已执行验证见 [2.0 原生文件契约](docs/kimi-code-2.0-contract.md)。
+
+## 从源码开发
+
+需要支持 `node:sqlite` 的 Node.js **22.13.0 或更新版本**、npm，以及 macOS Apple Silicon 发行构建环境。
 
 ```bash
 npm ci
-npm run dev          # Tauri 开发模式（Rust 后端 + Vite 渲染层热更新）
-npm run dev:web      # 仅渲染层（不带 Rust），纯 UI 调试用
+npm run dev
 ```
 
-### 测试
+`dev` 同时启动 Node 服务与 Vite，在浏览器打开开发入口。它默认使用临时的**工具私有目录**，原生 Kimi 目录仍按 `KIMI_CODE_HOME` 解析。开发和测试应显式将 `HOME`、`KIMI_CODE_HOME` 与工具私有目录指向临时样本，避免操作个人配置。
 
 ```bash
+npm run typecheck
 npm test
-```
-
-### 构建
-
-```bash
+npm run build:web
+npm run build:server
 npm run build
+npm run check:package
+npm run check:performance -- --kimi /absolute/path/to/kimi
 ```
 
-### 打包
+`build` 生成 macOS arm64 自包含程序、压缩包及 SHA-256 文件，输出到 `dist-release/`。`check:package` 把程序复制到隔离目录，用不含 Node 的 `PATH` 检查内嵌页面、鉴权、启动和退出。候选产物是否达到发行与性能标准，以 [重构验收记录](docs/refactor-execution.md) 的实际证据为准。
 
-```bash
-npm run build        # Tauri 发布构建（当前平台）
-```
+`check:performance` 使用隔离样本和真实官方 CLI，测量 5 次服务启动、空闲 CPU/RSS，以及各 100 次 AGENTS 和配置保存；报告保留全部样本，保存门槛采用 P95。通过 `--output /path/to/new-report.json` 指定报告路径，脚本拒绝覆盖已有报告。运行前停止本次其他构建或浏览器验收，以减少测量争用。
 
-按平台打包安装器：
+| 目录 | 职责 |
+| --- | --- |
+| `src/renderer/src/web/` | React 页面、独立草稿和显式保存交互 |
+| `src/renderer/src/http/` | 类型明确的浏览器 HTTP / SSE 客户端 |
+| `src/server/` | 本机服务生命周期、业务 API、迁移和原生能力 |
+| `src/server/configuration/` | 配置变更、冲突检查、恢复点和恢复总闸 |
+| `src/shared/` | 纯配置规则、协议类型、校验和脱敏 |
+| `tests/fixtures/kimi-code/` | 固定官方版本的样本与来源清单 |
 
-```bash
-npm run dist:mac     # macOS dmg
-npm run dist:win     # Windows nsis
-```
+贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)。官方基线升级见 [兼容性升级流程](docs/kimi-code-upgrade-sop.md)，浏览器验收见 [UI 验证指南](docs/ui-visual-regression.md)。
 
-构建产物输出到 `src-tauri/target/<target>/release/bundle/`（dmg / nsis）。
+## 来源与许可
 
-## macOS 首次打开
+本项目起源于 [sunhao-java/kimi-code-switch-gui](https://github.com/sunhao-java/kimi-code-switch-gui)，保留原 Git 历史、版权声明和 [MIT License](LICENSE)。项目名称为 `kimi-code-switch`，显示名称为 `Kimi Code Switch`，后续开发使用独立仓库 [fx1226/kimi-code-switch](https://github.com/fx1226/kimi-code-switch)。
 
-本应用是个人维护的免费工具，秉持隐私优先、零遥测的原则，且未购买 Apple 开发者证书做签名与公证。因此从 GitHub Release 下载的 DMG 属于**未签名 / 未公证**应用，首次打开时 macOS 可能提示「已损坏，无法打开」或「无法验证开发者」。这并非应用真的损坏，而是 Gatekeeper 对未公证应用附加了隔离（quarantine）属性。
+迁移方案保留 [旧仓库 fx1226/kimi-code-switch-gui](https://github.com/fx1226/kimi-code-switch-gui) 及其桌面 Release、安装包和历史 tag；新仓库完成源码推送与 CI 验证后，旧仓库将添加迁移说明并归档。旧仓库不改名、不解除 fork 关系，也不删除重建。迁移进度见 [仓库迁移记录](docs/repository-detach-review.md)。
 
-去隔离后即可正常打开，二选一：
-
-- 安装到 `/Applications` 后，执行去隔离命令：
-
-  ```bash
-  sudo xattr -rd com.apple.quarantine "/Applications/Kimi Code Switch GUI.app"
-  ```
-
-- 或使用 Homebrew cask 安装时直接带上 `--no-quarantine`：
-
-  ```bash
-  brew install --cask --no-quarantine kimi-code-switch-gui
-  ```
-
-> English: This is a free, privacy-first personal tool distributed without an Apple Developer certificate (no code signing / notarization). macOS may show "App is damaged" or "cannot verify developer" on first launch — the app is fine, it just carries Gatekeeper's quarantine attribute. Remove it with `sudo xattr -rd com.apple.quarantine "/Applications/Kimi Code Switch GUI.app"`, or install via `brew install --cask --no-quarantine kimi-code-switch-gui`.
-
-## 技术栈
-
-- Tauri v2（Rust + 系统 WebView）
-- React 18
-- TypeScript
-- Vite
-- Vitest
-- SQLite（Rust `rusqlite`，用量数据）/ `@iarna/toml`（配置）
-
-> 采用「薄 Rust 壳 + 前端业务逻辑」架构：约 5300 行 `src/shared/` 业务逻辑跑在渲染层，Rust 后端只暴露文件 I/O、命令执行、HTTP、SQLite、系统托盘等系统能力。
-
-## 目录结构
-
-```text
-.
-├── src-tauri/src           # Rust 后端命令：fs_access / system / usage / tray
-├── src/renderer/src        # React UI、样式、i18n、页面交互
-├── src/renderer/src/tauri  # 适配层：window.kimiSwitch → invoke() / listen()
-├── src/shared              # 纯逻辑：配置模型、序列化、状态转换、校验和单元测试
-├── docs/images             # README 截图资源
-└── .github/workflows       # GitHub Release 工作流
-```
-
-## 发布流程
-
-仓库内置 [`.github/workflows/release.yml`](.github/workflows/release.yml)。
-
-推送形如 `v2.0.0` 的 tag 后，工作流会运行测试（npm + cargo）、从 `CHANGELOGS/` 提取中英双语 release note 创建 GitHub Release、构建 macOS（dmg, arm64 + x64）/ Windows（nsis）安装包并上传，最后更新 `homebrew-kimi-code-switch` tap。
-
-## 当前版本
-
-- 应用版本：`2.2.7`
-- 变更记录：[CHANGELOG.md](CHANGELOG.md)（按语言分文件维护，详见 [`CHANGELOGS/`](CHANGELOGS/)）
-
-## 参与开发
-
-贡献代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 许可证
-
-MIT
+这是独立维护的配置工具，不是 Kimi 官方客户端。旧桌面实现、旧截图和早期调研保留在历史记录中，不代表当前 Web 版本的功能或验证结果。

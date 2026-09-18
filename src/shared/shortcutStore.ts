@@ -1,252 +1,35 @@
-import type { LocalizedText, ShortcutAction, ShortcutBinding, ShortcutScope } from "./types";
+import type { ShortcutAction, ShortcutBinding, ShortcutScope } from "./types";
 
-export interface ShortcutActionDefinition {
+/** Legacy panel metadata compatibility. These bindings are never registered or dispatched. */
+interface LegacyShortcutDefinition {
   action: ShortcutAction;
   scope: ShortcutScope;
   defaultAccelerator: string;
   defaultEnabled: boolean;
-  label: LocalizedText;
-  /** 仅桌面（Tauri）形态可用；依赖 Rust 原生能力的条目（如窗口呼出全局快捷键）标记为 true。 */
-  desktopOnly?: boolean;
 }
-
 export interface ShortcutConflict {
   accelerator: string;
   scope: ShortcutScope;
   actions: ShortcutAction[];
 }
-
-export const SHORTCUT_ACTIONS: ShortcutActionDefinition[] = [
-  {
-    action: "window.toggle",
-    scope: "global",
-    defaultAccelerator: "Command+Shift+H",
-    defaultEnabled: true,
-    desktopOnly: true,
-    label: {
-      "zh-CN": "显示/隐藏主窗口",
-      "zh-TW": "顯示/隱藏主視窗",
-      "en-US": "Show / Hide Window",
-      "ja-JP": "メインウィンドウを表示/非表示",
-      "de-DE": "Hauptfenster anzeigen/ausblenden",
-      "es-ES": "Mostrar/Ocultar ventana principal",
-    },
-  },
-  {
-    action: "profile.next",
-    scope: "global",
-    defaultAccelerator: "",
-    defaultEnabled: false,
-    label: {
-      "zh-CN": "切换到下一个 Profile",
-      "zh-TW": "切換到下一個 Profile",
-      "en-US": "Next Profile",
-      "ja-JP": "次の Profile へ切り替え",
-      "de-DE": "Zum nächsten Profil wechseln",
-      "es-ES": "Cambiar al perfil siguiente",
-    },
-  },
-  {
-    action: "profile.previous",
-    scope: "global",
-    defaultAccelerator: "",
-    defaultEnabled: false,
-    label: {
-      "zh-CN": "切换到上一个 Profile",
-      "zh-TW": "切換到上一個 Profile",
-      "en-US": "Previous Profile",
-      "ja-JP": "前の Profile へ切り替え",
-      "de-DE": "Zum vorherigen Profil wechseln",
-      "es-ES": "Cambiar al perfil anterior",
-    },
-  },
-  {
-    action: "app.reloadConfig",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+R",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "重新加载配置",
-      "zh-TW": "重新載入設定",
-      "en-US": "Reload Config",
-      "ja-JP": "設定を再読み込み",
-      "de-DE": "Konfiguration neu laden",
-      "es-ES": "Recargar configuración",
-    },
-  },
-  {
-    action: "app.save",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+S",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "保存全部",
-      "zh-TW": "全部儲存",
-      "en-US": "Save All",
-      "ja-JP": "すべて保存",
-      "de-DE": "Alles speichern",
-      "es-ES": "Guardar todo",
-    },
-  },
-  {
-    action: "app.globalSearch",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+K",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "全局搜索",
-      "zh-TW": "全域搜尋",
-      "en-US": "Global Search",
-      "ja-JP": "グローバル検索",
-      "de-DE": "Globale Suche",
-      "es-ES": "Búsqueda global",
-    },
-  },
-  {
-    action: "app.quickProfileSwitch",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+Shift+P",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "快速切换配置方案",
-      "zh-TW": "快速切換設定方案",
-      "en-US": "Quick Switch Profile",
-      "ja-JP": "Profile をすばやく切り替え",
-      "de-DE": "Profil schnell wechseln",
-      "es-ES": "Cambio rápido de perfil",
-    },
-  },
-  {
-    action: "app.refresh",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+Shift+R",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "刷新当前页面",
-      "zh-TW": "重新整理目前頁面",
-      "en-US": "Refresh Current Page",
-      "ja-JP": "現在のページを更新",
-      "de-DE": "Aktuelle Seite aktualisieren",
-      "es-ES": "Actualizar página actual",
-    },
-  },
-  {
-    action: "tab.overview",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+1",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到总览",
-      "zh-TW": "切換到總覽",
-      "en-US": "Switch to Overview",
-      "ja-JP": "概要へ切り替え",
-      "de-DE": "Zur Übersicht wechseln",
-      "es-ES": "Cambiar a Resumen",
-    },
-  },
-  {
-    action: "tab.profiles",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+2",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到 Profiles",
-      "zh-TW": "切換到 Profiles",
-      "en-US": "Switch to Profiles",
-      "ja-JP": "Profiles へ切り替え",
-      "de-DE": "Zu Profilen wechseln",
-      "es-ES": "Cambiar a Perfiles",
-    },
-  },
-  {
-    action: "tab.providers",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+3",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到 Providers",
-      "zh-TW": "切換到 Providers",
-      "en-US": "Switch to Providers",
-      "ja-JP": "Providers へ切り替え",
-      "de-DE": "Zu Providern wechseln",
-      "es-ES": "Cambiar a Proveedores",
-    },
-  },
-  {
-    action: "tab.models",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+4",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到 Models",
-      "zh-TW": "切換到 Models",
-      "en-US": "Switch to Models",
-      "ja-JP": "Models へ切り替え",
-      "de-DE": "Zu Modellen wechseln",
-      "es-ES": "Cambiar a Modelos",
-    },
-  },
-  {
-    action: "tab.mcp",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+5",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到 MCP",
-      "zh-TW": "切換到 MCP",
-      "en-US": "Switch to MCP",
-      "ja-JP": "MCP へ切り替え",
-      "de-DE": "Zu MCP wechseln",
-      "es-ES": "Cambiar a MCP",
-    },
-  },
-  {
-    action: "tab.skills",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+6",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到 Skills",
-      "zh-TW": "切換到 Skills",
-      "en-US": "Switch to Skills",
-      "ja-JP": "Skills へ切り替え",
-      "de-DE": "Zu Skills wechseln",
-      "es-ES": "Cambiar a Skills",
-    },
-  },
-  {
-    action: "tab.insights",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+7",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到洞察",
-      "zh-TW": "切換到洞察",
-      "en-US": "Switch to Insights",
-      "ja-JP": "インサイトへ切り替え",
-      "de-DE": "Zu Insights wechseln",
-      "es-ES": "Cambiar a Insights",
-    },
-  },
-  {
-    action: "tab.settings",
-    scope: "window",
-    defaultAccelerator: "CommandOrControl+8",
-    defaultEnabled: true,
-    label: {
-      "zh-CN": "切换到设置",
-      "zh-TW": "切換到設定",
-      "en-US": "Switch to Settings",
-      "ja-JP": "設定へ切り替え",
-      "de-DE": "Zu Einstellungen wechseln",
-      "es-ES": "Cambiar a Ajustes",
-    },
-  },
+const SHORTCUT_ACTIONS: LegacyShortcutDefinition[] = [
+  { action: "window.toggle", scope: "global", defaultAccelerator: "Command+Shift+H", defaultEnabled: true },
+  { action: "profile.next", scope: "global", defaultAccelerator: "", defaultEnabled: false },
+  { action: "profile.previous", scope: "global", defaultAccelerator: "", defaultEnabled: false },
+  { action: "app.reloadConfig", scope: "window", defaultAccelerator: "CommandOrControl+R", defaultEnabled: true },
+  { action: "app.save", scope: "window", defaultAccelerator: "CommandOrControl+S", defaultEnabled: true },
+  { action: "app.globalSearch", scope: "window", defaultAccelerator: "CommandOrControl+K", defaultEnabled: true },
+  { action: "app.quickProfileSwitch", scope: "window", defaultAccelerator: "CommandOrControl+Shift+P", defaultEnabled: true },
+  { action: "app.refresh", scope: "window", defaultAccelerator: "CommandOrControl+Shift+R", defaultEnabled: true },
+  { action: "tab.overview", scope: "window", defaultAccelerator: "CommandOrControl+1", defaultEnabled: true },
+  { action: "tab.profiles", scope: "window", defaultAccelerator: "CommandOrControl+2", defaultEnabled: true },
+  { action: "tab.providers", scope: "window", defaultAccelerator: "CommandOrControl+3", defaultEnabled: true },
+  { action: "tab.models", scope: "window", defaultAccelerator: "CommandOrControl+4", defaultEnabled: true },
+  { action: "tab.mcp", scope: "window", defaultAccelerator: "CommandOrControl+5", defaultEnabled: true },
+  { action: "tab.skills", scope: "window", defaultAccelerator: "CommandOrControl+6", defaultEnabled: true },
+  { action: "tab.insights", scope: "window", defaultAccelerator: "CommandOrControl+7", defaultEnabled: true },
+  { action: "tab.settings", scope: "window", defaultAccelerator: "CommandOrControl+8", defaultEnabled: true },
 ];
-
-export const SHORTCUT_ACTION_SET = new Set<ShortcutAction>(
-  SHORTCUT_ACTIONS.map((definition) => definition.action),
-);
 
 const LEGACY_WINDOW_TOGGLE_ACCELERATOR = "CommandOrControl+Shift+K";
 
@@ -301,11 +84,6 @@ export function normalizeShortcuts(value: unknown): Record<ShortcutAction, Short
   return defaults;
 }
 
-export function resetShortcutBinding(action: ShortcutAction): ShortcutBinding {
-  const defaults = createDefaultShortcuts();
-  return defaults[action];
-}
-
 export function getShortcutConflicts(shortcuts: Record<ShortcutAction, ShortcutBinding>): ShortcutConflict[] {
   const groups = new Map<string, ShortcutAction[]>();
 
@@ -329,10 +107,6 @@ export function getShortcutConflicts(shortcuts: Record<ShortcutAction, ShortcutB
     });
 }
 
-export function isShortcutAction(value: string): value is ShortcutAction {
-  return SHORTCUT_ACTION_SET.has(value as ShortcutAction);
-}
-
 export function normalizeAccelerator(value: string): string {
   return value
     .split("+")
@@ -351,52 +125,6 @@ export function isValidAccelerator(value: string): boolean {
   return !accelerator || /^[\x20-\x7E]+$/.test(accelerator);
 }
 
-export function formatAcceleratorForPlatform(accelerator: string, platform: NodeJS.Platform | string = getRuntimePlatform()): string {
-  if (!accelerator.trim()) {
-    return "";
-  }
-
-  const isMac = platform === "darwin";
-  const isWindows = platform === "win32";
-  return accelerator
-    .split("+")
-    .map((part) => {
-      if (!isMac) {
-        if (part === "CommandOrControl" || part === "Control") return "Ctrl";
-        if (part === "Command" || part === "Super") return isWindows ? "Win" : "Super";
-        return part;
-      }
-      if (part === "CommandOrControl" || part === "Command") return "⌘";
-      if (part === "Control") return "⌃";
-      if (part === "Alt" || part === "Option") return "⌥";
-      if (part === "Shift") return "⇧";
-      return part;
-    })
-    .join("+");
-}
-
-export function getBrowserShortcutPlatform(): string {
-  if (typeof navigator === "undefined") {
-    return getRuntimePlatform();
-  }
-  const platform = navigator.platform.toLowerCase();
-  const userAgent = navigator.userAgent.toLowerCase();
-  if (platform.includes("mac") || userAgent.includes("mac os")) {
-    return "darwin";
-  }
-  if (platform.includes("win") || userAgent.includes("windows")) {
-    return "win32";
-  }
-  if (platform.includes("linux") || userAgent.includes("linux")) {
-    return "linux";
-  }
-  return "";
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getRuntimePlatform(): string {
-  return typeof process !== "undefined" ? process.platform : "";
 }

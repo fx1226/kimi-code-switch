@@ -167,19 +167,20 @@ describe("configStore", () => {
     });
   });
 
-  it("never resolves the default environment to the retired GUI-managed root", () => {
+  it("uses the renamed home for new targets and preserves every explicit legacy target", () => {
     expect(getKimiCodeEnvironmentHomePath("default")).toBe("~/.kimi-code");
-    expect(getKimiCodeEnvironmentHomePath("team")).toBe("~/.kimi-code-switch-gui/.env/team");
+    expect(getKimiCodeEnvironmentHomePath("team")).toBe("~/.kimi-code-switch/.env/team");
 
     const environments = normalizeKimiCodeEnvironments([
       { id: "default", name: "Default", homePath: "~/.kimi-code-switch-gui/.env/default", kind: "managed" },
+      { id: "team", name: "Team", homePath: "~/.kimi-code-switch-gui/.env/team", kind: "managed" },
     ]);
 
     expect(environments).toEqual([expect.objectContaining({
       id: "default",
-      kind: "default",
-      homePath: "~/.kimi-code",
-    })]);
+      kind: "managed",
+      homePath: "~/.kimi-code-switch-gui/.env/default",
+    }), expect.objectContaining({ id: "team", kind: "managed", homePath: "~/.kimi-code-switch-gui/.env/team" })]);
   });
 
   it("bootstraps kimi-cli profile label from main config", () => {
@@ -397,7 +398,7 @@ items = ["model", "cwd"]
     expect(loaded.display_open_mode).toBe("active-display");
     expect(loaded.close_behavior).toBe("keep-in-tray");
     expect(loaded.terminal_app).toBe("system-terminal");
-    expect(loaded.backup_local_path).toBe("~/.kimi-code-switch-gui/backups");
+    expect(loaded.backup_local_path).toBe("~/.kimi-code-switch/backups");
     expect(loaded.backup_frequency).toBe("daily");
     expect(loaded.backup_retention_count).toBe(10);
     expect(loaded.backup_strategy).toBe("manual");
@@ -424,7 +425,7 @@ items = ["model", "cwd"]
     });
     const loaded = await loadPanelSettings(files, "/tmp/config.panel.toml");
     expect(loaded.ui_font_size).toBe("standard");
-    expect(loaded.backup_local_path).toBe("~/.kimi-code-switch-gui/backups");
+    expect(loaded.backup_local_path).toBe("~/.kimi-code-switch/backups");
     expect(loaded.backup_frequency).toBe("daily");
     expect(loaded.backup_retention_count).toBe(1);
     expect(loaded.backup_strategy).toBe("scheduled");
@@ -612,7 +613,7 @@ url = "https://mcp.context7.com/mcp"
       "~/.kimi/config.panel.toml": 'locale = "en-US"\ntheme = "dark"\n',
     });
     const loaded = await loadAppState(files);
-    expect(loaded.panelSettingsPath).toBe("~/.kimi-code-switch-gui/app.db#panel_settings");
+    expect(loaded.panelSettingsPath).toBe("~/.kimi-code-switch/app.db#panel_settings");
     expect(loaded.panelSettings.locale).toBe("en-US");
     expect(loaded.panelSettings.theme).toBe("dark");
     expect(files.ensured).not.toContain("~/.kimi-code-switch-gui");
@@ -678,7 +679,7 @@ url = "https://mcp.context7.com/mcp"
     state.panelSettingsPath = "";
     const normalized = normalizeStatePaths(state);
     expect(normalized.profilesPath).toBe("");
-    expect(normalized.panelSettingsPath).toBe("~/.kimi-code-switch-gui/app.db#panel_settings");
+    expect(normalized.panelSettingsPath).toBe("~/.kimi-code-switch/app.db#panel_settings");
     expect(normalized.mcpConfigPath).toBe("~/.kimi-code/mcp.json");
   });
 
@@ -1921,7 +1922,7 @@ describe("migrateLegacyKimiCliConfigToKimiCode", () => {
   const defaultConfigPath = getKimiCodeConfigPath(defaultHome);
   const defaultMcpPath = getKimiCodeMcpConfigPath(defaultHome);
   const LEGACY_CONFIG = "~/.kimi/config.toml";
-  const MARKER = "~/.kimi-code-switch-gui/legacy-kimi-cli-config.migrated.json";
+  const MARKER = "~/.kimi-code-switch/legacy-kimi-cli-config.migrated.json";
 
   it("migrates legacy config into the official default ~/.kimi-code directory", async () => {
     const files = createMemoryFs({

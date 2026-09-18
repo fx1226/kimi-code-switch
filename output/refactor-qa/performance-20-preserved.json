@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-09-18T05:41:24.322Z",
+  "purpose": "Preserve the complete original 20+20 sample final-artifact measurement before one pre-agreed 100+100 sample extension",
+  "files": [
+    {
+      "path": "output/refactor-qa/final-performance-metrics.json",
+      "sha256": "b798e97e792445ede585bd8df07295c783703537fdc4bfc5ba12461e7e8e8218",
+      "bytes": 17190,
+      "modifiedAt": "2026-09-18T05:38:07.033Z"
+    },
+    {
+      "path": "output/refactor-qa/final-performance.log",
+      "sha256": "31eb618d4f851572abc3fa0e74dd68400356f7f519b0734f671b72d479140518",
+      "bytes": 2798,
+      "modifiedAt": "2026-09-18T05:36:58.049Z"
+    },
+    {
+      "path": "dist-release/performance-metrics.json",
+      "sha256": "b798e97e792445ede585bd8df07295c783703537fdc4bfc5ba12461e7e8e8218",
+      "bytes": 17190,
+      "modifiedAt": "2026-09-18T05:36:58.048Z"
+    },
+    {
+      "path": "dist-release/kimi-code-switch",
+      "sha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+      "bytes": 63178000,
+      "modifiedAt": "2026-09-18T05:34:18.464Z"
+    }
+  ]
+}

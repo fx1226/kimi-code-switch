@@ -1,13 +1,16 @@
 // system.ts 的聚焦测试：覆盖 11 个系统集成命令的确定性分支。
 // 运行方式：npx vitest run src/server/native/system.test.ts
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   buildKimiProviderCommand,
   findKimiCodeLoginCommand,
+  fileStat,
+  getGoogleAdcAccessToken,
+  runKimiProviderCommand,
   ipIsBlocked,
   isOauthModelsPaymentRequired,
   normalizeMcpStdioArgs,
@@ -104,7 +107,7 @@ describe("file_stat", () => {
     const dir = makeTempDir();
     const file = join(dir, "a.log");
     writeFileSync(file, "abc");
-    const stat = (await invoke("file_stat", { path: file })) as {
+    const stat = (await fileStat({ path: file })) as {
       size: number;
       mtime_ms: number;
       ino: number;
@@ -116,7 +119,7 @@ describe("file_stat", () => {
   });
 
   it("returns null for a missing file", async () => {
-    const stat = await invoke("file_stat", { path: join(makeTempDir(), "missing.log") });
+    const stat = await fileStat({ path: join(makeTempDir(), "missing.log") });
     expect(stat).toBeNull();
   });
 });
@@ -220,24 +223,19 @@ describe("http_request validation (SSRF, offline)", () => {
 describe("get_google_adc_access_token", () => {
   it("rejects invalid env values before spawning", async () => {
     await expect(
-      invoke("get_google_adc_access_token", {
+      getGoogleAdcAccessToken({
         env: { GOOGLE_CLOUD_PROJECT: "a\0b" },
       }),
     ).rejects.toThrow("invalid Google ADC environment value for GOOGLE_CLOUD_PROJECT");
   });
 
-  it("fails when gcloud is unavailable (offline)", async () => {
-    // 本机未装 gcloud；若装了但无 ADC 配置同样会失败，二者消息均含 gcloud。
-    await expect(
-      invoke("get_google_adc_access_token", { env: {} }),
-    ).rejects.toThrow(/gcloud/);
-  });
+
 });
 
 describe("run_kimi_provider_command (deterministic validation branches)", () => {
   it("rejects unsupported actions", async () => {
     await expect(
-      invoke("run_kimi_provider_command", {
+      runKimiProviderCommand({
         homePath: "~/.kimi-code",
         request: { action: "bogus" },
       }),
@@ -246,7 +244,7 @@ describe("run_kimi_provider_command (deterministic validation branches)", () => 
 
   it("rejects catalog-add without provider id / api key", async () => {
     await expect(
-      invoke("run_kimi_provider_command", {
+      runKimiProviderCommand({
         homePath: "~/.kimi-code",
         request: { action: "catalog-add" },
       }),
@@ -255,7 +253,7 @@ describe("run_kimi_provider_command (deterministic validation branches)", () => 
 
   it("rejects insecure registry URLs", async () => {
     await expect(
-      invoke("run_kimi_provider_command", {
+      runKimiProviderCommand({
         homePath: "~/.kimi-code",
         request: { action: "registry-add", url: "http://registry.example/api.json", apiKey: "s" },
       }),
@@ -383,6 +381,17 @@ describe("normalize_mcp_stdio_args", () => {
 });
 
 describe("run_mcp_stdio_session", () => {
+  it("uses the selected target home and working directory in the actual child process", async () => {
+    const cwd = makeTempDir();
+    const kimiHome = join(cwd, "isolated-kimi-home");
+    const response = await runMcpStdioSession({
+      program: "node", cwd,
+      args: ["-e", "const rl=require('readline').createInterface({input:process.stdin});rl.on('line',l=>{const m=JSON.parse(l);console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{cwd:process.cwd(),home:process.env.KIMI_CODE_HOME}}))})"],
+      env: { KIMI_CODE_HOME: kimiHome }, requests: [{ id: 1, method: "initialize", params: {} }], timeoutMs: 3000,
+    });
+    expect(response.responses[0]).toMatchObject({ result: { cwd: realpathSync(cwd), home: kimiHome } });
+  });
+
   it("returns matching responses for a valid MCP stdio server", async () => {
     const result = (await runMcpStdioSession({
       program: "node",

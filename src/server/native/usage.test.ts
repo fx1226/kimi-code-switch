@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { usageCommands } from "./usage";
 import { storesCommands } from "./stores";
+import { configureAppPaths } from "./paths";
 
 let tmpDir: string;
 let dbPath: string;
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS ingest_state (source_path TEXT PRIMARY KEY);
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "kimi-usage-test-"));
+  configureAppPaths({ dataDir: tmpDir });
   dbPath = join(tmpDir, "app.db");
   usageCommands.usage_open({ dbPath, schemaSql: SCHEMA });
 });
@@ -32,6 +34,7 @@ afterEach(() => {
   } catch {
     // 可能已被关闭
   }
+  configureAppPaths();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -41,7 +44,7 @@ describe("usage_open / usage_close / reuse", () => {
       sql: "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('events','ingest_state') ORDER BY name",
       params: null,
     });
-    expect(tables.map((r) => r.name).sort()).toEqual(["events", "ingest_state"]);
+    expect((tables as Array<Record<string, unknown>>).map((r) => r.name).sort()).toEqual(["events", "ingest_state"]);
   });
 
   it("throws db not open after close, then works again after reopen", () => {
@@ -123,67 +126,11 @@ describe("usage_exec_batch", () => {
   });
 });
 
-describe("legacy native config export/clear", () => {
-  it("exports env_config and mcp_servers by environment without mutating", () => {
-    usageCommands.usage_exec_script({
-      sql: `
-        CREATE TABLE env_config (
-          kimi_code_environment_id TEXT PRIMARY KEY,
-          providers TEXT NOT NULL,
-          models TEXT NOT NULL
-        );
-        CREATE TABLE mcp_servers (
-          kimi_code_environment_id TEXT NOT NULL,
-          server_name TEXT NOT NULL,
-          enabled INTEGER NOT NULL,
-          transport TEXT NOT NULL,
-          url TEXT NOT NULL,
-          command TEXT NOT NULL,
-          args TEXT NOT NULL,
-          headers TEXT NOT NULL,
-          env TEXT NOT NULL,
-          extra TEXT
-        );
-        INSERT INTO env_config VALUES ('work', '{"openai":{"api_key":"secret"}}', '{"model-a":{"provider":"openai"}}');
-        INSERT INTO mcp_servers VALUES ('work','local',1,'stdio','','npx','["-y","server"]','{}','{"TOKEN":"secret"}','{"cwd":"/tmp"}');
-      `,
-    });
-
-    const doc = usageCommands.export_legacy_native_config({});
-    const parsed = JSON.parse(doc) as { environments: Record<string, any> };
-    expect(parsed.environments.work.providers.openai.api_key).toBe("secret");
-    expect(parsed.environments.work.mcpServers.local).toMatchObject({
-      enabled: true,
-      transport: "stdio",
-      command: "npx",
-      args: ["-y", "server"],
-    });
-  });
-
-  it("clears recovered rows for registered environments only", () => {
-    usageCommands.usage_exec_script({
-      sql: `
-        CREATE TABLE env_config (
-          kimi_code_environment_id TEXT PRIMARY KEY,
-          providers TEXT NOT NULL,
-          models TEXT NOT NULL
-        );
-        INSERT INTO env_config VALUES ('work','{}','{}');
-        INSERT INTO env_config VALUES ('orphan','{}','{}');
-      `,
-    });
-
-    usageCommands.clear_recovered_legacy_native_config({ environmentIds: ["work"] });
-    const rows = usageCommands.usage_query({
-      sql: "SELECT kimi_code_environment_id AS id FROM env_config ORDER BY id",
-      params: null,
-    });
-    expect(rows).toEqual([{ id: "orphan" }]);
-  });
-
-  it("returns an empty environment map when no legacy tables exist", () => {
-    const doc = usageCommands.export_legacy_native_config({});
-    expect(JSON.parse(doc)).toEqual({ environments: {} });
+describe("retired legacy native database capabilities", () => {
+  it("does not expose migration, export or mutation of retired native mirrors", () => {
+    for (const name of ["migrate_legacy_database", "export_legacy_native_config", "clear_recovered_legacy_native_config"]) {
+      expect(usageCommands[name]).toBeUndefined();
+    }
   });
 });
 

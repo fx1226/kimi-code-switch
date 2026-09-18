@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
 import * as TOML from "@iarna/toml";
@@ -7,6 +8,7 @@ import { buildConfigDocument, loadAppState } from "./configStore";
 import { buildMcpConfigDocument, parseMcpConfigStrict } from "./mcpStore";
 import { scanSkills } from "./skillsStore";
 import { mergeTuiConfigDocument, normalizeTuiConfig, parseTuiConfigDocumentWithDiagnostics } from "./tuiStore";
+import { evaluateKimiCompatibility, KIMI_CODE_CONTRACT_COMMIT, KIMI_CODE_CONTRACT_VERSION, KIMI_NATIVE_FILE_CONTRACTS, KIMI_NATIVE_RESOLUTION } from "./kimiCompatibility";
 
 const CONTRACT_DIR = resolve(process.cwd(), "tests/fixtures/kimi-code/0.38.0");
 
@@ -368,5 +370,100 @@ describe("Kimi Code 0.38.0 upstream contract", () => {
 
     // normalize（单一 schema）对同一文档给出等价有效配置。
     expect(normalizeTuiConfig(config)).toEqual(effective);
+  });
+});
+
+describe("Kimi Code 2.0.0 pinned source contract", () => {
+  const directory = resolve(process.cwd(), "tests/fixtures/kimi-code/2.0.0");
+  const fixture = (path: string) => readFileSync(resolve(directory, path), "utf8");
+
+  it("pins provenance and checks fixture integrity without claiming runtime consumption", () => {
+    const manifest = JSON.parse(fixture("contract-manifest.json"));
+    expect(manifest.product.version).toBe(KIMI_CODE_CONTRACT_VERSION);
+    expect(manifest.product.release_commit).toBe(KIMI_CODE_CONTRACT_COMMIT);
+    expect(manifest.product.release_date).toBe("2026-09-17");
+    const sourceIds = new Set(manifest.sources.map((source: { id: string }) => source.id));
+    for (const source of manifest.sources) {
+      expect(source.immutable_url).toContain(`/blob/${KIMI_CODE_CONTRACT_COMMIT}/`);
+      expect(source.sha256).toMatch(/^[a-f0-9]{64}$/);
+    }
+    for (const [path, value] of Object.entries(manifest.fixtures)) {
+      const provenance = value as { sources: string[]; derivation: string; sha256: string };
+      expect(provenance.sources.every((id) => sourceIds.has(id))).toBe(true);
+      expect(provenance.derivation.length).toBeGreaterThan(0);
+      expect(createHash("sha256").update(fixture(path)).digest("hex")).toBe(provenance.sha256);
+    }
+    expect(manifest.evidence.mcp_skills_plugins_runtime).toBe("full-cli-desktop-runtime-not-executed");
+    expect(manifest.evidence.local_source_consumption.result).toBe("passed");
+    expect(manifest.evidence.desktop.version).toBe("1.0.1");
+    expect(manifest.evidence.desktop.private_state).toBe("excluded");
+  });
+
+  it("keeps the isolated official consumer sources byte-identical to their pinned inventory", () => {
+    const inventory = JSON.parse(fixture("upstream/sources.json"));
+    expect(inventory.commit).toBe(KIMI_CODE_CONTRACT_COMMIT);
+    expect(inventory.sourceBase).toContain(`/blob/${KIMI_CODE_CONTRACT_COMMIT}/`);
+    for (const entry of inventory.files) {
+      expect(createHash("sha256").update(fixture(`upstream/${entry.path}`)).digest("hex")).toBe(entry.sha256);
+    }
+    expect(fixture(`upstream/${inventory.license}`)).toContain("Copyright (c) 2026 Moonshot AI");
+    expect(fixture(`upstream/${inventory.license}`)).toContain("MIT License");
+  });
+
+  it("round-trips the official config and MCP examples through the production adapters", async () => {
+    const config = fixture("config.toml");
+    const mcp = fixture("mcp.json");
+    const state = await loadAppState({
+      async readText(path: string) {
+        if (path.endsWith("config.toml")) return config;
+        if (path.endsWith("mcp.json")) return mcp;
+        return null;
+      },
+      async writeText() {},
+      async ensureDir() {},
+    });
+    expect(TOML.parse(buildConfigDocument(state))).toMatchObject(TOML.parse(config));
+    expect(JSON.parse(buildMcpConfigDocument(parseMcpConfigStrict(mcp)))).toMatchObject(JSON.parse(mcp));
+  });
+
+  it("preserves the released TUI additions when changing a profile", () => {
+    const document = fixture("tui.toml");
+    const parsed = parseTuiConfigDocumentWithDiagnostics(document);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.config).toMatchObject({ disableFeedbackSurvey: false, markdownMermaid: "final" });
+    const changed = TOML.parse(mergeTuiConfigDocument(document, { theme: "light" }));
+    expect(changed).toMatchObject({ theme: "light", disable_feedback_survey: false, markdown: { mermaid: "final" } });
+  });
+
+  it("loads the official directory skill and a documented flat-form fixture", async () => {
+    const result = await scanSkills({
+      async readText(path: string) { return existsSync(path) ? readFileSync(path, "utf8") : null; },
+      async listDir(path: string) {
+        return existsSync(path) ? readdirSync(path, { withFileTypes: true }).map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() })) : [];
+      },
+      async pathExists(path: string) { return existsSync(path); },
+    }, { mergeAllAvailableSkills: true, envHome: directory, userHome: resolve(directory, "isolated-home") });
+    expect(result.skills.map((skill) => skill.name).sort()).toEqual(["commit", "review-pr"]);
+  });
+
+  it("keeps per-file validation and client scopes explicit", () => {
+    expect(KIMI_NATIVE_FILE_CONTRACTS.filter((contract) => contract.officialValidation.startsWith("doctor")).map((contract) => contract.id)).toEqual(["config", "tui"]);
+    expect(KIMI_NATIVE_FILE_CONTRACTS.find((contract) => contract.id === "tui")?.clients).toBe("cli-terminal");
+    expect(KIMI_NATIVE_RESOLUTION.mcpPrecedenceLowToHigh).toEqual(["mcp-user", "mcp-project-root", "mcp-project-local"]);
+    expect(KIMI_NATIVE_RESOLUTION.skillPrecedenceLowToHigh).toEqual(["built-in", "extra", "user", "project"]);
+  });
+
+  it.each(["2.0.0", "v2.0.0", " 2.0.0 "])("permits native writes for exact CLI contract %s", (version) => {
+    expect(evaluateKimiCompatibility(version)).toMatchObject({ status: "contract-matched", nativeWritesAllowed: true, runtimeVerified: false });
+  });
+
+  it.each(["0.38.0", "2.0.1", "3.0.0", "2.0.0-beta.1", "2.0.0+custom", "Kimi Code 2.0.0"])("does not treat %s as a verified release", (version) => {
+    expect(evaluateKimiCompatibility(version)).toMatchObject({ status: "unverified-version", nativeWritesAllowed: false });
+  });
+
+  it("separates unavailable version and Desktop static evidence", () => {
+    expect(evaluateKimiCompatibility(null)).toMatchObject({ status: "unknown-version", nativeWritesAllowed: false });
+    expect(evaluateKimiCompatibility("1.0.1", "desktop")).toMatchObject({ status: "static-shared-contract", nativeWritesAllowed: false, runtimeVerified: false });
+    expect(evaluateKimiCompatibility("2.0.0", "desktop").status).toBe("unverified-version");
   });
 });

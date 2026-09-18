@@ -1,0 +1,8 @@
+{
+  "model": "Mac17,3",
+  "cpu": "Apple M5",
+  "macOS": "27.0",
+  "readAt": "2026-09-18",
+  "source": "sysctl hw.model machdep.cpu.brand_string; sw_vers -productVersion",
+  "note": "Same local machine for all reported runs; filesystem caches were not flushed."
+}

@@ -1,0 +1,111 @@
+{
+  "commit": "1b89e4b039f052d10f258464413b2047acca12ba",
+  "license": "LICENSE",
+  "sourceBase": "https://github.com/MoonshotAI/kimi-code/blob/1b89e4b039f052d10f258464413b2047acca12ba/",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "23cc68e17992e0b512ae2e80afc5787d7d8e0fbfbdb4fff54ec0245508fa400e"
+    },
+    {
+      "path": "packages/agent-core-v2/package.json",
+      "sha256": "990c397721fd6775502cb7c198b79cdaa23fac1488368f67673182a1dfeeae6f"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/bootstrap/bootstrap.ts",
+      "sha256": "b1f7938db6e65d7d19201657a202e6dd02898e14affe2180dd99da18b6bee173"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/git/workTree.ts",
+      "sha256": "423bbc1c9984d5597846bdb6018076026ac8a774ce988ab53a703668cc274361"
+    },
+    {
+      "path": "packages/agent-core-v2/src/_base/utils/paths.ts",
+      "sha256": "f065703d40cf3662864ccc3ace747c772d9e3dfa49b13b46e84e3b5f37d2abf6"
+    },
+    {
+      "path": "packages/agent-core-v2/src/_base/errors/codes.ts",
+      "sha256": "d0ff97273718bec7ff3ba6d2442847bb35603b424421e89397e0f62506ec0c90"
+    },
+    {
+      "path": "packages/agent-core-v2/src/_base/errors/errors.ts",
+      "sha256": "fd0e0d4efab7de6931b5785a16af7c4b6652f82e81766b7671ab52a4523bf0ca"
+    },
+    {
+      "path": "packages/agent-core-v2/src/_base/text/frontmatter.ts",
+      "sha256": "008187c295c8715145de6e05e09e594c18f6ff6e1625736c3da6fcc98647422f"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/config/errors.ts",
+      "sha256": "f8e13f53b3903ae53bd1c7156c6fb17e08951644e00ed83d916af939052da2ab"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/errors.ts",
+      "sha256": "866e247d37a390193c5fe2653840ccf32f8de3cc15cb964d2217f2578cde50b6"
+    },
+    {
+      "path": "packages/agent-core-v2/src/os/interface/hostFsErrors.ts",
+      "sha256": "ca9793f875d17db487f72bb8f52bf0f412888fae138c2457e4feb380d6472bbb"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/mcpConfig/configLoader.ts",
+      "sha256": "ed30b684f8592466b6d485b5048156012bab8ae1b355cda572a1acdb03f35fc3"
+    },
+    {
+      "path": "packages/agent-core-v2/src/mcpCore/config-schema.ts",
+      "sha256": "d22fcf6ac07f87029b8923e7e84314027b7ed0057eddf99d3ce51347dd0561b0"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/skill/catalog/fileSkillDiscovery.ts",
+      "sha256": "647d3a4a91873a45a973fd408c19d0df279bedd18340565c3c3188771c416b74"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/skill/catalog/parser.ts",
+      "sha256": "06ba976b1941a7e1db9b7879ea1a1fd13cfdbbc9f90f78b80b244da9f6993ad0"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/skill/catalog/types.ts",
+      "sha256": "7c90f7ab17f2a043da0f15e68e4d0fdb1d6fe9ac970920002861f27c76bfb3ac"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/skill/catalog/errors.ts",
+      "sha256": "3c3934aa8e4160c783392da8e62306b4c819233fa81d06709d0863ade88dea99"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/externalHooks/configSection.ts",
+      "sha256": "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20"
+    },
+    {
+      "path": "packages/agent-core-v2/src/features/externalHooks/internal/types.ts",
+      "sha256": "b8ecad863326646df46e5b596324fe9a3d7bd687c78bc6b538399c1201e01d6f"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/store.ts",
+      "sha256": "a24dcacc40f9c76a11cbd8af5188d6261df0d6d5250e79342930902cc3ddf232"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/manifest.ts",
+      "sha256": "c757889716b444663f0c783e949a97425e27d6a5da6718b000279783be45aaa7"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/manager.ts",
+      "sha256": "214440d3e0bc69b83f37110878923ff427cff3f898ad5c14ca6999af5e266316"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/types.ts",
+      "sha256": "612170f78ce2d0bcdf0d76c9287890e33e16534e1df4592949d758fe9a127d7e"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/commands.ts",
+      "sha256": "93d582115bb9a8d8dca8faadc53ece7c512b43daf21da071cc19165ee045d3cf"
+    },
+    {
+      "path": "packages/agent-core-v2/src/app/plugin/source.ts",
+      "sha256": "a621a55794225d858cf700b8d4bf2614709bdf2c373bcd75bc46f8bdf968a4be"
+    },
+    {
+      "path": "packages/agent-core-v2/src/llm-adapter/contract/errors.ts",
+      "sha256": "e753e2b3d6ce9137ef5f2cbe460ff8df20d3496e32069ccc2c7da55a946ec096"
+    }
+  ]
+}

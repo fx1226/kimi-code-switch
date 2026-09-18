@@ -1,0 +1,210 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  assignLegacySnapshotEnvironment,
+  initConfigHistory,
+  captureSnapshot,
+  listSnapshots,
+  getSnapshotContent,
+  restoreSnapshot,
+  cleanupOldSnapshots,
+} from "./configHistory";
+
+// Mock server native command dispatch
+vi.mock("../native", () => ({
+  invokeCommand: vi.fn(),
+}));
+
+import { invokeCommand as invoke } from "../native";
+const mockInvoke = vi.mocked(invoke);
+
+describe("configHistory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("initConfigHistory", () => {
+    it("调用 init_config_history 命令", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
+      await initConfigHistory();
+
+      expect(mockInvoke).toHaveBeenCalledWith("init_config_history");
+    });
+
+    it("失败时抛出错误", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("init failed"));
+
+      await expect(initConfigHistory()).rejects.toThrow("init failed");
+    });
+  });
+
+  describe("captureSnapshot", () => {
+    it("成功时返回快照 ID", async () => {
+      mockInvoke.mockResolvedValueOnce(42);
+
+      const result = await captureSnapshot("config", "~/.kimi-code/config.toml", "test snapshot");
+
+      expect(mockInvoke).toHaveBeenCalledWith("capture_snapshot", {
+        fileId: "config",
+        filePath: "~/.kimi-code/config.toml",
+        description: "test snapshot",
+        kimiCodeEnvironmentId: null,
+      });
+      expect(result).toBe(42);
+    });
+
+    it("去重时返回 null", async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+
+      const result = await captureSnapshot("tui", "~/.kimi-code/tui.toml");
+
+      expect(result).toBeNull();
+    });
+
+    it("失败时返回 null（不阻塞调用方）", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("disk full"));
+
+      const result = await captureSnapshot("panel", "~/.kimi-code/config.panel.toml");
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("listSnapshots", () => {
+    it("返回快照列表", async () => {
+      const mockSnapshots = [
+        {
+          id: 1,
+          snapshot_at: "2026-06-08T10:00:00Z",
+          kimi_code_environment_id: "work",
+          file_id: "config",
+          sha256: "abc123",
+          size_bytes: 1024,
+          snapshot_path: "/path/1.gz",
+          target_path: "/work/config.toml",
+          description: "test",
+        },
+        {
+          id: 2,
+          snapshot_at: "2026-06-08T11:00:00Z",
+          kimi_code_environment_id: "work",
+          file_id: "tui",
+          sha256: "def456",
+          size_bytes: 2048,
+          snapshot_path: "/path/2.gz",
+          target_path: "/work/tui.toml",
+          description: null,
+        },
+      ];
+
+      mockInvoke.mockResolvedValueOnce(mockSnapshots);
+
+      const result = await listSnapshots("work", "config", 50);
+
+      expect(mockInvoke).toHaveBeenCalledWith("list_snapshots", {
+        fileId: "config",
+        kimiCodeEnvironmentId: "work",
+        limit: 50,
+      });
+      expect(result).toEqual(mockSnapshots);
+    });
+
+    it("默认参数", async () => {
+      mockInvoke.mockResolvedValueOnce([]);
+
+      await listSnapshots("default");
+
+      expect(mockInvoke).toHaveBeenCalledWith("list_snapshots", {
+        fileId: null,
+        kimiCodeEnvironmentId: "default",
+        limit: 100,
+      });
+    });
+
+    it("失败时返回空数组", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("db error"));
+
+      const result = await listSnapshots("default");
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe("getSnapshotContent", () => {
+    it("返回快照内容", async () => {
+      const mockContent = "[providers]\ndefault = \"kimi\"";
+      mockInvoke.mockResolvedValueOnce(mockContent);
+
+      const result = await getSnapshotContent(42);
+
+      expect(mockInvoke).toHaveBeenCalledWith("get_snapshot_content", {
+        snapshotId: 42,
+      });
+      expect(result).toBe(mockContent);
+    });
+
+    it("失败时返回 null", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("file not found"));
+
+      const result = await getSnapshotContent(999);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("restoreSnapshot", () => {
+    it("成功时返回 true", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
+      const result = await restoreSnapshot(42);
+
+      expect(mockInvoke).toHaveBeenCalledWith("restore_snapshot", {
+        snapshotId: 42,
+      });
+      expect(result).toBe(true);
+    });
+
+    it("失败时返回 false", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("write failed"));
+
+      const result = await restoreSnapshot(42);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("assignLegacySnapshotEnvironment", () => {
+    it("binds a legacy snapshot to a selected registered environment", async () => {
+      mockInvoke.mockResolvedValue(undefined as never);
+      await expect(assignLegacySnapshotEnvironment(7, "work")).resolves.toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith("assign_legacy_snapshot_environment", {
+        snapshotId: 7,
+        kimiCodeEnvironmentId: "work",
+      });
+    });
+
+    it("returns false when the assignment is rejected", async () => {
+      mockInvoke.mockRejectedValue(new Error("not registered"));
+      await expect(assignLegacySnapshotEnvironment(7, "missing")).resolves.toBe(false);
+    });
+  });
+
+  describe("cleanupOldSnapshots", () => {
+    it("返回删除的记录数", async () => {
+      mockInvoke.mockResolvedValueOnce(15);
+
+      const result = await cleanupOldSnapshots();
+
+      expect(mockInvoke).toHaveBeenCalledWith("cleanup_old_snapshots");
+      expect(result).toBe(15);
+    });
+
+    it("失败时返回 0", async () => {
+      mockInvoke.mockRejectedValueOnce(new Error("cleanup failed"));
+
+      const result = await cleanupOldSnapshots();
+
+      expect(result).toBe(0);
+    });
+  });
+});

@@ -1,13 +1,2 @@
-/* Cascade order is deliberate: feature code cannot override the application shell. */
-@layer tokens, legacy-components, primitives, patterns, features, overrides, shell;
-
-@import "./fonts.css";
-@import "./tokens.css" layer(tokens);
-/* Existing component rules are migrated out incrementally; new shared rules belong below. */
-@import "./components.css" layer(legacy-components);
-@import "./primitives.css" layer(primitives);
-@import "./patterns.css" layer(patterns);
-@import "./insights.css" layer(features);
-@import "./foundation.css" layer(overrides);
-/* Shell/overview/split geometry is the final layout authority. */
-@import "./layout.css" layer(shell);
+/* The local browser client is the only production UI. */
+@import "./web/web.css";

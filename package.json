@@ -1,46 +1,41 @@
 {
-  "name": "kimi-code-switch-gui",
+  "name": "kimi-code-switch",
   "version": "2.2.7",
-  "description": "Tauri desktop app for managing kimi-code-cli providers, models, and profiles.",
-  "author": "Hulk Sun <sunhao.java@gmail.com>",
+  "description": "Local web configuration companion for Kimi Code.",
+  "author": "fx1226",
   "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\"",
-    "dev:web": "vite",
-    "build:web": "vite build",
-    "build:bridge": "esbuild src/bridge/src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-bridge/bridge.mjs",
-    "build:bridge:sidecar": "node scripts/build-bridge-sidecar.mjs",
-    "test:bridge": "vitest run src/bridge",
-    "build:server": "node scripts/build-server.mjs",
+    "clean": "node scripts/clean.mjs",
+    "dev": "node scripts/build-icons.mjs && node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
     "dev:server": "node scripts/build-server.mjs && node dist-server/server.mjs --no-open",
+    "build:web": "node scripts/build-icons.mjs && vite build",
+    "build:server": "node scripts/build-server.mjs",
     "build:server:sidecar": "node scripts/build-server-sidecar.mjs",
-    "preview": "vite preview",
+    "build": "npm run build:web && npm run build:server && npm run build:server:sidecar",
+    "build:icons": "node scripts/build-icons.mjs",
+    "check:package": "node scripts/check-package.mjs",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:a11y": "vitest run src/renderer/src/dialogs.test.tsx src/renderer/src/commandPalette.test.tsx src/renderer/src/quickProfileSwitcher.test.tsx src/renderer/src/resourceWorkspace.test.tsx src/renderer/src/tabList.test.tsx src/renderer/src/tabComponents.test.tsx src/renderer/src/insightsComponents.test.tsx",
-    "lint:css": "node scripts/check-css-architecture.mjs",
+    "test:a11y": "vitest run src/renderer/src/web",
     "typecheck": "tsc -b",
-    "tauri": "tauri",
-    "tauri:dev:web": "vite",
-    "tauri:build:web": "vite build",
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "dist:mac": "tauri build --bundles dmg",
-    "dist:win": "tauri build --bundles nsis"
+    "check:performance": "node scripts/check-performance.mjs"
+  },
+  "pkg": {
+    "assets": [
+      "dist/**"
+    ],
+    "targets": [
+      "node22-darwin-arm64"
+    ]
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-global-shortcut": "^2.3.2",
-    "@tauri-apps/plugin-opener": "^2.5.4",
-    "@tauri-apps/plugin-process": "^2.3.1",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.15.3",
@@ -53,10 +48,26 @@
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vitest": "^3.2.2"
+    "vitest": "^3.2.2",
+    "esbuild": "^0.25.12"
+  },
+  "contributors": [
+    "Hulk Sun <sunhao.java@gmail.com>"
+  ],
+  "bin": {
+    "kimi-code-switch": "dist-server/server.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fx1226/kimi-code-switch.git"
+  },
+  "homepage": "https://github.com/fx1226/kimi-code-switch",
+  "bugs": {
+    "url": "https://github.com/fx1226/kimi-code-switch/issues"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

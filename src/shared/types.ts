@@ -180,6 +180,8 @@ export interface MainConfig {
 }
 
 export interface Profile {
+  /** Explicit native fields captured by Web presets; omitted fields stay unset. */
+  nativeEdits?: import("./documentPatch").DocumentEdit[];
   name: string;
   label: string;
   default_model: string;
@@ -212,6 +214,8 @@ export interface McpServerConfig {
 
 export interface McpConfig {
   mcpServers: Record<string, McpServerConfig>;
+  /** Unknown native top-level fields survive a read/edit/write cycle. */
+  extra?: Record<string, unknown>;
 }
 
 export interface TuiConfig {
@@ -219,6 +223,8 @@ export interface TuiConfig {
   disable_paste_burst?: boolean;
   renderLatex?: boolean;
   cacheExpiryHint?: boolean;
+  disableFeedbackSurvey?: boolean;
+  markdownMermaid?: "final" | "off";
   editorCommand?: string;
   notificationsEnabled?: boolean;
   notificationCondition?: "unfocused" | "always";
@@ -235,6 +241,8 @@ export interface EffectiveTuiConfig {
   disablePasteBurst: boolean;
   renderLatex: boolean;
   cacheExpiryHint: boolean;
+  disableFeedbackSurvey: boolean;
+  markdownMermaid: "final" | "off";
   editorCommand: string | null;
   notificationsEnabled: boolean;
   notificationCondition: "unfocused" | "always";

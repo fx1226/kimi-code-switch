@@ -82,6 +82,9 @@ export function sendStaticResult(res: ServerResponse, result: StaticFileResult, 
     "content-type": result.contentType,
     "content-length": result.body.length,
     "cache-control": "no-cache",
+    "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
   });
   res.end(includeBody ? result.body : undefined);
 }

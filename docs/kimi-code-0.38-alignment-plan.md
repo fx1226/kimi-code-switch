@@ -1,6 +1,6 @@
 # Kimi Code 0.38 对齐计划
 
-> **状态：已被取代（superseded）**。本文档保留为历史调研参考；后续实施、验收与完成判断以根目录 `plan_kimi_code_alignment_remaining.md` 为准。
+> **历史记录，已被 Web / CLI 2.0 重构取代。** 本文保留 0.38 时期的调研和决策，不代表当前架构、迁移行为或完成状态。当前契约见 [2.0 原生文件契约](kimi-code-2.0-contract.md)，当前验收见 [重构记录](refactor-execution.md)。
 
 ## 1. 基线与目标
 

@@ -24,7 +24,6 @@
   "include": [
     "vite.config.ts",
     "src/shared/**/*.ts",
-    "src/bridge/**/*.ts",
     "src/server/**/*.ts",
     "vitest.config.ts"
   ]

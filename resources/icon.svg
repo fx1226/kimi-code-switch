@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Kimi Code Switch GUI — Config Buddy</title>
+  <defs>
+    <linearGradient id="blue" x1="0.3" y1="0" x2="0.65" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#54B2FF"/>
+      <stop offset="0.5" stop-color="#0784FF"/>
+      <stop offset="1" stop-color="#379CFF"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#143B63"/>
+      <stop offset="1" stop-color="#08274C"/>
+    </linearGradient>
+    <linearGradient id="knob" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#52B8FF"/>
+      <stop offset="0.55" stop-color="#1299FF"/>
+      <stop offset="1" stop-color="#007CFF"/>
+    </linearGradient>
+  </defs>
+  <rect id="tile" x="52" y="52" width="920" height="920" rx="208" fill="#FAFBFD"/>
+  <circle cx="512" cy="470" r="348" fill="url(#blue)"/>
+  <rect x="406" y="316" width="92" height="170" rx="46" transform="rotate(-10 452 401)" fill="#FFFFFF"/>
+  <rect x="581" y="284" width="88" height="162" rx="44" transform="rotate(-10 625 365)" fill="#FFFFFF"/>
+  <rect x="172" y="542" width="680" height="306" rx="82" fill="url(#panel)"/>
+  <circle cx="188" cy="613" r="59" fill="url(#blue)"/>
+  <circle cx="836" cy="613" r="59" fill="url(#blue)"/>
+  <rect x="276" y="622" width="470" height="43" rx="21.5" fill="#FFFFFF"/>
+  <rect x="276" y="731" width="470" height="43" rx="21.5" fill="#FFFFFF"/>
+  <circle cx="635" cy="644" r="54" fill="#021D39" opacity="0.12" transform="translate(0 4)"/>
+  <circle cx="413" cy="753" r="54" fill="#021D39" opacity="0.12" transform="translate(0 4)"/>
+  <circle cx="635" cy="644" r="54" fill="url(#knob)"/>
+  <circle cx="413" cy="753" r="54" fill="url(#knob)"/>
+</svg>

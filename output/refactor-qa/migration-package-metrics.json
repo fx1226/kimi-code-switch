@@ -1,0 +1,28 @@
+{
+  "measuredAt": "2026-09-18T06:11:58.370Z",
+  "platform": "darwin",
+  "arch": "arm64",
+  "binarySha256": "528ba09d62830966f66611b2bfe9d3611f1a98fb3b200ff9c8fc397b9c7475e5",
+  "archiveSha256": "70f026304d2e8c13cbf320cd7c4a4b05745324a9dece0854ae6adc2d41fe0dc0",
+  "executableMiB": 60.3,
+  "readyMs": 103,
+  "startupBudgetMs": 2000,
+  "startupWithinBudget": true,
+  "initialWebGzipBytes": 104874,
+  "initialWebBudgetBytes": 358400,
+  "initialWebWithinBudget": true,
+  "webAssets": [
+    {
+      "asset": "/assets/index-CzMax7w-.js",
+      "bytes": 334441,
+      "gzipBytes": 101353
+    },
+    {
+      "asset": "/assets/index-i9kHjJEz.css",
+      "bytes": 13913,
+      "gzipBytes": 3521
+    }
+  ],
+  "rssMiB": 52.6,
+  "cpuPercent": 0
+}

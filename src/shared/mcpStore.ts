@@ -51,7 +51,8 @@ export function parseMcpConfigStrict(document: string): McpConfig {
     }),
   );
 
-  return { mcpServers };
+  const extra = Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "mcpServers"));
+  return { mcpServers, ...(Object.keys(extra).length ? { extra } : {}) };
 }
 
 export function buildMcpConfigDocument(config: McpConfig): string {
@@ -61,7 +62,7 @@ export function buildMcpConfigDocument(config: McpConfig): string {
     Object.entries(config.mcpServers)
       .map(([name, server]) => [name, buildMcpServerDocument(server)]),
   );
-  return `${JSON.stringify({ mcpServers }, null, 2)}\n`;
+  return `${JSON.stringify({ ...config.extra, mcpServers }, null, 2)}\n`;
 }
 
 function parseMcpServer(raw: unknown): McpServerConfig {

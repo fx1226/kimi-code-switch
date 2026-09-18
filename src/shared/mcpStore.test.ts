@@ -1,6 +1,11 @@
 import { buildMcpConfigDocument, parseMcpConfig, parseMcpConfigStrict } from "./mcpStore";
 
 describe("mcpStore", () => {
+  it("preserves unknown root fields while changing a server", () => {
+    const config = parseMcpConfigStrict(JSON.stringify({ version: 7, extension: { mode: "future" }, mcpServers: { test: { command: "node" } } }));
+    config.mcpServers.test.command = "bun";
+    expect(JSON.parse(buildMcpConfigDocument(config))).toEqual({ version: 7, extension: { mode: "future" }, mcpServers: { test: { command: "bun" } } });
+  });
   it("parses legacy http transport as streamable-http", () => {
     const config = parseMcpConfig(`{
       "mcpServers": {

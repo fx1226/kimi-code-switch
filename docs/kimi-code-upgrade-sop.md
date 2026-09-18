@@ -1,39 +1,35 @@
-# Kimi Code 官方兼容性升级 SOP
+# Kimi Code 官方兼容性升级
 
-本文档描述当官方 `@moonshot-ai/kimi-code` 发布新版本时，如何在本仓库（kimi-code-switch-gui）固定基线、更新契约 fixtures、验证并发布兼容性结论。请严格遵循 `plan_kimi_code_alignment_remaining.md` 第 1.1 节「固定官方基线」与第 7 章 Batch F 的防漂移约束。
+当前基线与验收证据位于 [2.0 原生文件契约](kimi-code-2.0-contract.md)。本流程用于明确授权的官方版本升级，不持续追随上游 `main`。
 
-## 升级前：确认新版本
+## 固定与对照
 
-1. 查看官方发布与 tag：`@moonshot-ai/kimi-code` 的最新版本与对应 commit。
-2. 只有用户明确请求「对齐新版本」时才执行本 SOP；日常不跟随 `main`。
+1. 记录官方 release tag、完整 commit、发布日期和产品（CLI / Desktop）。后续所有源码链接固定到该 commit。
+2. 在 `tests/fixtures/kimi-code/<version>/` 新建样本及 `contract-manifest.json`，记录来源路径、哈希、字段、默认值、作用域和验证入口。合成样本标明合成原因，不冒充官方原文件。
+3. 对照当前基线核查数据根、config、TUI、项目配置、MCP、Skills 与 Plugins。标出能安全编辑、仅透传、只读以及交给官方命令的能力。
+4. 保留旧版本样本用于回归；旧样本测试通过不代表该版本仍开放编辑。
 
-## SOP 步骤
+## 实现与验证
 
-1. **发现新版本**：记录官方版本号 `vX.Y.Z`、发布 commit、发布日期。
-2. **固定源码**：将官方源码副本固定到该 commit（只读副本，如 `/private/tmp/kimi-code-upstream-<ver>-audit`），不再直接以 `main` 为基线。
-3. **更新 manifest/fixtures**：
-   - 在 `tests/fixtures/kimi-code/<version>/` 新建受审计 fixture（config.toml / mcp.json / tui.toml / skills / plugins 等）。
-   - 更新 `contract-manifest.json`：`release_tag`、`release_commit`（不可变 commit URL）、`release_date`、官方源文件列表。
-   - 保持可追溯性：fixture 只能来自固定 commit，绝不来自 `main`。
-4. **运行差分**：执行 `npx vitest run src/shared/kimiCodeContract.test.ts` 与相关契约测试，对比 GUI 生产解析器/序列化器与官方 fixture 的一致性，记录差异。
-5. **更新本计划**：将 `plan_kimi_code_alignment_remaining.md` 第 1.1 节基线与各 Batch 的完成证据更新为新版本结论。
-6. **实施**：按差异改造 structured management / parser / serializer / UI，逐项带测试。
-7. **双审查**：本地代码审查 + 官方源码差异复核（与官方同一 commit 源码逐字段比对）。
-8. **发布**：走既有发布流程（版本号、CHANGELOG、tag、CI）。发布前必须完成 F3 完整门禁。
+- 更新 `src/shared/kimiCompatibility.ts` 和相关规则、表单及参数校验。可写兼容范围按明确验证版本确定，不使用“版本较新”推断兼容。
+- 原生写入统一经过 `src/server/configuration/`。测试单字段修改、未知字段与注释保留、未设置状态、无修改零写入、并发冲突和失败恢复。
+- 执行对应契约测试、`npm run typecheck`、全量测试及 Web / server 构建。实际 API 验证应读取、预览、应用并断言最终文件内容。
+- 使用独立的临时 HOME、KIMI_CODE_HOME、cwd 和候选文件运行官方消费验证，不使用个人真实配置或凭据。
 
-## 兼容性状态页基线
+```bash
+npx vitest run src/shared/kimiCodeContract.test.ts
+node scripts/verify-kimi-contract.mjs /absolute/path/to/kimi
+```
 
-`src/renderer/src/aboutPage.tsx` 中的 `OFFICIAL_BASELINE` 与 `CAPABILITY_TIERS` 是兼容性状态页（F2）的数据来源，升级后必须同步更新：
+`verify-kimi-contract.mjs` 的版本及样本路径也必须随升级明确更新。`kimi doctor config <candidate>` 与 `kimi doctor tui <candidate>` 只验证它们对应的文件；MCP、Skills、Plugins 需各自的 parser / discovery / consumer 证据，不能用 doctor 成功代替。保留失败样本，确认错误类型和畸形文档确实被拒绝。
 
-- 已验证官方版本 / commit / 发布日期。
-- 各能力五档分类（supported / passthrough / readonly / delegated-tui / unsupported）。
+桌面版按具体版本单独验证共享配置，不将静态源码相同或 CLI 校验成功写成桌面运行验收。报告分别标明固定源码契约、本项目测试、官方消费验证和未验证范围。
 
-本机版本的比对由总览页 `getCliVersion` 完成；本机版本高于基线时，页面会给出风险提示。
+## 出口条件
 
-## 退出条件
+- 所有开放编辑的新增能力都有固定官方依据、样本与测试。
+- 保存、并发与恢复检查通过；页面准确展示兼容状态和真实目标。
+- 验证记录包含产品、版本、执行命令、结果及限制。
+- [原生文件契约](kimi-code-2.0-contract.md) 和 fixture manifest 已同步。
 
-- 新版本基线已固定（tag+commit）。
-- fixtures 与 manifest 已更新并纳入版本控制。
-- 契约差分测试通过。
-- 兼容性状态页展示新的已验证基线。
-- 完整门禁（F3）通过。
+升级实现不自动发布。用户请求发布时再执行 [维护者工作流](maintainer-workflow.md)。

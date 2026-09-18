@@ -1,0 +1,17 @@
+{
+  "measuredAt": "2026-09-18T06:48:30.970Z",
+  "browser": "153.0.8010.52",
+  "binarySha256": "29395990141e157db7aa65d45729ed5c3ca3deca3d5781551c1c906e0b078408",
+  "officialCli": "2.0.0",
+  "checks": {
+    "independentDraftGuard": true,
+    "savedDraftReleased": true,
+    "multilineSourceRedacted": true,
+    "annotatedArrayRefusedWithoutWrite": true,
+    "mcpTransportPersisted": true,
+    "blankMcpCreated": true,
+    "narrowWindowNoOverflow": true
+  },
+  "consoleErrors": [],
+  "personalDataAccessed": false
+}

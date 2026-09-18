@@ -1,22 +1,12 @@
-// Wave 2：把 src-tauri/src/fs_access.rs 的「文件 I/O」命令组忠实移植成 Node 实现。
-// 语义对齐点（B1 安全模型，必须保留）：
-//   - 所有写/删/移命令必须通过 authorizeMutation 授权：落在固定受管根
-//     （~/.kimi、~/.kimi-code、~/.kimi-code-switch-gui）或 durable grant
-//     （~/.kimi-code-switch-gui/access-grants.json，root/kind/source/createdAt，
-//      目录 0700 / 文件 0600）范围内。
-//   - 写/删/移前解析 symlink 最终目标并复核授权范围，禁止受管目录内 symlink 逃逸。
-//   - write_text_cas：expectedSha256 为空表示 create-only、非空表示 compare-and-swap。
-//   - 原子写（临时文件 + rename）；私密文件 0600 / 私密目录 0700（仅 unix）。
-//   - portable directory 上限 4000 文件 / 4000 目录 / 64MB / 深度 32 / 单路径 4096。
-//   - quarantine_journal 移到 ~/.kimi-code-switch-gui/quarantine/ 并返回新路径。
-//   - reconcile_durable_grants 按面板设置里的 managed 环境 home 重建 durable grants。
+// Native filesystem primitives. Every public mutation must pass path authorization.
+// Atomic rename and hash rechecks narrow external-editor races; they are not OS-level CAS.
 import { createHash, randomBytes } from "node:crypto";
 import { homedir, hostname as osHostname } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import * as fs from "node:fs";
 
 import type { CommandHandlers } from "./index";
-import { expandHome, getAppDataDir, getKimiCodeHome } from "./paths";
+import { expandHome, getAppDataDir, getAppPaths, getKimiCodeHome } from "./paths";
 
 const PORTABLE_DIRECTORY_MAX_FILES = 4_000;
 const PORTABLE_DIRECTORY_MAX_DIRECTORIES = 4_000;
@@ -104,6 +94,22 @@ export function registerDurableGrant(root: string, kind: GrantKind, source: Gran
   registerGrant(durableGrantsState, { root, kind, source, createdAt: createdAt ?? new Date().toISOString() });
 }
 
+/** Called only after an authenticated, explicit choice of a native data directory. */
+export function grantSelectedTargetDirectory(path: string): string {
+  const expanded = expandHome(path);
+  validateNoParentTraversal(expanded);
+  const root = fs.realpathSync(expanded);
+  if (!fs.statSync(root).isDirectory()) throw new Error("selected target must be an existing directory");
+  const denied = [fs.realpathSync(homedir()), "/", "/System", "/Library", "/Applications", "/Users", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp"];
+  if (denied.some((entry) => canonicalizeOrSelf(entry) === root) || dirname(root) === root) {
+    throw new Error("select a specific Kimi data directory, not a system root or home directory");
+  }
+  const record: GrantRecord = { root, kind: "DirectoryTree", source: "managed-root", createdAt: new Date().toISOString() };
+  saveDurableGrantTo(accessGrantsFile(), record);
+  registerGrant(durableGrantsState, record);
+  return root;
+}
+
 /** 清空进程内授权（测试用）。 */
 export function clearDurableGrants(): void {
   durableGrantsState.length = 0;
@@ -153,9 +159,8 @@ function validateNoParentTraversal(path: string): void {
 /** 判断路径是否落在固定受管根内（组件级比较）。 */
 export function withinManagedRootAt(path: string, home: string): boolean {
   const bases = [
-    join(home, ".kimi"),
     join(home, ".kimi-code"),
-    join(home, ".kimi-code-switch-gui"),
+    join(home, ".kimi-code-switch"),
   ];
   return bases.some((base) => path === base || path.startsWith(base + sep));
 }
@@ -172,7 +177,11 @@ function canonicalizedHome(): string {
 }
 
 function withinManagedRoot(path: string): boolean {
-  return withinManagedRootAt(path, canonicalizedHome());
+  const paths = getAppPaths();
+  const roots = [resolveFinalTarget(paths.dataDir), resolveFinalTarget(paths.kimiHome)];
+  const home = canonicalizedHome();
+  return roots.some((root) => root !== home && dirname(root) !== root
+    && (path === root || path.startsWith(root + sep)));
 }
 
 /** 解析路径的最终写目标：已存在则 canonicalize（跟随 symlink 链）；否则解析存在的父目录后拼接。 */
@@ -214,9 +223,9 @@ function nearestExistingAncestor(path: string): string | null {
 
 function scopeContains(state: GrantRecord[], candidate: string, kind: GrantKind): boolean {
   return state.some((grant) => {
+    if (grant.kind === "File") return kind === "File" && candidate === grant.root;
     const inScope = candidate === grant.root || candidate.startsWith(grant.root + sep);
-    if (!inScope) return false;
-    return grant.kind === "DirectoryTree" || (grant.kind === "File" && kind === "File");
+    return inScope;
   });
 }
 
@@ -314,12 +323,18 @@ export function atomicWriteText(path: string, content: string, expected: string 
   const parent = dirname(effectivePath);
   const tmp = join(parent, `.${basename(effectivePath)}.tmp-${randomHex(8)}`);
   try {
-    fs.writeFileSync(tmp, content);
+    fs.writeFileSync(tmp, content, { flag: "wx", mode: existingMode ?? 0o600 });
     if (IS_UNIX) {
       fs.chmodSync(tmp, existingMode ?? 0o600);
     }
     fsyncFile(tmp);
+    // External editors do not share our lock. Recheck immediately before rename;
+    // this narrows their race window but is not an operating-system CAS primitive.
+    verifyExpectedHash(effectivePath, expected);
     fs.renameSync(tmp, effectivePath);
+    if (currentFileHash(effectivePath) !== sha256Text(content)) {
+      throw new Error(`write verification failed for ${effectivePath}: file changed during commit`);
+    }
   } finally {
     try { fs.unlinkSync(tmp); } catch { /* temp already renamed */ }
   }
@@ -957,7 +972,11 @@ export function managedEnvironmentHomesFromPanelSettingsAt(settingsJson: string,
     } catch {
       continue;
     }
-    if (!withinManagedRootAt(canonical, home)) continue;
+    // Existing managed environments may remain under the legacy private directory.
+    // Only recorded environment roots are granted, never that entire legacy tree.
+    const legacyEnvironments = join(home, ".kimi-code-switch-gui", ".env");
+    if (!withinManagedRootAt(canonical, home)
+      && !(canonical === legacyEnvironments || canonical.startsWith(legacyEnvironments + sep))) continue;
     if (!homes.includes(canonical)) homes.push(canonical);
   }
   return homes;
@@ -998,7 +1017,7 @@ export function quarantineJournalAtHome(source: string, home: string): string {
   if (!metadata.isFile()) {
     throw new Error(`journal is not a regular file: ${source}`);
   }
-  const quarantineDir = join(home, ".kimi-code-switch-gui", "quarantine");
+  const quarantineDir = home === homedir() ? getAppPaths().quarantineDir : join(home, ".kimi-code-switch", "quarantine");
   fs.mkdirSync(quarantineDir, { recursive: true });
   if (IS_UNIX) fs.chmodSync(quarantineDir, 0o700);
   const suffix = randomHex(8);
@@ -1181,12 +1200,6 @@ export const fsCommands: CommandHandlers = {
       typeof expected === "string" ? expected : null,
       durableGrantsState,
     );
-  },
-  save_file_with_dialog: () => {
-    throw new Error("save_file_with_dialog is only available on desktop; the web/browser runtime uses a client-side download instead");
-  },
-  pick_backup_directory: () => {
-    throw new Error("pick_backup_directory is only available on desktop; the web/browser runtime selects a directory via a client-side prompt");
   },
   write_project_local_config: (args) => {
     const root = expandHome(strArg(args, "projectRoot"));

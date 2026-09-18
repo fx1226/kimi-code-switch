@@ -1,0 +1,5979 @@
+{
+  "measuredAt": "2026-09-18T05:45:50.880Z",
+  "status": "passed",
+  "platform": "darwin",
+  "arch": "arm64",
+  "artifact": {
+    "file": "<workspace>/dist-release/kimi-code-switch",
+    "sha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "bytes": 63178000
+  },
+  "requestedSaveCountPerResource": 100,
+  "writeValidationMode": "Version evidence is reusable only while each write rechecks original-path realpath plus dev/ino/size/mtimeNs/ctimeNs/mode identity; changes invalidate it. Every config candidate still invokes real official doctor. Native transaction and recovery records remain enabled.",
+  "methodology": {
+    "startup": "Five new processes with separate fresh HOME, KIMI_CODE_HOME and app data directories; each native directory is seeded with the same credential-free default_plan_mode=false fixture. Measure spawn to successful HTTP /api/ping. Filesystem caches are not flushed; this is not a disk-cold or browser first-paint measurement.",
+    "idle": "After authenticated bootstrap and a 500 ms settling period, sample ps process CPU time and RSS for 10 seconds per process. Average CPU is cumulative process CPU time delta / measured wall time, where 100% means one fully occupied core. CLI child CPU is excluded after bootstrap.",
+    "saves": "100 sequential 1024-byte AGENTS.md changes through authenticated HTTP planChange then applyChange, including initial creation, with the application's current version gate. Each result must succeed and match the native file content and SHA-256 revision. No doctor is claimed for this text resource.",
+    "configSaves": "100 config.toml default_plan_mode boolean toggles through authenticated HTTP planChange then applyChange. Every plan must report a real official doctor success, and every commit must match the native file, SHA-256 revision and parsed readback. The 1000 ms save budget uses P95 of the full HTTP plan plus apply path, including version checks, doctor, transaction and recovery records; apply alone is reported only as a component. Every outlier remains in the report.",
+    "comparison": "When --compare is supplied, it must contain the original 20 verified samples per resource for the identical executable hash. New and combined groups are reported separately; all original and new outliers remain in the combined group. Both new and combined P95 must meet the save budget. Original report files are never written.",
+    "host": "At measurement start, record OS load averages and the count of PIDs returned by ps -A -o pid=. No process command arguments are read. UTC timestamps bracket each save for later correlation; they do not establish causation.",
+    "cliTimings": "Five isolated real --version and five doctor config fixture calls provide independent subprocess timing for attribution. They are outside the measured HTTP saves and never replace or bypass the application's checks.",
+    "percentile": "Nearest-rank percentile, rank ceil(p * sample count)."
+  },
+  "officialCli": {
+    "requestedPath": "<official-cli>",
+    "resolvedPath": "<official-cli>",
+    "version": "2.0.0",
+    "status": "verified"
+  },
+  "startupBudgetMs": 2000,
+  "saveBudgetMs": 1000,
+  "saveBudgetMetric": "planAndApplyMs.p95",
+  "idleCpuBudgetPercent": 1,
+  "peakRssBudgetMiB": 120,
+  "binaryBudgetMiB": 90,
+  "comparison": {
+    "file": "<workspace>/output/refactor-qa/final-performance-metrics.json",
+    "sha256": "b798e97e792445ede585bd8df07295c783703537fdc4bfc5ba12461e7e8e8218",
+    "measuredAt": "2026-09-18T05:35:38.834Z",
+    "artifactSha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "originalStatus": "budget-exceeded",
+    "samplesPerResource": 20,
+    "agentsPlanAndApplyMs": {
+      "samples": 20,
+      "min": 136.03,
+      "mean": 145.32,
+      "p50": 141.65,
+      "p95": 159.13,
+      "max": 177.18
+    },
+    "configPlanAndApplyMs": {
+      "samples": 20,
+      "min": 579.92,
+      "mean": 748.73,
+      "p50": 649.03,
+      "p95": 1347.12,
+      "max": 1612.36
+    },
+    "unchanged": true
+  },
+  "rounds": [
+    {
+      "index": 1,
+      "readyMs": 777.92,
+      "bootstrapMs": 553.29,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10005.62,
+        "cpuTimeSeconds": 0.03,
+        "averageCpuPercent": 0.3,
+        "rssMiB": {
+          "first": 53.58,
+          "last": 50.91,
+          "mean": 52.85,
+          "peak": 53.58
+        }
+      }
+    },
+    {
+      "index": 2,
+      "readyMs": 88.35,
+      "bootstrapMs": 557.88,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10005.48,
+        "cpuTimeSeconds": 0.03,
+        "averageCpuPercent": 0.3,
+        "rssMiB": {
+          "first": 53.44,
+          "last": 50.78,
+          "mean": 52.71,
+          "peak": 53.44
+        }
+      }
+    },
+    {
+      "index": 3,
+      "readyMs": 86.9,
+      "bootstrapMs": 593.3,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10004.22,
+        "cpuTimeSeconds": 0.05,
+        "averageCpuPercent": 0.5,
+        "rssMiB": {
+          "first": 53.52,
+          "last": 43.91,
+          "mean": 46.49,
+          "peak": 53.52
+        }
+      }
+    },
+    {
+      "index": 4,
+      "readyMs": 87.06,
+      "bootstrapMs": 815.6,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10005.02,
+        "cpuTimeSeconds": 0.03,
+        "averageCpuPercent": 0.3,
+        "rssMiB": {
+          "first": 44.95,
+          "last": 43.92,
+          "mean": 43.93,
+          "peak": 45.02
+        }
+      }
+    },
+    {
+      "index": 5,
+      "readyMs": 87.59,
+      "bootstrapMs": 662.18,
+      "startupWithinBudget": true,
+      "idle": {
+        "requestedIntervalMs": 10000,
+        "measuredIntervalMs": 10004.11,
+        "cpuTimeSeconds": 0.02,
+        "averageCpuPercent": 0.2,
+        "rssMiB": {
+          "first": 44.53,
+          "last": 44.28,
+          "mean": 44.55,
+          "peak": 45.14
+        }
+      }
+    }
+  ],
+  "saves": {
+    "status": "passed",
+    "resource": "agents",
+    "samples": [
+      {
+        "index": 1,
+        "startedAt": "2026-09-18T05:46:53.164Z",
+        "plannedAt": "2026-09-18T05:46:53.239Z",
+        "completedAt": "2026-09-18T05:46:53.356Z",
+        "bytes": 1024,
+        "planMs": 75.25,
+        "applyMs": 117.46,
+        "planAndApplyMs": 192.71,
+        "withinBudget": true
+      },
+      {
+        "index": 2,
+        "startedAt": "2026-09-18T05:46:53.357Z",
+        "plannedAt": "2026-09-18T05:46:53.416Z",
+        "completedAt": "2026-09-18T05:46:53.515Z",
+        "bytes": 1024,
+        "planMs": 58.46,
+        "applyMs": 99.63,
+        "planAndApplyMs": 158.08,
+        "withinBudget": true
+      },
+      {
+        "index": 3,
+        "startedAt": "2026-09-18T05:46:53.517Z",
+        "plannedAt": "2026-09-18T05:46:53.572Z",
+        "completedAt": "2026-09-18T05:46:53.668Z",
+        "bytes": 1024,
+        "planMs": 55.46,
+        "applyMs": 96.23,
+        "planAndApplyMs": 151.69,
+        "withinBudget": true
+      },
+      {
+        "index": 4,
+        "startedAt": "2026-09-18T05:46:53.669Z",
+        "plannedAt": "2026-09-18T05:46:53.725Z",
+        "completedAt": "2026-09-18T05:46:53.818Z",
+        "bytes": 1024,
+        "planMs": 55.47,
+        "applyMs": 93.56,
+        "planAndApplyMs": 149.02,
+        "withinBudget": true
+      },
+      {
+        "index": 5,
+        "startedAt": "2026-09-18T05:46:53.819Z",
+        "plannedAt": "2026-09-18T05:46:53.876Z",
+        "completedAt": "2026-09-18T05:46:53.977Z",
+        "bytes": 1024,
+        "planMs": 57.12,
+        "applyMs": 101.08,
+        "planAndApplyMs": 158.2,
+        "withinBudget": true
+      },
+      {
+        "index": 6,
+        "startedAt": "2026-09-18T05:46:53.978Z",
+        "plannedAt": "2026-09-18T05:46:54.033Z",
+        "completedAt": "2026-09-18T05:46:54.131Z",
+        "bytes": 1024,
+        "planMs": 55.01,
+        "applyMs": 97.96,
+        "planAndApplyMs": 152.97,
+        "withinBudget": true
+      },
+      {
+        "index": 7,
+        "startedAt": "2026-09-18T05:46:54.132Z",
+        "plannedAt": "2026-09-18T05:46:54.187Z",
+        "completedAt": "2026-09-18T05:46:54.287Z",
+        "bytes": 1024,
+        "planMs": 55.37,
+        "applyMs": 99.37,
+        "planAndApplyMs": 154.74,
+        "withinBudget": true
+      },
+      {
+        "index": 8,
+        "startedAt": "2026-09-18T05:46:54.287Z",
+        "plannedAt": "2026-09-18T05:46:54.342Z",
+        "completedAt": "2026-09-18T05:46:54.440Z",
+        "bytes": 1024,
+        "planMs": 54.7,
+        "applyMs": 98.27,
+        "planAndApplyMs": 152.97,
+        "withinBudget": true
+      },
+      {
+        "index": 9,
+        "startedAt": "2026-09-18T05:46:54.441Z",
+        "plannedAt": "2026-09-18T05:46:54.499Z",
+        "completedAt": "2026-09-18T05:46:54.599Z",
+        "bytes": 1024,
+        "planMs": 58.15,
+        "applyMs": 99.35,
+        "planAndApplyMs": 157.5,
+        "withinBudget": true
+      },
+      {
+        "index": 10,
+        "startedAt": "2026-09-18T05:46:54.599Z",
+        "plannedAt": "2026-09-18T05:46:54.654Z",
+        "completedAt": "2026-09-18T05:46:54.751Z",
+        "bytes": 1024,
+        "planMs": 54.35,
+        "applyMs": 97.15,
+        "planAndApplyMs": 151.5,
+        "withinBudget": true
+      },
+      {
+        "index": 11,
+        "startedAt": "2026-09-18T05:46:54.752Z",
+        "plannedAt": "2026-09-18T05:46:54.806Z",
+        "completedAt": "2026-09-18T05:46:54.907Z",
+        "bytes": 1024,
+        "planMs": 53.77,
+        "applyMs": 100.72,
+        "planAndApplyMs": 154.49,
+        "withinBudget": true
+      },
+      {
+        "index": 12,
+        "startedAt": "2026-09-18T05:46:54.908Z",
+        "plannedAt": "2026-09-18T05:46:54.964Z",
+        "completedAt": "2026-09-18T05:46:55.068Z",
+        "bytes": 1024,
+        "planMs": 56.72,
+        "applyMs": 104.17,
+        "planAndApplyMs": 160.89,
+        "withinBudget": true
+      },
+      {
+        "index": 13,
+        "startedAt": "2026-09-18T05:46:55.069Z",
+        "plannedAt": "2026-09-18T05:46:55.127Z",
+        "completedAt": "2026-09-18T05:46:55.227Z",
+        "bytes": 1024,
+        "planMs": 57.58,
+        "applyMs": 100.08,
+        "planAndApplyMs": 157.66,
+        "withinBudget": true
+      },
+      {
+        "index": 14,
+        "startedAt": "2026-09-18T05:46:55.228Z",
+        "plannedAt": "2026-09-18T05:46:55.285Z",
+        "completedAt": "2026-09-18T05:46:55.387Z",
+        "bytes": 1024,
+        "planMs": 56.8,
+        "applyMs": 102.39,
+        "planAndApplyMs": 159.19,
+        "withinBudget": true
+      },
+      {
+        "index": 15,
+        "startedAt": "2026-09-18T05:46:55.388Z",
+        "plannedAt": "2026-09-18T05:46:55.444Z",
+        "completedAt": "2026-09-18T05:46:55.544Z",
+        "bytes": 1024,
+        "planMs": 55.88,
+        "applyMs": 99.41,
+        "planAndApplyMs": 155.29,
+        "withinBudget": true
+      },
+      {
+        "index": 16,
+        "startedAt": "2026-09-18T05:46:55.544Z",
+        "plannedAt": "2026-09-18T05:46:55.600Z",
+        "completedAt": "2026-09-18T05:46:55.700Z",
+        "bytes": 1024,
+        "planMs": 55.27,
+        "applyMs": 99.8,
+        "planAndApplyMs": 155.07,
+        "withinBudget": true
+      },
+      {
+        "index": 17,
+        "startedAt": "2026-09-18T05:46:55.700Z",
+        "plannedAt": "2026-09-18T05:46:55.769Z",
+        "completedAt": "2026-09-18T05:46:55.881Z",
+        "bytes": 1024,
+        "planMs": 68.93,
+        "applyMs": 111.5,
+        "planAndApplyMs": 180.43,
+        "withinBudget": true
+      },
+      {
+        "index": 18,
+        "startedAt": "2026-09-18T05:46:55.881Z",
+        "plannedAt": "2026-09-18T05:46:55.943Z",
+        "completedAt": "2026-09-18T05:46:56.054Z",
+        "bytes": 1024,
+        "planMs": 62.01,
+        "applyMs": 110.08,
+        "planAndApplyMs": 172.09,
+        "withinBudget": true
+      },
+      {
+        "index": 19,
+        "startedAt": "2026-09-18T05:46:56.054Z",
+        "plannedAt": "2026-09-18T05:46:56.110Z",
+        "completedAt": "2026-09-18T05:46:56.210Z",
+        "bytes": 1024,
+        "planMs": 55.47,
+        "applyMs": 99.8,
+        "planAndApplyMs": 155.27,
+        "withinBudget": true
+      },
+      {
+        "index": 20,
+        "startedAt": "2026-09-18T05:46:56.210Z",
+        "plannedAt": "2026-09-18T05:46:56.268Z",
+        "completedAt": "2026-09-18T05:46:56.368Z",
+        "bytes": 1024,
+        "planMs": 57.42,
+        "applyMs": 100.14,
+        "planAndApplyMs": 157.57,
+        "withinBudget": true
+      },
+      {
+        "index": 21,
+        "startedAt": "2026-09-18T05:46:56.369Z",
+        "plannedAt": "2026-09-18T05:46:56.426Z",
+        "completedAt": "2026-09-18T05:46:56.528Z",
+        "bytes": 1024,
+        "planMs": 57.2,
+        "applyMs": 101.65,
+        "planAndApplyMs": 158.86,
+        "withinBudget": true
+      },
+      {
+        "index": 22,
+        "startedAt": "2026-09-18T05:46:56.528Z",
+        "plannedAt": "2026-09-18T05:46:56.586Z",
+        "completedAt": "2026-09-18T05:46:56.683Z",
+        "bytes": 1024,
+        "planMs": 57.3,
+        "applyMs": 97.81,
+        "planAndApplyMs": 155.11,
+        "withinBudget": true
+      },
+      {
+        "index": 23,
+        "startedAt": "2026-09-18T05:46:56.684Z",
+        "plannedAt": "2026-09-18T05:46:56.740Z",
+        "completedAt": "2026-09-18T05:46:56.840Z",
+        "bytes": 1024,
+        "planMs": 55.34,
+        "applyMs": 100.83,
+        "planAndApplyMs": 156.17,
+        "withinBudget": true
+      },
+      {
+        "index": 24,
+        "startedAt": "2026-09-18T05:46:56.841Z",
+        "plannedAt": "2026-09-18T05:46:56.899Z",
+        "completedAt": "2026-09-18T05:46:57.001Z",
+        "bytes": 1024,
+        "planMs": 57.97,
+        "applyMs": 102.01,
+        "planAndApplyMs": 159.98,
+        "withinBudget": true
+      },
+      {
+        "index": 25,
+        "startedAt": "2026-09-18T05:46:57.002Z",
+        "plannedAt": "2026-09-18T05:46:57.060Z",
+        "completedAt": "2026-09-18T05:46:57.181Z",
+        "bytes": 1024,
+        "planMs": 57.73,
+        "applyMs": 121.55,
+        "planAndApplyMs": 179.28,
+        "withinBudget": true
+      },
+      {
+        "index": 26,
+        "startedAt": "2026-09-18T05:46:57.182Z",
+        "plannedAt": "2026-09-18T05:46:57.242Z",
+        "completedAt": "2026-09-18T05:46:57.341Z",
+        "bytes": 1024,
+        "planMs": 59.49,
+        "applyMs": 99.22,
+        "planAndApplyMs": 158.71,
+        "withinBudget": true
+      },
+      {
+        "index": 27,
+        "startedAt": "2026-09-18T05:46:57.342Z",
+        "plannedAt": "2026-09-18T05:46:57.404Z",
+        "completedAt": "2026-09-18T05:46:57.513Z",
+        "bytes": 1024,
+        "planMs": 62.65,
+        "applyMs": 108.59,
+        "planAndApplyMs": 171.23,
+        "withinBudget": true
+      },
+      {
+        "index": 28,
+        "startedAt": "2026-09-18T05:46:57.514Z",
+        "plannedAt": "2026-09-18T05:46:57.570Z",
+        "completedAt": "2026-09-18T05:46:57.675Z",
+        "bytes": 1024,
+        "planMs": 56.37,
+        "applyMs": 105.04,
+        "planAndApplyMs": 161.41,
+        "withinBudget": true
+      },
+      {
+        "index": 29,
+        "startedAt": "2026-09-18T05:46:57.676Z",
+        "plannedAt": "2026-09-18T05:46:57.731Z",
+        "completedAt": "2026-09-18T05:46:57.830Z",
+        "bytes": 1024,
+        "planMs": 54.45,
+        "applyMs": 99.18,
+        "planAndApplyMs": 153.64,
+        "withinBudget": true
+      },
+      {
+        "index": 30,
+        "startedAt": "2026-09-18T05:46:57.831Z",
+        "plannedAt": "2026-09-18T05:46:57.886Z",
+        "completedAt": "2026-09-18T05:46:57.991Z",
+        "bytes": 1024,
+        "planMs": 55.8,
+        "applyMs": 104.59,
+        "planAndApplyMs": 160.39,
+        "withinBudget": true
+      },
+      {
+        "index": 31,
+        "startedAt": "2026-09-18T05:46:57.992Z",
+        "plannedAt": "2026-09-18T05:46:58.049Z",
+        "completedAt": "2026-09-18T05:46:58.151Z",
+        "bytes": 1024,
+        "planMs": 57.45,
+        "applyMs": 101.83,
+        "planAndApplyMs": 159.28,
+        "withinBudget": true
+      },
+      {
+        "index": 32,
+        "startedAt": "2026-09-18T05:46:58.152Z",
+        "plannedAt": "2026-09-18T05:46:58.210Z",
+        "completedAt": "2026-09-18T05:46:58.313Z",
+        "bytes": 1024,
+        "planMs": 58.83,
+        "applyMs": 103.04,
+        "planAndApplyMs": 161.88,
+        "withinBudget": true
+      },
+      {
+        "index": 33,
+        "startedAt": "2026-09-18T05:46:58.314Z",
+        "plannedAt": "2026-09-18T05:46:58.373Z",
+        "completedAt": "2026-09-18T05:46:58.470Z",
+        "bytes": 1024,
+        "planMs": 58.3,
+        "applyMs": 97.25,
+        "planAndApplyMs": 155.55,
+        "withinBudget": true
+      },
+      {
+        "index": 34,
+        "startedAt": "2026-09-18T05:46:58.470Z",
+        "plannedAt": "2026-09-18T05:46:58.525Z",
+        "completedAt": "2026-09-18T05:46:58.623Z",
+        "bytes": 1024,
+        "planMs": 54.71,
+        "applyMs": 97.48,
+        "planAndApplyMs": 152.19,
+        "withinBudget": true
+      },
+      {
+        "index": 35,
+        "startedAt": "2026-09-18T05:46:58.623Z",
+        "plannedAt": "2026-09-18T05:46:58.680Z",
+        "completedAt": "2026-09-18T05:46:58.783Z",
+        "bytes": 1024,
+        "planMs": 56.82,
+        "applyMs": 102.92,
+        "planAndApplyMs": 159.73,
+        "withinBudget": true
+      },
+      {
+        "index": 36,
+        "startedAt": "2026-09-18T05:46:58.784Z",
+        "plannedAt": "2026-09-18T05:46:58.841Z",
+        "completedAt": "2026-09-18T05:46:58.942Z",
+        "bytes": 1024,
+        "planMs": 57.29,
+        "applyMs": 100.62,
+        "planAndApplyMs": 157.92,
+        "withinBudget": true
+      },
+      {
+        "index": 37,
+        "startedAt": "2026-09-18T05:46:58.943Z",
+        "plannedAt": "2026-09-18T05:46:58.997Z",
+        "completedAt": "2026-09-18T05:46:59.096Z",
+        "bytes": 1024,
+        "planMs": 54.63,
+        "applyMs": 99.11,
+        "planAndApplyMs": 153.74,
+        "withinBudget": true
+      },
+      {
+        "index": 38,
+        "startedAt": "2026-09-18T05:46:59.097Z",
+        "plannedAt": "2026-09-18T05:46:59.154Z",
+        "completedAt": "2026-09-18T05:46:59.255Z",
+        "bytes": 1024,
+        "planMs": 57.19,
+        "applyMs": 100.85,
+        "planAndApplyMs": 158.04,
+        "withinBudget": true
+      },
+      {
+        "index": 39,
+        "startedAt": "2026-09-18T05:46:59.256Z",
+        "plannedAt": "2026-09-18T05:46:59.313Z",
+        "completedAt": "2026-09-18T05:46:59.412Z",
+        "bytes": 1024,
+        "planMs": 56.83,
+        "applyMs": 98.96,
+        "planAndApplyMs": 155.79,
+        "withinBudget": true
+      },
+      {
+        "index": 40,
+        "startedAt": "2026-09-18T05:46:59.413Z",
+        "plannedAt": "2026-09-18T05:46:59.470Z",
+        "completedAt": "2026-09-18T05:46:59.567Z",
+        "bytes": 1024,
+        "planMs": 56.98,
+        "applyMs": 97.9,
+        "planAndApplyMs": 154.87,
+        "withinBudget": true
+      },
+      {
+        "index": 41,
+        "startedAt": "2026-09-18T05:46:59.568Z",
+        "plannedAt": "2026-09-18T05:46:59.623Z",
+        "completedAt": "2026-09-18T05:46:59.725Z",
+        "bytes": 1024,
+        "planMs": 54.93,
+        "applyMs": 102.06,
+        "planAndApplyMs": 156.99,
+        "withinBudget": true
+      },
+      {
+        "index": 42,
+        "startedAt": "2026-09-18T05:46:59.726Z",
+        "plannedAt": "2026-09-18T05:46:59.783Z",
+        "completedAt": "2026-09-18T05:46:59.883Z",
+        "bytes": 1024,
+        "planMs": 56.65,
+        "applyMs": 100.36,
+        "planAndApplyMs": 157.01,
+        "withinBudget": true
+      },
+      {
+        "index": 43,
+        "startedAt": "2026-09-18T05:46:59.884Z",
+        "plannedAt": "2026-09-18T05:46:59.941Z",
+        "completedAt": "2026-09-18T05:47:00.040Z",
+        "bytes": 1024,
+        "planMs": 57.42,
+        "applyMs": 98.63,
+        "planAndApplyMs": 156.05,
+        "withinBudget": true
+      },
+      {
+        "index": 44,
+        "startedAt": "2026-09-18T05:47:00.040Z",
+        "plannedAt": "2026-09-18T05:47:00.096Z",
+        "completedAt": "2026-09-18T05:47:00.193Z",
+        "bytes": 1024,
+        "planMs": 55.36,
+        "applyMs": 96.96,
+        "planAndApplyMs": 152.32,
+        "withinBudget": true
+      },
+      {
+        "index": 45,
+        "startedAt": "2026-09-18T05:47:00.194Z",
+        "plannedAt": "2026-09-18T05:47:00.249Z",
+        "completedAt": "2026-09-18T05:47:00.347Z",
+        "bytes": 1024,
+        "planMs": 55.46,
+        "applyMs": 97.7,
+        "planAndApplyMs": 153.16,
+        "withinBudget": true
+      },
+      {
+        "index": 46,
+        "startedAt": "2026-09-18T05:47:00.348Z",
+        "plannedAt": "2026-09-18T05:47:00.404Z",
+        "completedAt": "2026-09-18T05:47:00.503Z",
+        "bytes": 1024,
+        "planMs": 56.44,
+        "applyMs": 98.62,
+        "planAndApplyMs": 155.06,
+        "withinBudget": true
+      },
+      {
+        "index": 47,
+        "startedAt": "2026-09-18T05:47:00.504Z",
+        "plannedAt": "2026-09-18T05:47:00.558Z",
+        "completedAt": "2026-09-18T05:47:00.654Z",
+        "bytes": 1024,
+        "planMs": 54.38,
+        "applyMs": 95.83,
+        "planAndApplyMs": 150.2,
+        "withinBudget": true
+      },
+      {
+        "index": 48,
+        "startedAt": "2026-09-18T05:47:00.655Z",
+        "plannedAt": "2026-09-18T05:47:00.709Z",
+        "completedAt": "2026-09-18T05:47:00.805Z",
+        "bytes": 1024,
+        "planMs": 54.19,
+        "applyMs": 96.76,
+        "planAndApplyMs": 150.95,
+        "withinBudget": true
+      },
+      {
+        "index": 49,
+        "startedAt": "2026-09-18T05:47:00.806Z",
+        "plannedAt": "2026-09-18T05:47:00.861Z",
+        "completedAt": "2026-09-18T05:47:00.965Z",
+        "bytes": 1024,
+        "planMs": 55.14,
+        "applyMs": 103.81,
+        "planAndApplyMs": 158.96,
+        "withinBudget": true
+      },
+      {
+        "index": 50,
+        "startedAt": "2026-09-18T05:47:00.966Z",
+        "plannedAt": "2026-09-18T05:47:01.021Z",
+        "completedAt": "2026-09-18T05:47:01.120Z",
+        "bytes": 1024,
+        "planMs": 54.62,
+        "applyMs": 99,
+        "planAndApplyMs": 153.62,
+        "withinBudget": true
+      },
+      {
+        "index": 51,
+        "startedAt": "2026-09-18T05:47:01.121Z",
+        "plannedAt": "2026-09-18T05:47:01.176Z",
+        "completedAt": "2026-09-18T05:47:01.274Z",
+        "bytes": 1024,
+        "planMs": 55.08,
+        "applyMs": 98.41,
+        "planAndApplyMs": 153.5,
+        "withinBudget": true
+      },
+      {
+        "index": 52,
+        "startedAt": "2026-09-18T05:47:01.275Z",
+        "plannedAt": "2026-09-18T05:47:01.332Z",
+        "completedAt": "2026-09-18T05:47:01.436Z",
+        "bytes": 1024,
+        "planMs": 57.42,
+        "applyMs": 104.09,
+        "planAndApplyMs": 161.52,
+        "withinBudget": true
+      },
+      {
+        "index": 53,
+        "startedAt": "2026-09-18T05:47:01.437Z",
+        "plannedAt": "2026-09-18T05:47:01.495Z",
+        "completedAt": "2026-09-18T05:47:01.597Z",
+        "bytes": 1024,
+        "planMs": 57.9,
+        "applyMs": 101.87,
+        "planAndApplyMs": 159.77,
+        "withinBudget": true
+      },
+      {
+        "index": 54,
+        "startedAt": "2026-09-18T05:47:01.598Z",
+        "plannedAt": "2026-09-18T05:47:01.656Z",
+        "completedAt": "2026-09-18T05:47:01.758Z",
+        "bytes": 1024,
+        "planMs": 58.7,
+        "applyMs": 101.26,
+        "planAndApplyMs": 159.96,
+        "withinBudget": true
+      },
+      {
+        "index": 55,
+        "startedAt": "2026-09-18T05:47:01.758Z",
+        "plannedAt": "2026-09-18T05:47:01.818Z",
+        "completedAt": "2026-09-18T05:47:01.915Z",
+        "bytes": 1024,
+        "planMs": 59.51,
+        "applyMs": 97.51,
+        "planAndApplyMs": 157.02,
+        "withinBudget": true
+      },
+      {
+        "index": 56,
+        "startedAt": "2026-09-18T05:47:01.916Z",
+        "plannedAt": "2026-09-18T05:47:01.971Z",
+        "completedAt": "2026-09-18T05:47:02.070Z",
+        "bytes": 1024,
+        "planMs": 54.66,
+        "applyMs": 98.55,
+        "planAndApplyMs": 153.21,
+        "withinBudget": true
+      },
+      {
+        "index": 57,
+        "startedAt": "2026-09-18T05:47:02.070Z",
+        "plannedAt": "2026-09-18T05:47:02.129Z",
+        "completedAt": "2026-09-18T05:47:02.230Z",
+        "bytes": 1024,
+        "planMs": 58.95,
+        "applyMs": 101.21,
+        "planAndApplyMs": 160.17,
+        "withinBudget": true
+      },
+      {
+        "index": 58,
+        "startedAt": "2026-09-18T05:47:02.231Z",
+        "plannedAt": "2026-09-18T05:47:02.287Z",
+        "completedAt": "2026-09-18T05:47:02.387Z",
+        "bytes": 1024,
+        "planMs": 55.69,
+        "applyMs": 100.49,
+        "planAndApplyMs": 156.18,
+        "withinBudget": true
+      },
+      {
+        "index": 59,
+        "startedAt": "2026-09-18T05:47:02.388Z",
+        "plannedAt": "2026-09-18T05:47:02.444Z",
+        "completedAt": "2026-09-18T05:47:02.542Z",
+        "bytes": 1024,
+        "planMs": 55.64,
+        "applyMs": 98.59,
+        "planAndApplyMs": 154.22,
+        "withinBudget": true
+      },
+      {
+        "index": 60,
+        "startedAt": "2026-09-18T05:47:02.543Z",
+        "plannedAt": "2026-09-18T05:47:02.599Z",
+        "completedAt": "2026-09-18T05:47:02.696Z",
+        "bytes": 1024,
+        "planMs": 55.49,
+        "applyMs": 97.93,
+        "planAndApplyMs": 153.42,
+        "withinBudget": true
+      },
+      {
+        "index": 61,
+        "startedAt": "2026-09-18T05:47:02.697Z",
+        "plannedAt": "2026-09-18T05:47:02.753Z",
+        "completedAt": "2026-09-18T05:47:02.853Z",
+        "bytes": 1024,
+        "planMs": 55.4,
+        "applyMs": 99.75,
+        "planAndApplyMs": 155.15,
+        "withinBudget": true
+      },
+      {
+        "index": 62,
+        "startedAt": "2026-09-18T05:47:02.853Z",
+        "plannedAt": "2026-09-18T05:47:02.908Z",
+        "completedAt": "2026-09-18T05:47:03.009Z",
+        "bytes": 1024,
+        "planMs": 54.46,
+        "applyMs": 101.25,
+        "planAndApplyMs": 155.71,
+        "withinBudget": true
+      },
+      {
+        "index": 63,
+        "startedAt": "2026-09-18T05:47:03.010Z",
+        "plannedAt": "2026-09-18T05:47:03.068Z",
+        "completedAt": "2026-09-18T05:47:03.166Z",
+        "bytes": 1024,
+        "planMs": 57.94,
+        "applyMs": 98.11,
+        "planAndApplyMs": 156.05,
+        "withinBudget": true
+      },
+      {
+        "index": 64,
+        "startedAt": "2026-09-18T05:47:03.166Z",
+        "plannedAt": "2026-09-18T05:47:03.221Z",
+        "completedAt": "2026-09-18T05:47:03.323Z",
+        "bytes": 1024,
+        "planMs": 54.83,
+        "applyMs": 102.01,
+        "planAndApplyMs": 156.85,
+        "withinBudget": true
+      },
+      {
+        "index": 65,
+        "startedAt": "2026-09-18T05:47:03.324Z",
+        "plannedAt": "2026-09-18T05:47:03.379Z",
+        "completedAt": "2026-09-18T05:47:03.479Z",
+        "bytes": 1024,
+        "planMs": 54.93,
+        "applyMs": 100.53,
+        "planAndApplyMs": 155.46,
+        "withinBudget": true
+      },
+      {
+        "index": 66,
+        "startedAt": "2026-09-18T05:47:03.480Z",
+        "plannedAt": "2026-09-18T05:47:03.535Z",
+        "completedAt": "2026-09-18T05:47:03.632Z",
+        "bytes": 1024,
+        "planMs": 55.08,
+        "applyMs": 96.34,
+        "planAndApplyMs": 151.41,
+        "withinBudget": true
+      },
+      {
+        "index": 67,
+        "startedAt": "2026-09-18T05:47:03.633Z",
+        "plannedAt": "2026-09-18T05:47:03.690Z",
+        "completedAt": "2026-09-18T05:47:03.788Z",
+        "bytes": 1024,
+        "planMs": 57.32,
+        "applyMs": 98.31,
+        "planAndApplyMs": 155.63,
+        "withinBudget": true
+      },
+      {
+        "index": 68,
+        "startedAt": "2026-09-18T05:47:03.789Z",
+        "plannedAt": "2026-09-18T05:47:03.845Z",
+        "completedAt": "2026-09-18T05:47:03.951Z",
+        "bytes": 1024,
+        "planMs": 56.12,
+        "applyMs": 106.23,
+        "planAndApplyMs": 162.35,
+        "withinBudget": true
+      },
+      {
+        "index": 69,
+        "startedAt": "2026-09-18T05:47:03.952Z",
+        "plannedAt": "2026-09-18T05:47:04.005Z",
+        "completedAt": "2026-09-18T05:47:04.104Z",
+        "bytes": 1024,
+        "planMs": 53.21,
+        "applyMs": 98.9,
+        "planAndApplyMs": 152.11,
+        "withinBudget": true
+      },
+      {
+        "index": 70,
+        "startedAt": "2026-09-18T05:47:04.105Z",
+        "plannedAt": "2026-09-18T05:47:04.162Z",
+        "completedAt": "2026-09-18T05:47:04.263Z",
+        "bytes": 1024,
+        "planMs": 56.97,
+        "applyMs": 101.2,
+        "planAndApplyMs": 158.17,
+        "withinBudget": true
+      },
+      {
+        "index": 71,
+        "startedAt": "2026-09-18T05:47:04.264Z",
+        "plannedAt": "2026-09-18T05:47:04.320Z",
+        "completedAt": "2026-09-18T05:47:04.422Z",
+        "bytes": 1024,
+        "planMs": 56.21,
+        "applyMs": 102.52,
+        "planAndApplyMs": 158.73,
+        "withinBudget": true
+      },
+      {
+        "index": 72,
+        "startedAt": "2026-09-18T05:47:04.423Z",
+        "plannedAt": "2026-09-18T05:47:04.478Z",
+        "completedAt": "2026-09-18T05:47:04.575Z",
+        "bytes": 1024,
+        "planMs": 55.24,
+        "applyMs": 96.97,
+        "planAndApplyMs": 152.21,
+        "withinBudget": true
+      },
+      {
+        "index": 73,
+        "startedAt": "2026-09-18T05:47:04.576Z",
+        "plannedAt": "2026-09-18T05:47:04.630Z",
+        "completedAt": "2026-09-18T05:47:04.725Z",
+        "bytes": 1024,
+        "planMs": 54.29,
+        "applyMs": 94.74,
+        "planAndApplyMs": 149.04,
+        "withinBudget": true
+      },
+      {
+        "index": 74,
+        "startedAt": "2026-09-18T05:47:04.726Z",
+        "plannedAt": "2026-09-18T05:47:04.779Z",
+        "completedAt": "2026-09-18T05:47:04.877Z",
+        "bytes": 1024,
+        "planMs": 53.71,
+        "applyMs": 98.18,
+        "planAndApplyMs": 151.89,
+        "withinBudget": true
+      },
+      {
+        "index": 75,
+        "startedAt": "2026-09-18T05:47:04.878Z",
+        "plannedAt": "2026-09-18T05:47:04.932Z",
+        "completedAt": "2026-09-18T05:47:05.025Z",
+        "bytes": 1024,
+        "planMs": 53.84,
+        "applyMs": 93.03,
+        "planAndApplyMs": 146.87,
+        "withinBudget": true
+      },
+      {
+        "index": 76,
+        "startedAt": "2026-09-18T05:47:05.026Z",
+        "plannedAt": "2026-09-18T05:47:05.081Z",
+        "completedAt": "2026-09-18T05:47:05.178Z",
+        "bytes": 1024,
+        "planMs": 54.95,
+        "applyMs": 97.05,
+        "planAndApplyMs": 152,
+        "withinBudget": true
+      },
+      {
+        "index": 77,
+        "startedAt": "2026-09-18T05:47:05.178Z",
+        "plannedAt": "2026-09-18T05:47:05.237Z",
+        "completedAt": "2026-09-18T05:47:05.335Z",
+        "bytes": 1024,
+        "planMs": 58.31,
+        "applyMs": 98.55,
+        "planAndApplyMs": 156.85,
+        "withinBudget": true
+      },
+      {
+        "index": 78,
+        "startedAt": "2026-09-18T05:47:05.336Z",
+        "plannedAt": "2026-09-18T05:47:05.391Z",
+        "completedAt": "2026-09-18T05:47:05.491Z",
+        "bytes": 1024,
+        "planMs": 55.36,
+        "applyMs": 99.7,
+        "planAndApplyMs": 155.06,
+        "withinBudget": true
+      },
+      {
+        "index": 79,
+        "startedAt": "2026-09-18T05:47:05.492Z",
+        "plannedAt": "2026-09-18T05:47:05.546Z",
+        "completedAt": "2026-09-18T05:47:05.644Z",
+        "bytes": 1024,
+        "planMs": 54.54,
+        "applyMs": 97.44,
+        "planAndApplyMs": 151.98,
+        "withinBudget": true
+      },
+      {
+        "index": 80,
+        "startedAt": "2026-09-18T05:47:05.645Z",
+        "plannedAt": "2026-09-18T05:47:05.701Z",
+        "completedAt": "2026-09-18T05:47:05.800Z",
+        "bytes": 1024,
+        "planMs": 56.71,
+        "applyMs": 98.7,
+        "planAndApplyMs": 155.41,
+        "withinBudget": true
+      },
+      {
+        "index": 81,
+        "startedAt": "2026-09-18T05:47:05.801Z",
+        "plannedAt": "2026-09-18T05:47:05.856Z",
+        "completedAt": "2026-09-18T05:47:05.952Z",
+        "bytes": 1024,
+        "planMs": 54.9,
+        "applyMs": 95.73,
+        "planAndApplyMs": 150.63,
+        "withinBudget": true
+      },
+      {
+        "index": 82,
+        "startedAt": "2026-09-18T05:47:05.952Z",
+        "plannedAt": "2026-09-18T05:47:06.007Z",
+        "completedAt": "2026-09-18T05:47:06.109Z",
+        "bytes": 1024,
+        "planMs": 54.43,
+        "applyMs": 102.14,
+        "planAndApplyMs": 156.57,
+        "withinBudget": true
+      },
+      {
+        "index": 83,
+        "startedAt": "2026-09-18T05:47:06.109Z",
+        "plannedAt": "2026-09-18T05:47:06.179Z",
+        "completedAt": "2026-09-18T05:47:06.307Z",
+        "bytes": 1024,
+        "planMs": 70.02,
+        "applyMs": 127.39,
+        "planAndApplyMs": 197.41,
+        "withinBudget": true
+      },
+      {
+        "index": 84,
+        "startedAt": "2026-09-18T05:47:06.307Z",
+        "plannedAt": "2026-09-18T05:47:06.372Z",
+        "completedAt": "2026-09-18T05:47:06.490Z",
+        "bytes": 1024,
+        "planMs": 64.45,
+        "applyMs": 117.89,
+        "planAndApplyMs": 182.35,
+        "withinBudget": true
+      },
+      {
+        "index": 85,
+        "startedAt": "2026-09-18T05:47:06.490Z",
+        "plannedAt": "2026-09-18T05:47:06.547Z",
+        "completedAt": "2026-09-18T05:47:06.647Z",
+        "bytes": 1024,
+        "planMs": 56.16,
+        "applyMs": 99.9,
+        "planAndApplyMs": 156.06,
+        "withinBudget": true
+      },
+      {
+        "index": 86,
+        "startedAt": "2026-09-18T05:47:06.648Z",
+        "plannedAt": "2026-09-18T05:47:06.703Z",
+        "completedAt": "2026-09-18T05:47:06.803Z",
+        "bytes": 1024,
+        "planMs": 55.48,
+        "applyMs": 100.31,
+        "planAndApplyMs": 155.8,
+        "withinBudget": true
+      },
+      {
+        "index": 87,
+        "startedAt": "2026-09-18T05:47:06.804Z",
+        "plannedAt": "2026-09-18T05:47:06.861Z",
+        "completedAt": "2026-09-18T05:47:06.959Z",
+        "bytes": 1024,
+        "planMs": 56.97,
+        "applyMs": 97.75,
+        "planAndApplyMs": 154.72,
+        "withinBudget": true
+      },
+      {
+        "index": 88,
+        "startedAt": "2026-09-18T05:47:06.959Z",
+        "plannedAt": "2026-09-18T05:47:07.015Z",
+        "completedAt": "2026-09-18T05:47:07.116Z",
+        "bytes": 1024,
+        "planMs": 55.23,
+        "applyMs": 101.08,
+        "planAndApplyMs": 156.31,
+        "withinBudget": true
+      },
+      {
+        "index": 89,
+        "startedAt": "2026-09-18T05:47:07.116Z",
+        "plannedAt": "2026-09-18T05:47:07.184Z",
+        "completedAt": "2026-09-18T05:47:07.282Z",
+        "bytes": 1024,
+        "planMs": 67.4,
+        "applyMs": 98.78,
+        "planAndApplyMs": 166.18,
+        "withinBudget": true
+      },
+      {
+        "index": 90,
+        "startedAt": "2026-09-18T05:47:07.283Z",
+        "plannedAt": "2026-09-18T05:47:07.338Z",
+        "completedAt": "2026-09-18T05:47:07.437Z",
+        "bytes": 1024,
+        "planMs": 54.47,
+        "applyMs": 99.52,
+        "planAndApplyMs": 153.99,
+        "withinBudget": true
+      },
+      {
+        "index": 91,
+        "startedAt": "2026-09-18T05:47:07.438Z",
+        "plannedAt": "2026-09-18T05:47:07.492Z",
+        "completedAt": "2026-09-18T05:47:07.593Z",
+        "bytes": 1024,
+        "planMs": 54.34,
+        "applyMs": 100.66,
+        "planAndApplyMs": 155,
+        "withinBudget": true
+      },
+      {
+        "index": 92,
+        "startedAt": "2026-09-18T05:47:07.594Z",
+        "plannedAt": "2026-09-18T05:47:07.647Z",
+        "completedAt": "2026-09-18T05:47:07.746Z",
+        "bytes": 1024,
+        "planMs": 53.81,
+        "applyMs": 98.29,
+        "planAndApplyMs": 152.1,
+        "withinBudget": true
+      },
+      {
+        "index": 93,
+        "startedAt": "2026-09-18T05:47:07.746Z",
+        "plannedAt": "2026-09-18T05:47:07.800Z",
+        "completedAt": "2026-09-18T05:47:07.899Z",
+        "bytes": 1024,
+        "planMs": 53.27,
+        "applyMs": 99.78,
+        "planAndApplyMs": 153.04,
+        "withinBudget": true
+      },
+      {
+        "index": 94,
+        "startedAt": "2026-09-18T05:47:07.900Z",
+        "plannedAt": "2026-09-18T05:47:07.954Z",
+        "completedAt": "2026-09-18T05:47:08.053Z",
+        "bytes": 1024,
+        "planMs": 54.4,
+        "applyMs": 98.94,
+        "planAndApplyMs": 153.34,
+        "withinBudget": true
+      },
+      {
+        "index": 95,
+        "startedAt": "2026-09-18T05:47:08.054Z",
+        "plannedAt": "2026-09-18T05:47:08.108Z",
+        "completedAt": "2026-09-18T05:47:08.204Z",
+        "bytes": 1024,
+        "planMs": 54.5,
+        "applyMs": 95.33,
+        "planAndApplyMs": 149.84,
+        "withinBudget": true
+      },
+      {
+        "index": 96,
+        "startedAt": "2026-09-18T05:47:08.205Z",
+        "plannedAt": "2026-09-18T05:47:08.259Z",
+        "completedAt": "2026-09-18T05:47:08.359Z",
+        "bytes": 1024,
+        "planMs": 54.41,
+        "applyMs": 100.39,
+        "planAndApplyMs": 154.81,
+        "withinBudget": true
+      },
+      {
+        "index": 97,
+        "startedAt": "2026-09-18T05:47:08.360Z",
+        "plannedAt": "2026-09-18T05:47:08.415Z",
+        "completedAt": "2026-09-18T05:47:08.511Z",
+        "bytes": 1024,
+        "planMs": 54.83,
+        "applyMs": 96.54,
+        "planAndApplyMs": 151.37,
+        "withinBudget": true
+      },
+      {
+        "index": 98,
+        "startedAt": "2026-09-18T05:47:08.512Z",
+        "plannedAt": "2026-09-18T05:47:08.566Z",
+        "completedAt": "2026-09-18T05:47:08.663Z",
+        "bytes": 1024,
+        "planMs": 53.85,
+        "applyMs": 96.93,
+        "planAndApplyMs": 150.78,
+        "withinBudget": true
+      },
+      {
+        "index": 99,
+        "startedAt": "2026-09-18T05:47:08.663Z",
+        "plannedAt": "2026-09-18T05:47:08.717Z",
+        "completedAt": "2026-09-18T05:47:08.815Z",
+        "bytes": 1024,
+        "planMs": 54.1,
+        "applyMs": 97.8,
+        "planAndApplyMs": 151.9,
+        "withinBudget": true
+      },
+      {
+        "index": 100,
+        "startedAt": "2026-09-18T05:47:08.816Z",
+        "plannedAt": "2026-09-18T05:47:08.870Z",
+        "completedAt": "2026-09-18T05:47:08.969Z",
+        "bytes": 1024,
+        "planMs": 54.27,
+        "applyMs": 98.98,
+        "planAndApplyMs": 153.25,
+        "withinBudget": true
+      }
+    ],
+    "planMs": {
+      "samples": 100,
+      "min": 53.21,
+      "mean": 56.67,
+      "p50": 55.48,
+      "p95": 62.65,
+      "max": 75.25
+    },
+    "applyMs": {
+      "samples": 100,
+      "min": 93.03,
+      "mean": 100.62,
+      "p50": 99.41,
+      "p95": 110.08,
+      "max": 127.39
+    },
+    "planAndApplyMs": {
+      "samples": 100,
+      "min": 146.87,
+      "mean": 157.29,
+      "p50": 155.46,
+      "p95": 172.09,
+      "max": 197.41
+    },
+    "allSamplesWithinBudget": true,
+    "p95WithinBudget": true,
+    "withinBudget": true,
+    "overBudgetSamples": 0
+  },
+  "configSaves": {
+    "status": "passed",
+    "resource": "config",
+    "samples": [
+      {
+        "index": 1,
+        "startedAt": "2026-09-18T05:47:08.971Z",
+        "plannedAt": "2026-09-18T05:47:09.750Z",
+        "completedAt": "2026-09-18T05:47:09.852Z",
+        "bytes": 25,
+        "planMs": 778.75,
+        "applyMs": 102.25,
+        "planAndApplyMs": 881,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 2,
+        "startedAt": "2026-09-18T05:47:09.853Z",
+        "plannedAt": "2026-09-18T05:47:10.402Z",
+        "completedAt": "2026-09-18T05:47:10.508Z",
+        "bytes": 26,
+        "planMs": 548.78,
+        "applyMs": 105.9,
+        "planAndApplyMs": 654.68,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 3,
+        "startedAt": "2026-09-18T05:47:10.508Z",
+        "plannedAt": "2026-09-18T05:47:11.079Z",
+        "completedAt": "2026-09-18T05:47:11.181Z",
+        "bytes": 25,
+        "planMs": 570.43,
+        "applyMs": 102.4,
+        "planAndApplyMs": 672.84,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 4,
+        "startedAt": "2026-09-18T05:47:11.182Z",
+        "plannedAt": "2026-09-18T05:47:11.799Z",
+        "completedAt": "2026-09-18T05:47:11.901Z",
+        "bytes": 26,
+        "planMs": 616.94,
+        "applyMs": 101.74,
+        "planAndApplyMs": 718.69,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 5,
+        "startedAt": "2026-09-18T05:47:11.902Z",
+        "plannedAt": "2026-09-18T05:47:12.492Z",
+        "completedAt": "2026-09-18T05:47:12.596Z",
+        "bytes": 25,
+        "planMs": 589.86,
+        "applyMs": 104.33,
+        "planAndApplyMs": 694.19,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 6,
+        "startedAt": "2026-09-18T05:47:12.598Z",
+        "plannedAt": "2026-09-18T05:47:13.269Z",
+        "completedAt": "2026-09-18T05:47:13.385Z",
+        "bytes": 26,
+        "planMs": 671.28,
+        "applyMs": 115.97,
+        "planAndApplyMs": 787.26,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 7,
+        "startedAt": "2026-09-18T05:47:13.386Z",
+        "plannedAt": "2026-09-18T05:47:13.995Z",
+        "completedAt": "2026-09-18T05:47:14.095Z",
+        "bytes": 25,
+        "planMs": 609.59,
+        "applyMs": 99.51,
+        "planAndApplyMs": 709.1,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 8,
+        "startedAt": "2026-09-18T05:47:14.095Z",
+        "plannedAt": "2026-09-18T05:47:14.684Z",
+        "completedAt": "2026-09-18T05:47:14.788Z",
+        "bytes": 26,
+        "planMs": 588.65,
+        "applyMs": 103.92,
+        "planAndApplyMs": 692.57,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 9,
+        "startedAt": "2026-09-18T05:47:14.789Z",
+        "plannedAt": "2026-09-18T05:47:15.355Z",
+        "completedAt": "2026-09-18T05:47:15.460Z",
+        "bytes": 25,
+        "planMs": 566.38,
+        "applyMs": 104.56,
+        "planAndApplyMs": 670.94,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 10,
+        "startedAt": "2026-09-18T05:47:15.460Z",
+        "plannedAt": "2026-09-18T05:47:16.014Z",
+        "completedAt": "2026-09-18T05:47:16.114Z",
+        "bytes": 26,
+        "planMs": 553.25,
+        "applyMs": 100.6,
+        "planAndApplyMs": 653.85,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 11,
+        "startedAt": "2026-09-18T05:47:16.115Z",
+        "plannedAt": "2026-09-18T05:47:16.676Z",
+        "completedAt": "2026-09-18T05:47:16.780Z",
+        "bytes": 25,
+        "planMs": 561.37,
+        "applyMs": 103.08,
+        "planAndApplyMs": 664.45,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 12,
+        "startedAt": "2026-09-18T05:47:16.782Z",
+        "plannedAt": "2026-09-18T05:47:17.674Z",
+        "completedAt": "2026-09-18T05:47:17.781Z",
+        "bytes": 26,
+        "planMs": 892.42,
+        "applyMs": 106.77,
+        "planAndApplyMs": 999.19,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 13,
+        "startedAt": "2026-09-18T05:47:17.782Z",
+        "plannedAt": "2026-09-18T05:47:18.355Z",
+        "completedAt": "2026-09-18T05:47:18.464Z",
+        "bytes": 25,
+        "planMs": 573.38,
+        "applyMs": 108.52,
+        "planAndApplyMs": 681.9,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 14,
+        "startedAt": "2026-09-18T05:47:18.465Z",
+        "plannedAt": "2026-09-18T05:47:19.022Z",
+        "completedAt": "2026-09-18T05:47:19.125Z",
+        "bytes": 26,
+        "planMs": 557.92,
+        "applyMs": 102.08,
+        "planAndApplyMs": 660,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 15,
+        "startedAt": "2026-09-18T05:47:19.125Z",
+        "plannedAt": "2026-09-18T05:47:19.653Z",
+        "completedAt": "2026-09-18T05:47:19.755Z",
+        "bytes": 25,
+        "planMs": 527.57,
+        "applyMs": 102.24,
+        "planAndApplyMs": 629.81,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 16,
+        "startedAt": "2026-09-18T05:47:19.756Z",
+        "plannedAt": "2026-09-18T05:47:20.285Z",
+        "completedAt": "2026-09-18T05:47:20.383Z",
+        "bytes": 26,
+        "planMs": 528.32,
+        "applyMs": 98.27,
+        "planAndApplyMs": 626.59,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 17,
+        "startedAt": "2026-09-18T05:47:20.384Z",
+        "plannedAt": "2026-09-18T05:47:20.918Z",
+        "completedAt": "2026-09-18T05:47:21.020Z",
+        "bytes": 25,
+        "planMs": 534.45,
+        "applyMs": 101.53,
+        "planAndApplyMs": 635.98,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 18,
+        "startedAt": "2026-09-18T05:47:21.020Z",
+        "plannedAt": "2026-09-18T05:47:21.584Z",
+        "completedAt": "2026-09-18T05:47:21.689Z",
+        "bytes": 26,
+        "planMs": 563.11,
+        "applyMs": 105.2,
+        "planAndApplyMs": 668.32,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 19,
+        "startedAt": "2026-09-18T05:47:21.689Z",
+        "plannedAt": "2026-09-18T05:47:22.222Z",
+        "completedAt": "2026-09-18T05:47:22.325Z",
+        "bytes": 25,
+        "planMs": 532.31,
+        "applyMs": 102.93,
+        "planAndApplyMs": 635.24,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 20,
+        "startedAt": "2026-09-18T05:47:22.325Z",
+        "plannedAt": "2026-09-18T05:47:22.876Z",
+        "completedAt": "2026-09-18T05:47:22.980Z",
+        "bytes": 26,
+        "planMs": 550.58,
+        "applyMs": 104.18,
+        "planAndApplyMs": 654.76,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 21,
+        "startedAt": "2026-09-18T05:47:22.981Z",
+        "plannedAt": "2026-09-18T05:47:23.539Z",
+        "completedAt": "2026-09-18T05:47:23.641Z",
+        "bytes": 25,
+        "planMs": 558.31,
+        "applyMs": 101.78,
+        "planAndApplyMs": 660.09,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 22,
+        "startedAt": "2026-09-18T05:47:23.642Z",
+        "plannedAt": "2026-09-18T05:47:24.198Z",
+        "completedAt": "2026-09-18T05:47:24.307Z",
+        "bytes": 26,
+        "planMs": 556.06,
+        "applyMs": 108.55,
+        "planAndApplyMs": 664.61,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 23,
+        "startedAt": "2026-09-18T05:47:24.307Z",
+        "plannedAt": "2026-09-18T05:47:24.875Z",
+        "completedAt": "2026-09-18T05:47:24.974Z",
+        "bytes": 25,
+        "planMs": 567.1,
+        "applyMs": 99.88,
+        "planAndApplyMs": 666.97,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 24,
+        "startedAt": "2026-09-18T05:47:24.975Z",
+        "plannedAt": "2026-09-18T05:47:25.565Z",
+        "completedAt": "2026-09-18T05:47:25.665Z",
+        "bytes": 26,
+        "planMs": 589.67,
+        "applyMs": 100.56,
+        "planAndApplyMs": 690.23,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 25,
+        "startedAt": "2026-09-18T05:47:25.666Z",
+        "plannedAt": "2026-09-18T05:47:26.206Z",
+        "completedAt": "2026-09-18T05:47:26.313Z",
+        "bytes": 25,
+        "planMs": 540.5,
+        "applyMs": 106.56,
+        "planAndApplyMs": 647.06,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 26,
+        "startedAt": "2026-09-18T05:47:26.314Z",
+        "plannedAt": "2026-09-18T05:47:26.854Z",
+        "completedAt": "2026-09-18T05:47:26.959Z",
+        "bytes": 26,
+        "planMs": 540.51,
+        "applyMs": 104.49,
+        "planAndApplyMs": 645,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 27,
+        "startedAt": "2026-09-18T05:47:26.960Z",
+        "plannedAt": "2026-09-18T05:47:27.522Z",
+        "completedAt": "2026-09-18T05:47:27.623Z",
+        "bytes": 25,
+        "planMs": 562.65,
+        "applyMs": 100.99,
+        "planAndApplyMs": 663.64,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 28,
+        "startedAt": "2026-09-18T05:47:27.624Z",
+        "plannedAt": "2026-09-18T05:47:28.181Z",
+        "completedAt": "2026-09-18T05:47:28.282Z",
+        "bytes": 26,
+        "planMs": 557.36,
+        "applyMs": 100.71,
+        "planAndApplyMs": 658.07,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 29,
+        "startedAt": "2026-09-18T05:47:28.283Z",
+        "plannedAt": "2026-09-18T05:47:28.845Z",
+        "completedAt": "2026-09-18T05:47:28.953Z",
+        "bytes": 25,
+        "planMs": 562.45,
+        "applyMs": 108.19,
+        "planAndApplyMs": 670.64,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 30,
+        "startedAt": "2026-09-18T05:47:28.954Z",
+        "plannedAt": "2026-09-18T05:47:29.517Z",
+        "completedAt": "2026-09-18T05:47:29.621Z",
+        "bytes": 26,
+        "planMs": 562.6,
+        "applyMs": 104.49,
+        "planAndApplyMs": 667.1,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 31,
+        "startedAt": "2026-09-18T05:47:29.622Z",
+        "plannedAt": "2026-09-18T05:47:30.447Z",
+        "completedAt": "2026-09-18T05:47:30.553Z",
+        "bytes": 25,
+        "planMs": 824.51,
+        "applyMs": 106.11,
+        "planAndApplyMs": 930.62,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 32,
+        "startedAt": "2026-09-18T05:47:30.554Z",
+        "plannedAt": "2026-09-18T05:47:31.099Z",
+        "completedAt": "2026-09-18T05:47:31.200Z",
+        "bytes": 26,
+        "planMs": 545.28,
+        "applyMs": 101.57,
+        "planAndApplyMs": 646.86,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 33,
+        "startedAt": "2026-09-18T05:47:31.201Z",
+        "plannedAt": "2026-09-18T05:47:32.029Z",
+        "completedAt": "2026-09-18T05:47:32.144Z",
+        "bytes": 25,
+        "planMs": 827.79,
+        "applyMs": 114.8,
+        "planAndApplyMs": 942.59,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 34,
+        "startedAt": "2026-09-18T05:47:32.146Z",
+        "plannedAt": "2026-09-18T05:47:32.715Z",
+        "completedAt": "2026-09-18T05:47:32.817Z",
+        "bytes": 26,
+        "planMs": 569.38,
+        "applyMs": 101.63,
+        "planAndApplyMs": 671.02,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 35,
+        "startedAt": "2026-09-18T05:47:32.817Z",
+        "plannedAt": "2026-09-18T05:47:33.916Z",
+        "completedAt": "2026-09-18T05:47:34.027Z",
+        "bytes": 25,
+        "planMs": 1098.62,
+        "applyMs": 110.5,
+        "planAndApplyMs": 1209.12,
+        "withinBudget": false,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 36,
+        "startedAt": "2026-09-18T05:47:34.028Z",
+        "plannedAt": "2026-09-18T05:47:34.564Z",
+        "completedAt": "2026-09-18T05:47:34.665Z",
+        "bytes": 26,
+        "planMs": 535.84,
+        "applyMs": 101.27,
+        "planAndApplyMs": 637.11,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 37,
+        "startedAt": "2026-09-18T05:47:34.666Z",
+        "plannedAt": "2026-09-18T05:47:35.202Z",
+        "completedAt": "2026-09-18T05:47:35.308Z",
+        "bytes": 25,
+        "planMs": 536.91,
+        "applyMs": 106.01,
+        "planAndApplyMs": 642.93,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 38,
+        "startedAt": "2026-09-18T05:47:35.309Z",
+        "plannedAt": "2026-09-18T05:47:35.858Z",
+        "completedAt": "2026-09-18T05:47:35.960Z",
+        "bytes": 26,
+        "planMs": 548.92,
+        "applyMs": 102.11,
+        "planAndApplyMs": 651.03,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 39,
+        "startedAt": "2026-09-18T05:47:35.961Z",
+        "plannedAt": "2026-09-18T05:47:36.492Z",
+        "completedAt": "2026-09-18T05:47:36.598Z",
+        "bytes": 25,
+        "planMs": 531.39,
+        "applyMs": 105.45,
+        "planAndApplyMs": 636.84,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 40,
+        "startedAt": "2026-09-18T05:47:36.598Z",
+        "plannedAt": "2026-09-18T05:47:37.672Z",
+        "completedAt": "2026-09-18T05:47:37.782Z",
+        "bytes": 26,
+        "planMs": 1073.27,
+        "applyMs": 110.74,
+        "planAndApplyMs": 1184.01,
+        "withinBudget": false,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 41,
+        "startedAt": "2026-09-18T05:47:37.783Z",
+        "plannedAt": "2026-09-18T05:47:38.335Z",
+        "completedAt": "2026-09-18T05:47:38.439Z",
+        "bytes": 25,
+        "planMs": 551.82,
+        "applyMs": 103.82,
+        "planAndApplyMs": 655.65,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 42,
+        "startedAt": "2026-09-18T05:47:38.440Z",
+        "plannedAt": "2026-09-18T05:47:39.011Z",
+        "completedAt": "2026-09-18T05:47:39.113Z",
+        "bytes": 26,
+        "planMs": 571.48,
+        "applyMs": 101.95,
+        "planAndApplyMs": 673.43,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 43,
+        "startedAt": "2026-09-18T05:47:39.114Z",
+        "plannedAt": "2026-09-18T05:47:39.655Z",
+        "completedAt": "2026-09-18T05:47:39.759Z",
+        "bytes": 25,
+        "planMs": 541.53,
+        "applyMs": 103.19,
+        "planAndApplyMs": 644.72,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 44,
+        "startedAt": "2026-09-18T05:47:39.759Z",
+        "plannedAt": "2026-09-18T05:47:40.270Z",
+        "completedAt": "2026-09-18T05:47:40.371Z",
+        "bytes": 26,
+        "planMs": 510.92,
+        "applyMs": 101.17,
+        "planAndApplyMs": 612.09,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 45,
+        "startedAt": "2026-09-18T05:47:40.372Z",
+        "plannedAt": "2026-09-18T05:47:40.893Z",
+        "completedAt": "2026-09-18T05:47:40.999Z",
+        "bytes": 25,
+        "planMs": 521.13,
+        "applyMs": 105.63,
+        "planAndApplyMs": 626.76,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 46,
+        "startedAt": "2026-09-18T05:47:41.000Z",
+        "plannedAt": "2026-09-18T05:47:41.542Z",
+        "completedAt": "2026-09-18T05:47:41.642Z",
+        "bytes": 26,
+        "planMs": 542.17,
+        "applyMs": 100.07,
+        "planAndApplyMs": 642.24,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 47,
+        "startedAt": "2026-09-18T05:47:41.643Z",
+        "plannedAt": "2026-09-18T05:47:42.186Z",
+        "completedAt": "2026-09-18T05:47:42.290Z",
+        "bytes": 25,
+        "planMs": 542.8,
+        "applyMs": 104.12,
+        "planAndApplyMs": 646.92,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 48,
+        "startedAt": "2026-09-18T05:47:42.291Z",
+        "plannedAt": "2026-09-18T05:47:42.819Z",
+        "completedAt": "2026-09-18T05:47:42.918Z",
+        "bytes": 26,
+        "planMs": 528.19,
+        "applyMs": 99.51,
+        "planAndApplyMs": 627.69,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 49,
+        "startedAt": "2026-09-18T05:47:42.919Z",
+        "plannedAt": "2026-09-18T05:47:43.439Z",
+        "completedAt": "2026-09-18T05:47:43.539Z",
+        "bytes": 25,
+        "planMs": 519.82,
+        "applyMs": 100.48,
+        "planAndApplyMs": 620.3,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 50,
+        "startedAt": "2026-09-18T05:47:43.541Z",
+        "plannedAt": "2026-09-18T05:47:44.078Z",
+        "completedAt": "2026-09-18T05:47:44.177Z",
+        "bytes": 26,
+        "planMs": 537.49,
+        "applyMs": 98.95,
+        "planAndApplyMs": 636.44,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 51,
+        "startedAt": "2026-09-18T05:47:44.178Z",
+        "plannedAt": "2026-09-18T05:47:44.714Z",
+        "completedAt": "2026-09-18T05:47:44.814Z",
+        "bytes": 25,
+        "planMs": 535.92,
+        "applyMs": 100.02,
+        "planAndApplyMs": 635.93,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 52,
+        "startedAt": "2026-09-18T05:47:44.815Z",
+        "plannedAt": "2026-09-18T05:47:45.357Z",
+        "completedAt": "2026-09-18T05:47:45.464Z",
+        "bytes": 26,
+        "planMs": 542.51,
+        "applyMs": 107.44,
+        "planAndApplyMs": 649.96,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 53,
+        "startedAt": "2026-09-18T05:47:45.465Z",
+        "plannedAt": "2026-09-18T05:47:46.003Z",
+        "completedAt": "2026-09-18T05:47:46.105Z",
+        "bytes": 25,
+        "planMs": 538,
+        "applyMs": 102.16,
+        "planAndApplyMs": 640.16,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 54,
+        "startedAt": "2026-09-18T05:47:46.106Z",
+        "plannedAt": "2026-09-18T05:47:46.643Z",
+        "completedAt": "2026-09-18T05:47:46.743Z",
+        "bytes": 26,
+        "planMs": 536.98,
+        "applyMs": 99.86,
+        "planAndApplyMs": 636.84,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 55,
+        "startedAt": "2026-09-18T05:47:46.743Z",
+        "plannedAt": "2026-09-18T05:47:47.281Z",
+        "completedAt": "2026-09-18T05:47:47.382Z",
+        "bytes": 25,
+        "planMs": 537.62,
+        "applyMs": 100.51,
+        "planAndApplyMs": 638.12,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 56,
+        "startedAt": "2026-09-18T05:47:47.382Z",
+        "plannedAt": "2026-09-18T05:47:47.927Z",
+        "completedAt": "2026-09-18T05:47:48.033Z",
+        "bytes": 26,
+        "planMs": 544.42,
+        "applyMs": 105.78,
+        "planAndApplyMs": 650.21,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 57,
+        "startedAt": "2026-09-18T05:47:48.033Z",
+        "plannedAt": "2026-09-18T05:47:48.600Z",
+        "completedAt": "2026-09-18T05:47:48.704Z",
+        "bytes": 25,
+        "planMs": 566.32,
+        "applyMs": 103.91,
+        "planAndApplyMs": 670.23,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 58,
+        "startedAt": "2026-09-18T05:47:48.704Z",
+        "plannedAt": "2026-09-18T05:47:49.249Z",
+        "completedAt": "2026-09-18T05:47:49.353Z",
+        "bytes": 26,
+        "planMs": 544.72,
+        "applyMs": 103.54,
+        "planAndApplyMs": 648.26,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 59,
+        "startedAt": "2026-09-18T05:47:49.353Z",
+        "plannedAt": "2026-09-18T05:47:49.897Z",
+        "completedAt": "2026-09-18T05:47:50.002Z",
+        "bytes": 25,
+        "planMs": 543.26,
+        "applyMs": 104.98,
+        "planAndApplyMs": 648.24,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 60,
+        "startedAt": "2026-09-18T05:47:50.002Z",
+        "plannedAt": "2026-09-18T05:47:50.532Z",
+        "completedAt": "2026-09-18T05:47:50.640Z",
+        "bytes": 26,
+        "planMs": 529.66,
+        "applyMs": 108.48,
+        "planAndApplyMs": 638.14,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 61,
+        "startedAt": "2026-09-18T05:47:50.641Z",
+        "plannedAt": "2026-09-18T05:47:51.518Z",
+        "completedAt": "2026-09-18T05:47:51.626Z",
+        "bytes": 25,
+        "planMs": 877.1,
+        "applyMs": 107.94,
+        "planAndApplyMs": 985.04,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 62,
+        "startedAt": "2026-09-18T05:47:51.627Z",
+        "plannedAt": "2026-09-18T05:47:52.208Z",
+        "completedAt": "2026-09-18T05:47:52.308Z",
+        "bytes": 26,
+        "planMs": 581.66,
+        "applyMs": 99.92,
+        "planAndApplyMs": 681.59,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 63,
+        "startedAt": "2026-09-18T05:47:52.309Z",
+        "plannedAt": "2026-09-18T05:47:52.879Z",
+        "completedAt": "2026-09-18T05:47:52.986Z",
+        "bytes": 25,
+        "planMs": 570.21,
+        "applyMs": 107.14,
+        "planAndApplyMs": 677.36,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 64,
+        "startedAt": "2026-09-18T05:47:52.987Z",
+        "plannedAt": "2026-09-18T05:47:53.590Z",
+        "completedAt": "2026-09-18T05:47:53.703Z",
+        "bytes": 26,
+        "planMs": 603,
+        "applyMs": 113.32,
+        "planAndApplyMs": 716.32,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 65,
+        "startedAt": "2026-09-18T05:47:53.704Z",
+        "plannedAt": "2026-09-18T05:47:54.242Z",
+        "completedAt": "2026-09-18T05:47:54.343Z",
+        "bytes": 25,
+        "planMs": 537.63,
+        "applyMs": 101.38,
+        "planAndApplyMs": 639.02,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 66,
+        "startedAt": "2026-09-18T05:47:54.347Z",
+        "plannedAt": "2026-09-18T05:47:54.934Z",
+        "completedAt": "2026-09-18T05:47:55.035Z",
+        "bytes": 26,
+        "planMs": 587.4,
+        "applyMs": 100.79,
+        "planAndApplyMs": 688.19,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 67,
+        "startedAt": "2026-09-18T05:47:55.036Z",
+        "plannedAt": "2026-09-18T05:47:55.588Z",
+        "completedAt": "2026-09-18T05:47:55.692Z",
+        "bytes": 25,
+        "planMs": 552.84,
+        "applyMs": 103.12,
+        "planAndApplyMs": 655.97,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 68,
+        "startedAt": "2026-09-18T05:47:55.692Z",
+        "plannedAt": "2026-09-18T05:47:56.520Z",
+        "completedAt": "2026-09-18T05:47:56.635Z",
+        "bytes": 26,
+        "planMs": 827.31,
+        "applyMs": 115.66,
+        "planAndApplyMs": 942.97,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 69,
+        "startedAt": "2026-09-18T05:47:56.636Z",
+        "plannedAt": "2026-09-18T05:47:57.462Z",
+        "completedAt": "2026-09-18T05:47:57.576Z",
+        "bytes": 25,
+        "planMs": 825.95,
+        "applyMs": 114.41,
+        "planAndApplyMs": 940.37,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 70,
+        "startedAt": "2026-09-18T05:47:57.577Z",
+        "plannedAt": "2026-09-18T05:47:58.110Z",
+        "completedAt": "2026-09-18T05:47:58.212Z",
+        "bytes": 26,
+        "planMs": 533.35,
+        "applyMs": 101.07,
+        "planAndApplyMs": 634.42,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 71,
+        "startedAt": "2026-09-18T05:47:58.212Z",
+        "plannedAt": "2026-09-18T05:47:58.793Z",
+        "completedAt": "2026-09-18T05:47:58.898Z",
+        "bytes": 25,
+        "planMs": 580.69,
+        "applyMs": 105.36,
+        "planAndApplyMs": 686.04,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 72,
+        "startedAt": "2026-09-18T05:47:58.899Z",
+        "plannedAt": "2026-09-18T05:47:59.428Z",
+        "completedAt": "2026-09-18T05:47:59.531Z",
+        "bytes": 26,
+        "planMs": 529.36,
+        "applyMs": 102.16,
+        "planAndApplyMs": 631.52,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 73,
+        "startedAt": "2026-09-18T05:47:59.531Z",
+        "plannedAt": "2026-09-18T05:48:00.063Z",
+        "completedAt": "2026-09-18T05:48:00.164Z",
+        "bytes": 25,
+        "planMs": 531.5,
+        "applyMs": 101.61,
+        "planAndApplyMs": 633.1,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 74,
+        "startedAt": "2026-09-18T05:48:00.165Z",
+        "plannedAt": "2026-09-18T05:48:00.990Z",
+        "completedAt": "2026-09-18T05:48:01.102Z",
+        "bytes": 26,
+        "planMs": 824.78,
+        "applyMs": 112.18,
+        "planAndApplyMs": 936.96,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 75,
+        "startedAt": "2026-09-18T05:48:01.103Z",
+        "plannedAt": "2026-09-18T05:48:01.628Z",
+        "completedAt": "2026-09-18T05:48:01.731Z",
+        "bytes": 25,
+        "planMs": 525.38,
+        "applyMs": 102.59,
+        "planAndApplyMs": 627.98,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 76,
+        "startedAt": "2026-09-18T05:48:01.732Z",
+        "plannedAt": "2026-09-18T05:48:02.567Z",
+        "completedAt": "2026-09-18T05:48:02.684Z",
+        "bytes": 26,
+        "planMs": 835.48,
+        "applyMs": 116.94,
+        "planAndApplyMs": 952.42,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 77,
+        "startedAt": "2026-09-18T05:48:02.685Z",
+        "plannedAt": "2026-09-18T05:48:03.238Z",
+        "completedAt": "2026-09-18T05:48:03.343Z",
+        "bytes": 25,
+        "planMs": 552.75,
+        "applyMs": 105.64,
+        "planAndApplyMs": 658.39,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 78,
+        "startedAt": "2026-09-18T05:48:03.344Z",
+        "plannedAt": "2026-09-18T05:48:03.903Z",
+        "completedAt": "2026-09-18T05:48:04.008Z",
+        "bytes": 26,
+        "planMs": 559.08,
+        "applyMs": 104.81,
+        "planAndApplyMs": 663.89,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 79,
+        "startedAt": "2026-09-18T05:48:04.009Z",
+        "plannedAt": "2026-09-18T05:48:04.559Z",
+        "completedAt": "2026-09-18T05:48:04.663Z",
+        "bytes": 25,
+        "planMs": 550.51,
+        "applyMs": 104,
+        "planAndApplyMs": 654.51,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 80,
+        "startedAt": "2026-09-18T05:48:04.664Z",
+        "plannedAt": "2026-09-18T05:48:05.198Z",
+        "completedAt": "2026-09-18T05:48:05.302Z",
+        "bytes": 26,
+        "planMs": 533.99,
+        "applyMs": 104.7,
+        "planAndApplyMs": 638.68,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 81,
+        "startedAt": "2026-09-18T05:48:05.303Z",
+        "plannedAt": "2026-09-18T05:48:05.884Z",
+        "completedAt": "2026-09-18T05:48:05.988Z",
+        "bytes": 25,
+        "planMs": 580.8,
+        "applyMs": 103.39,
+        "planAndApplyMs": 684.19,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 82,
+        "startedAt": "2026-09-18T05:48:05.988Z",
+        "plannedAt": "2026-09-18T05:48:06.542Z",
+        "completedAt": "2026-09-18T05:48:06.645Z",
+        "bytes": 26,
+        "planMs": 553.84,
+        "applyMs": 102.81,
+        "planAndApplyMs": 656.65,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 83,
+        "startedAt": "2026-09-18T05:48:06.646Z",
+        "plannedAt": "2026-09-18T05:48:07.464Z",
+        "completedAt": "2026-09-18T05:48:07.580Z",
+        "bytes": 25,
+        "planMs": 818.47,
+        "applyMs": 116.37,
+        "planAndApplyMs": 934.84,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 84,
+        "startedAt": "2026-09-18T05:48:07.581Z",
+        "plannedAt": "2026-09-18T05:48:08.153Z",
+        "completedAt": "2026-09-18T05:48:08.258Z",
+        "bytes": 26,
+        "planMs": 571.35,
+        "applyMs": 105.32,
+        "planAndApplyMs": 676.68,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 85,
+        "startedAt": "2026-09-18T05:48:08.259Z",
+        "plannedAt": "2026-09-18T05:48:08.796Z",
+        "completedAt": "2026-09-18T05:48:08.898Z",
+        "bytes": 25,
+        "planMs": 537.48,
+        "applyMs": 102.06,
+        "planAndApplyMs": 639.54,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 86,
+        "startedAt": "2026-09-18T05:48:08.899Z",
+        "plannedAt": "2026-09-18T05:48:09.450Z",
+        "completedAt": "2026-09-18T05:48:09.550Z",
+        "bytes": 26,
+        "planMs": 550.78,
+        "applyMs": 100.01,
+        "planAndApplyMs": 650.8,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 87,
+        "startedAt": "2026-09-18T05:48:09.550Z",
+        "plannedAt": "2026-09-18T05:48:10.088Z",
+        "completedAt": "2026-09-18T05:48:10.198Z",
+        "bytes": 25,
+        "planMs": 537.42,
+        "applyMs": 109.76,
+        "planAndApplyMs": 647.18,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 88,
+        "startedAt": "2026-09-18T05:48:10.198Z",
+        "plannedAt": "2026-09-18T05:48:10.766Z",
+        "completedAt": "2026-09-18T05:48:10.870Z",
+        "bytes": 26,
+        "planMs": 568.13,
+        "applyMs": 103.44,
+        "planAndApplyMs": 671.56,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 89,
+        "startedAt": "2026-09-18T05:48:10.871Z",
+        "plannedAt": "2026-09-18T05:48:11.627Z",
+        "completedAt": "2026-09-18T05:48:11.734Z",
+        "bytes": 25,
+        "planMs": 756.59,
+        "applyMs": 106.79,
+        "planAndApplyMs": 863.38,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 90,
+        "startedAt": "2026-09-18T05:48:11.735Z",
+        "plannedAt": "2026-09-18T05:48:12.316Z",
+        "completedAt": "2026-09-18T05:48:12.424Z",
+        "bytes": 26,
+        "planMs": 581.46,
+        "applyMs": 107.53,
+        "planAndApplyMs": 689,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 91,
+        "startedAt": "2026-09-18T05:48:12.425Z",
+        "plannedAt": "2026-09-18T05:48:13.068Z",
+        "completedAt": "2026-09-18T05:48:13.173Z",
+        "bytes": 25,
+        "planMs": 642.93,
+        "applyMs": 104.86,
+        "planAndApplyMs": 747.79,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 92,
+        "startedAt": "2026-09-18T05:48:13.174Z",
+        "plannedAt": "2026-09-18T05:48:13.741Z",
+        "completedAt": "2026-09-18T05:48:13.846Z",
+        "bytes": 26,
+        "planMs": 567.61,
+        "applyMs": 104.36,
+        "planAndApplyMs": 671.96,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 93,
+        "startedAt": "2026-09-18T05:48:13.846Z",
+        "plannedAt": "2026-09-18T05:48:14.404Z",
+        "completedAt": "2026-09-18T05:48:14.506Z",
+        "bytes": 25,
+        "planMs": 557.18,
+        "applyMs": 102.17,
+        "planAndApplyMs": 659.34,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 94,
+        "startedAt": "2026-09-18T05:48:14.506Z",
+        "plannedAt": "2026-09-18T05:48:15.324Z",
+        "completedAt": "2026-09-18T05:48:15.433Z",
+        "bytes": 26,
+        "planMs": 817.71,
+        "applyMs": 108.48,
+        "planAndApplyMs": 926.19,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 95,
+        "startedAt": "2026-09-18T05:48:15.433Z",
+        "plannedAt": "2026-09-18T05:48:15.966Z",
+        "completedAt": "2026-09-18T05:48:16.079Z",
+        "bytes": 25,
+        "planMs": 532.29,
+        "applyMs": 113,
+        "planAndApplyMs": 645.3,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 96,
+        "startedAt": "2026-09-18T05:48:16.079Z",
+        "plannedAt": "2026-09-18T05:48:16.741Z",
+        "completedAt": "2026-09-18T05:48:16.848Z",
+        "bytes": 26,
+        "planMs": 661.32,
+        "applyMs": 106.84,
+        "planAndApplyMs": 768.15,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 97,
+        "startedAt": "2026-09-18T05:48:16.849Z",
+        "plannedAt": "2026-09-18T05:48:17.405Z",
+        "completedAt": "2026-09-18T05:48:17.508Z",
+        "bytes": 25,
+        "planMs": 556.46,
+        "applyMs": 102.42,
+        "planAndApplyMs": 658.88,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 98,
+        "startedAt": "2026-09-18T05:48:17.508Z",
+        "plannedAt": "2026-09-18T05:48:18.057Z",
+        "completedAt": "2026-09-18T05:48:18.164Z",
+        "bytes": 26,
+        "planMs": 549.21,
+        "applyMs": 106.62,
+        "planAndApplyMs": 655.83,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 99,
+        "startedAt": "2026-09-18T05:48:18.165Z",
+        "plannedAt": "2026-09-18T05:48:18.715Z",
+        "completedAt": "2026-09-18T05:48:18.821Z",
+        "bytes": 25,
+        "planMs": 550.04,
+        "applyMs": 105.96,
+        "planAndApplyMs": 655.99,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      },
+      {
+        "index": 100,
+        "startedAt": "2026-09-18T05:48:18.821Z",
+        "plannedAt": "2026-09-18T05:48:19.376Z",
+        "completedAt": "2026-09-18T05:48:19.481Z",
+        "bytes": 26,
+        "planMs": 554.59,
+        "applyMs": 105.18,
+        "planAndApplyMs": 659.78,
+        "withinBudget": true,
+        "officialDoctor": [
+          "OFFICIAL_DOCTOR_PASSED"
+        ]
+      }
+    ],
+    "planMs": {
+      "samples": 100,
+      "min": 510.92,
+      "mean": 599.57,
+      "p50": 556.06,
+      "p95": 827.79,
+      "max": 1098.62
+    },
+    "applyMs": {
+      "samples": 100,
+      "min": 98.27,
+      "mean": 104.7,
+      "p50": 103.92,
+      "p95": 114.41,
+      "max": 116.94
+    },
+    "planAndApplyMs": {
+      "samples": 100,
+      "min": 612.09,
+      "mean": 704.27,
+      "p50": 658.88,
+      "p95": 942.97,
+      "max": 1209.12
+    },
+    "allSamplesWithinBudget": false,
+    "p95WithinBudget": true,
+    "withinBudget": true,
+    "overBudgetSamples": 2
+  },
+  "hostStart": {
+    "measuredAt": "2026-09-18T05:45:50.899Z",
+    "loadAverage1m5m15m": [
+      5.1240234375,
+      4.8447265625,
+      3.767578125
+    ],
+    "processCount": 846,
+    "availableParallelism": 10
+  },
+  "officialCliTimings": {
+    "versionMs": {
+      "samples": 5,
+      "min": 355.94,
+      "mean": 367.98,
+      "p50": 365.41,
+      "p95": 383.65,
+      "max": 383.65
+    },
+    "doctorConfigMs": {
+      "samples": 5,
+      "min": 377.25,
+      "mean": 390.47,
+      "p50": 392.16,
+      "p95": 402.39,
+      "max": 402.39
+    },
+    "fixture": "default_plan_mode = false\n"
+  },
+  "startupMs": {
+    "samples": 5,
+    "min": 86.9,
+    "mean": 225.56,
+    "p50": 87.59,
+    "p95": 777.92,
+    "max": 777.92
+  },
+  "startupWithinBudget": true,
+  "idleAverageCpuPercent": {
+    "samples": 5,
+    "min": 0.2,
+    "mean": 0.32,
+    "p50": 0.3,
+    "p95": 0.5,
+    "max": 0.5
+  },
+  "idleRssMiB": {
+    "samples": 5,
+    "min": 43.91,
+    "mean": 46.76,
+    "p50": 44.28,
+    "p95": 50.91,
+    "max": 50.91
+  },
+  "idleCpuMeasuredPercent": 0.32,
+  "idleCpuWithinBudget": true,
+  "peakRssMiB": 53.58,
+  "peakRssWithinBudget": true,
+  "binaryMiB": 60.25,
+  "binaryWithinBudget": true,
+  "saveBudgetWithinLimit": true,
+  "allSaveSamplesWithinBudget": false,
+  "combined": {
+    "comparisonSamplesPerResource": 20,
+    "newSamplesPerResource": 100,
+    "artifactSha256": "998f2c34af52b4fb60f1d727d5e0f3e0329105d711f30400bb079be654564841",
+    "saves": {
+      "status": "passed",
+      "resource": "agents",
+      "samples": [
+        {
+          "index": 1,
+          "bytes": 1024,
+          "planMs": 76.1,
+          "applyMs": 101.08,
+          "planAndApplyMs": 177.18,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 2,
+          "bytes": 1024,
+          "planMs": 50.43,
+          "applyMs": 96.1,
+          "planAndApplyMs": 146.53,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 3,
+          "bytes": 1024,
+          "planMs": 47.86,
+          "applyMs": 91.45,
+          "planAndApplyMs": 139.3,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 4,
+          "bytes": 1024,
+          "planMs": 48.75,
+          "applyMs": 91.14,
+          "planAndApplyMs": 139.89,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 5,
+          "bytes": 1024,
+          "planMs": 49.06,
+          "applyMs": 92.59,
+          "planAndApplyMs": 141.65,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 6,
+          "bytes": 1024,
+          "planMs": 49.05,
+          "applyMs": 93.24,
+          "planAndApplyMs": 142.29,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 7,
+          "bytes": 1024,
+          "planMs": 48.5,
+          "applyMs": 89.81,
+          "planAndApplyMs": 138.31,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 8,
+          "bytes": 1024,
+          "planMs": 48.23,
+          "applyMs": 87.81,
+          "planAndApplyMs": 136.03,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 9,
+          "bytes": 1024,
+          "planMs": 51.26,
+          "applyMs": 96.31,
+          "planAndApplyMs": 147.57,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 10,
+          "bytes": 1024,
+          "planMs": 49.4,
+          "applyMs": 90.67,
+          "planAndApplyMs": 140.07,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 11,
+          "bytes": 1024,
+          "planMs": 47.59,
+          "applyMs": 91.39,
+          "planAndApplyMs": 138.98,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 12,
+          "bytes": 1024,
+          "planMs": 46.09,
+          "applyMs": 90.2,
+          "planAndApplyMs": 136.3,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 13,
+          "bytes": 1024,
+          "planMs": 48,
+          "applyMs": 90.74,
+          "planAndApplyMs": 138.75,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 14,
+          "bytes": 1024,
+          "planMs": 48.38,
+          "applyMs": 88.3,
+          "planAndApplyMs": 136.68,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 15,
+          "bytes": 1024,
+          "planMs": 50.71,
+          "applyMs": 99.54,
+          "planAndApplyMs": 150.25,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 16,
+          "bytes": 1024,
+          "planMs": 54.58,
+          "applyMs": 89.74,
+          "planAndApplyMs": 144.31,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 17,
+          "bytes": 1024,
+          "planMs": 47.38,
+          "applyMs": 100.08,
+          "planAndApplyMs": 147.46,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 18,
+          "bytes": 1024,
+          "planMs": 66.23,
+          "applyMs": 92.9,
+          "planAndApplyMs": 159.13,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 19,
+          "bytes": 1024,
+          "planMs": 52.19,
+          "applyMs": 95.34,
+          "planAndApplyMs": 147.54,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 20,
+          "bytes": 1024,
+          "planMs": 55.79,
+          "applyMs": 102.47,
+          "planAndApplyMs": 158.26,
+          "withinBudget": true,
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 1,
+          "startedAt": "2026-09-18T05:46:53.164Z",
+          "plannedAt": "2026-09-18T05:46:53.239Z",
+          "completedAt": "2026-09-18T05:46:53.356Z",
+          "bytes": 1024,
+          "planMs": 75.25,
+          "applyMs": 117.46,
+          "planAndApplyMs": 192.71,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 2,
+          "startedAt": "2026-09-18T05:46:53.357Z",
+          "plannedAt": "2026-09-18T05:46:53.416Z",
+          "completedAt": "2026-09-18T05:46:53.515Z",
+          "bytes": 1024,
+          "planMs": 58.46,
+          "applyMs": 99.63,
+          "planAndApplyMs": 158.08,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 3,
+          "startedAt": "2026-09-18T05:46:53.517Z",
+          "plannedAt": "2026-09-18T05:46:53.572Z",
+          "completedAt": "2026-09-18T05:46:53.668Z",
+          "bytes": 1024,
+          "planMs": 55.46,
+          "applyMs": 96.23,
+          "planAndApplyMs": 151.69,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 4,
+          "startedAt": "2026-09-18T05:46:53.669Z",
+          "plannedAt": "2026-09-18T05:46:53.725Z",
+          "completedAt": "2026-09-18T05:46:53.818Z",
+          "bytes": 1024,
+          "planMs": 55.47,
+          "applyMs": 93.56,
+          "planAndApplyMs": 149.02,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 5,
+          "startedAt": "2026-09-18T05:46:53.819Z",
+          "plannedAt": "2026-09-18T05:46:53.876Z",
+          "completedAt": "2026-09-18T05:46:53.977Z",
+          "bytes": 1024,
+          "planMs": 57.12,
+          "applyMs": 101.08,
+          "planAndApplyMs": 158.2,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 6,
+          "startedAt": "2026-09-18T05:46:53.978Z",
+          "plannedAt": "2026-09-18T05:46:54.033Z",
+          "completedAt": "2026-09-18T05:46:54.131Z",
+          "bytes": 1024,
+          "planMs": 55.01,
+          "applyMs": 97.96,
+          "planAndApplyMs": 152.97,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 7,
+          "startedAt": "2026-09-18T05:46:54.132Z",
+          "plannedAt": "2026-09-18T05:46:54.187Z",
+          "completedAt": "2026-09-18T05:46:54.287Z",
+          "bytes": 1024,
+          "planMs": 55.37,
+          "applyMs": 99.37,
+          "planAndApplyMs": 154.74,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 8,
+          "startedAt": "2026-09-18T05:46:54.287Z",
+          "plannedAt": "2026-09-18T05:46:54.342Z",
+          "completedAt": "2026-09-18T05:46:54.440Z",
+          "bytes": 1024,
+          "planMs": 54.7,
+          "applyMs": 98.27,
+          "planAndApplyMs": 152.97,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 9,
+          "startedAt": "2026-09-18T05:46:54.441Z",
+          "plannedAt": "2026-09-18T05:46:54.499Z",
+          "completedAt": "2026-09-18T05:46:54.599Z",
+          "bytes": 1024,
+          "planMs": 58.15,
+          "applyMs": 99.35,
+          "planAndApplyMs": 157.5,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 10,
+          "startedAt": "2026-09-18T05:46:54.599Z",
+          "plannedAt": "2026-09-18T05:46:54.654Z",
+          "completedAt": "2026-09-18T05:46:54.751Z",
+          "bytes": 1024,
+          "planMs": 54.35,
+          "applyMs": 97.15,
+          "planAndApplyMs": 151.5,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 11,
+          "startedAt": "2026-09-18T05:46:54.752Z",
+          "plannedAt": "2026-09-18T05:46:54.806Z",
+          "completedAt": "2026-09-18T05:46:54.907Z",
+          "bytes": 1024,
+          "planMs": 53.77,
+          "applyMs": 100.72,
+          "planAndApplyMs": 154.49,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 12,
+          "startedAt": "2026-09-18T05:46:54.908Z",
+          "plannedAt": "2026-09-18T05:46:54.964Z",
+          "completedAt": "2026-09-18T05:46:55.068Z",
+          "bytes": 1024,
+          "planMs": 56.72,
+          "applyMs": 104.17,
+          "planAndApplyMs": 160.89,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 13,
+          "startedAt": "2026-09-18T05:46:55.069Z",
+          "plannedAt": "2026-09-18T05:46:55.127Z",
+          "completedAt": "2026-09-18T05:46:55.227Z",
+          "bytes": 1024,
+          "planMs": 57.58,
+          "applyMs": 100.08,
+          "planAndApplyMs": 157.66,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 14,
+          "startedAt": "2026-09-18T05:46:55.228Z",
+          "plannedAt": "2026-09-18T05:46:55.285Z",
+          "completedAt": "2026-09-18T05:46:55.387Z",
+          "bytes": 1024,
+          "planMs": 56.8,
+          "applyMs": 102.39,
+          "planAndApplyMs": 159.19,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 15,
+          "startedAt": "2026-09-18T05:46:55.388Z",
+          "plannedAt": "2026-09-18T05:46:55.444Z",
+          "completedAt": "2026-09-18T05:46:55.544Z",
+          "bytes": 1024,
+          "planMs": 55.88,
+          "applyMs": 99.41,
+          "planAndApplyMs": 155.29,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 16,
+          "startedAt": "2026-09-18T05:46:55.544Z",
+          "plannedAt": "2026-09-18T05:46:55.600Z",
+          "completedAt": "2026-09-18T05:46:55.700Z",
+          "bytes": 1024,
+          "planMs": 55.27,
+          "applyMs": 99.8,
+          "planAndApplyMs": 155.07,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 17,
+          "startedAt": "2026-09-18T05:46:55.700Z",
+          "plannedAt": "2026-09-18T05:46:55.769Z",
+          "completedAt": "2026-09-18T05:46:55.881Z",
+          "bytes": 1024,
+          "planMs": 68.93,
+          "applyMs": 111.5,
+          "planAndApplyMs": 180.43,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 18,
+          "startedAt": "2026-09-18T05:46:55.881Z",
+          "plannedAt": "2026-09-18T05:46:55.943Z",
+          "completedAt": "2026-09-18T05:46:56.054Z",
+          "bytes": 1024,
+          "planMs": 62.01,
+          "applyMs": 110.08,
+          "planAndApplyMs": 172.09,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 19,
+          "startedAt": "2026-09-18T05:46:56.054Z",
+          "plannedAt": "2026-09-18T05:46:56.110Z",
+          "completedAt": "2026-09-18T05:46:56.210Z",
+          "bytes": 1024,
+          "planMs": 55.47,
+          "applyMs": 99.8,
+          "planAndApplyMs": 155.27,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 20,
+          "startedAt": "2026-09-18T05:46:56.210Z",
+          "plannedAt": "2026-09-18T05:46:56.268Z",
+          "completedAt": "2026-09-18T05:46:56.368Z",
+          "bytes": 1024,
+          "planMs": 57.42,
+          "applyMs": 100.14,
+          "planAndApplyMs": 157.57,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 21,
+          "startedAt": "2026-09-18T05:46:56.369Z",
+          "plannedAt": "2026-09-18T05:46:56.426Z",
+          "completedAt": "2026-09-18T05:46:56.528Z",
+          "bytes": 1024,
+          "planMs": 57.2,
+          "applyMs": 101.65,
+          "planAndApplyMs": 158.86,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 22,
+          "startedAt": "2026-09-18T05:46:56.528Z",
+          "plannedAt": "2026-09-18T05:46:56.586Z",
+          "completedAt": "2026-09-18T05:46:56.683Z",
+          "bytes": 1024,
+          "planMs": 57.3,
+          "applyMs": 97.81,
+          "planAndApplyMs": 155.11,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 23,
+          "startedAt": "2026-09-18T05:46:56.684Z",
+          "plannedAt": "2026-09-18T05:46:56.740Z",
+          "completedAt": "2026-09-18T05:46:56.840Z",
+          "bytes": 1024,
+          "planMs": 55.34,
+          "applyMs": 100.83,
+          "planAndApplyMs": 156.17,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 24,
+          "startedAt": "2026-09-18T05:46:56.841Z",
+          "plannedAt": "2026-09-18T05:46:56.899Z",
+          "completedAt": "2026-09-18T05:46:57.001Z",
+          "bytes": 1024,
+          "planMs": 57.97,
+          "applyMs": 102.01,
+          "planAndApplyMs": 159.98,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 25,
+          "startedAt": "2026-09-18T05:46:57.002Z",
+          "plannedAt": "2026-09-18T05:46:57.060Z",
+          "completedAt": "2026-09-18T05:46:57.181Z",
+          "bytes": 1024,
+          "planMs": 57.73,
+          "applyMs": 121.55,
+          "planAndApplyMs": 179.28,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 26,
+          "startedAt": "2026-09-18T05:46:57.182Z",
+          "plannedAt": "2026-09-18T05:46:57.242Z",
+          "completedAt": "2026-09-18T05:46:57.341Z",
+          "bytes": 1024,
+          "planMs": 59.49,
+          "applyMs": 99.22,
+          "planAndApplyMs": 158.71,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 27,
+          "startedAt": "2026-09-18T05:46:57.342Z",
+          "plannedAt": "2026-09-18T05:46:57.404Z",
+          "completedAt": "2026-09-18T05:46:57.513Z",
+          "bytes": 1024,
+          "planMs": 62.65,
+          "applyMs": 108.59,
+          "planAndApplyMs": 171.23,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 28,
+          "startedAt": "2026-09-18T05:46:57.514Z",
+          "plannedAt": "2026-09-18T05:46:57.570Z",
+          "completedAt": "2026-09-18T05:46:57.675Z",
+          "bytes": 1024,
+          "planMs": 56.37,
+          "applyMs": 105.04,
+          "planAndApplyMs": 161.41,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 29,
+          "startedAt": "2026-09-18T05:46:57.676Z",
+          "plannedAt": "2026-09-18T05:46:57.731Z",
+          "completedAt": "2026-09-18T05:46:57.830Z",
+          "bytes": 1024,
+          "planMs": 54.45,
+          "applyMs": 99.18,
+          "planAndApplyMs": 153.64,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 30,
+          "startedAt": "2026-09-18T05:46:57.831Z",
+          "plannedAt": "2026-09-18T05:46:57.886Z",
+          "completedAt": "2026-09-18T05:46:57.991Z",
+          "bytes": 1024,
+          "planMs": 55.8,
+          "applyMs": 104.59,
+          "planAndApplyMs": 160.39,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 31,
+          "startedAt": "2026-09-18T05:46:57.992Z",
+          "plannedAt": "2026-09-18T05:46:58.049Z",
+          "completedAt": "2026-09-18T05:46:58.151Z",
+          "bytes": 1024,
+          "planMs": 57.45,
+          "applyMs": 101.83,
+          "planAndApplyMs": 159.28,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 32,
+          "startedAt": "2026-09-18T05:46:58.152Z",
+          "plannedAt": "2026-09-18T05:46:58.210Z",
+          "completedAt": "2026-09-18T05:46:58.313Z",
+          "bytes": 1024,
+          "planMs": 58.83,
+          "applyMs": 103.04,
+          "planAndApplyMs": 161.88,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 33,
+          "startedAt": "2026-09-18T05:46:58.314Z",
+          "plannedAt": "2026-09-18T05:46:58.373Z",
+          "completedAt": "2026-09-18T05:46:58.470Z",
+          "bytes": 1024,
+          "planMs": 58.3,
+          "applyMs": 97.25,
+          "planAndApplyMs": 155.55,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 34,
+          "startedAt": "2026-09-18T05:46:58.470Z",
+          "plannedAt": "2026-09-18T05:46:58.525Z",
+          "completedAt": "2026-09-18T05:46:58.623Z",
+          "bytes": 1024,
+          "planMs": 54.71,
+          "applyMs": 97.48,
+          "planAndApplyMs": 152.19,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 35,
+          "startedAt": "2026-09-18T05:46:58.623Z",
+          "plannedAt": "2026-09-18T05:46:58.680Z",
+          "completedAt": "2026-09-18T05:46:58.783Z",
+          "bytes": 1024,
+          "planMs": 56.82,
+          "applyMs": 102.92,
+          "planAndApplyMs": 159.73,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 36,
+          "startedAt": "2026-09-18T05:46:58.784Z",
+          "plannedAt": "2026-09-18T05:46:58.841Z",
+          "completedAt": "2026-09-18T05:46:58.942Z",
+          "bytes": 1024,
+          "planMs": 57.29,
+          "applyMs": 100.62,
+          "planAndApplyMs": 157.92,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 37,
+          "startedAt": "2026-09-18T05:46:58.943Z",
+          "plannedAt": "2026-09-18T05:46:58.997Z",
+          "completedAt": "2026-09-18T05:46:59.096Z",
+          "bytes": 1024,
+          "planMs": 54.63,
+          "applyMs": 99.11,
+          "planAndApplyMs": 153.74,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 38,
+          "startedAt": "2026-09-18T05:46:59.097Z",
+          "plannedAt": "2026-09-18T05:46:59.154Z",
+          "completedAt": "2026-09-18T05:46:59.255Z",
+          "bytes": 1024,
+          "planMs": 57.19,
+          "applyMs": 100.85,
+          "planAndApplyMs": 158.04,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 39,
+          "startedAt": "2026-09-18T05:46:59.256Z",
+          "plannedAt": "2026-09-18T05:46:59.313Z",
+          "completedAt": "2026-09-18T05:46:59.412Z",
+          "bytes": 1024,
+          "planMs": 56.83,
+          "applyMs": 98.96,
+          "planAndApplyMs": 155.79,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 40,
+          "startedAt": "2026-09-18T05:46:59.413Z",
+          "plannedAt": "2026-09-18T05:46:59.470Z",
+          "completedAt": "2026-09-18T05:46:59.567Z",
+          "bytes": 1024,
+          "planMs": 56.98,
+          "applyMs": 97.9,
+          "planAndApplyMs": 154.87,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 41,
+          "startedAt": "2026-09-18T05:46:59.568Z",
+          "plannedAt": "2026-09-18T05:46:59.623Z",
+          "completedAt": "2026-09-18T05:46:59.725Z",
+          "bytes": 1024,
+          "planMs": 54.93,
+          "applyMs": 102.06,
+          "planAndApplyMs": 156.99,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 42,
+          "startedAt": "2026-09-18T05:46:59.726Z",
+          "plannedAt": "2026-09-18T05:46:59.783Z",
+          "completedAt": "2026-09-18T05:46:59.883Z",
+          "bytes": 1024,
+          "planMs": 56.65,
+          "applyMs": 100.36,
+          "planAndApplyMs": 157.01,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 43,
+          "startedAt": "2026-09-18T05:46:59.884Z",
+          "plannedAt": "2026-09-18T05:46:59.941Z",
+          "completedAt": "2026-09-18T05:47:00.040Z",
+          "bytes": 1024,
+          "planMs": 57.42,
+          "applyMs": 98.63,
+          "planAndApplyMs": 156.05,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 44,
+          "startedAt": "2026-09-18T05:47:00.040Z",
+          "plannedAt": "2026-09-18T05:47:00.096Z",
+          "completedAt": "2026-09-18T05:47:00.193Z",
+          "bytes": 1024,
+          "planMs": 55.36,
+          "applyMs": 96.96,
+          "planAndApplyMs": 152.32,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 45,
+          "startedAt": "2026-09-18T05:47:00.194Z",
+          "plannedAt": "2026-09-18T05:47:00.249Z",
+          "completedAt": "2026-09-18T05:47:00.347Z",
+          "bytes": 1024,
+          "planMs": 55.46,
+          "applyMs": 97.7,
+          "planAndApplyMs": 153.16,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 46,
+          "startedAt": "2026-09-18T05:47:00.348Z",
+          "plannedAt": "2026-09-18T05:47:00.404Z",
+          "completedAt": "2026-09-18T05:47:00.503Z",
+          "bytes": 1024,
+          "planMs": 56.44,
+          "applyMs": 98.62,
+          "planAndApplyMs": 155.06,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 47,
+          "startedAt": "2026-09-18T05:47:00.504Z",
+          "plannedAt": "2026-09-18T05:47:00.558Z",
+          "completedAt": "2026-09-18T05:47:00.654Z",
+          "bytes": 1024,
+          "planMs": 54.38,
+          "applyMs": 95.83,
+          "planAndApplyMs": 150.2,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 48,
+          "startedAt": "2026-09-18T05:47:00.655Z",
+          "plannedAt": "2026-09-18T05:47:00.709Z",
+          "completedAt": "2026-09-18T05:47:00.805Z",
+          "bytes": 1024,
+          "planMs": 54.19,
+          "applyMs": 96.76,
+          "planAndApplyMs": 150.95,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 49,
+          "startedAt": "2026-09-18T05:47:00.806Z",
+          "plannedAt": "2026-09-18T05:47:00.861Z",
+          "completedAt": "2026-09-18T05:47:00.965Z",
+          "bytes": 1024,
+          "planMs": 55.14,
+          "applyMs": 103.81,
+          "planAndApplyMs": 158.96,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 50,
+          "startedAt": "2026-09-18T05:47:00.966Z",
+          "plannedAt": "2026-09-18T05:47:01.021Z",
+          "completedAt": "2026-09-18T05:47:01.120Z",
+          "bytes": 1024,
+          "planMs": 54.62,
+          "applyMs": 99,
+          "planAndApplyMs": 153.62,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 51,
+          "startedAt": "2026-09-18T05:47:01.121Z",
+          "plannedAt": "2026-09-18T05:47:01.176Z",
+          "completedAt": "2026-09-18T05:47:01.274Z",
+          "bytes": 1024,
+          "planMs": 55.08,
+          "applyMs": 98.41,
+          "planAndApplyMs": 153.5,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 52,
+          "startedAt": "2026-09-18T05:47:01.275Z",
+          "plannedAt": "2026-09-18T05:47:01.332Z",
+          "completedAt": "2026-09-18T05:47:01.436Z",
+          "bytes": 1024,
+          "planMs": 57.42,
+          "applyMs": 104.09,
+          "planAndApplyMs": 161.52,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 53,
+          "startedAt": "2026-09-18T05:47:01.437Z",
+          "plannedAt": "2026-09-18T05:47:01.495Z",
+          "completedAt": "2026-09-18T05:47:01.597Z",
+          "bytes": 1024,
+          "planMs": 57.9,
+          "applyMs": 101.87,
+          "planAndApplyMs": 159.77,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 54,
+          "startedAt": "2026-09-18T05:47:01.598Z",
+          "plannedAt": "2026-09-18T05:47:01.656Z",
+          "completedAt": "2026-09-18T05:47:01.758Z",
+          "bytes": 1024,
+          "planMs": 58.7,
+          "applyMs": 101.26,
+          "planAndApplyMs": 159.96,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 55,
+          "startedAt": "2026-09-18T05:47:01.758Z",
+          "plannedAt": "2026-09-18T05:47:01.818Z",
+          "completedAt": "2026-09-18T05:47:01.915Z",
+          "bytes": 1024,
+          "planMs": 59.51,
+          "applyMs": 97.51,
+          "planAndApplyMs": 157.02,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 56,
+          "startedAt": "2026-09-18T05:47:01.916Z",
+          "plannedAt": "2026-09-18T05:47:01.971Z",
+          "completedAt": "2026-09-18T05:47:02.070Z",
+          "bytes": 1024,
+          "planMs": 54.66,
+          "applyMs": 98.55,
+          "planAndApplyMs": 153.21,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 57,
+          "startedAt": "2026-09-18T05:47:02.070Z",
+          "plannedAt": "2026-09-18T05:47:02.129Z",
+          "completedAt": "2026-09-18T05:47:02.230Z",
+          "bytes": 1024,
+          "planMs": 58.95,
+          "applyMs": 101.21,
+          "planAndApplyMs": 160.17,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 58,
+          "startedAt": "2026-09-18T05:47:02.231Z",
+          "plannedAt": "2026-09-18T05:47:02.287Z",
+          "completedAt": "2026-09-18T05:47:02.387Z",
+          "bytes": 1024,
+          "planMs": 55.69,
+          "applyMs": 100.49,
+          "planAndApplyMs": 156.18,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 59,
+          "startedAt": "2026-09-18T05:47:02.388Z",
+          "plannedAt": "2026-09-18T05:47:02.444Z",
+          "completedAt": "2026-09-18T05:47:02.542Z",
+          "bytes": 1024,
+          "planMs": 55.64,
+          "applyMs": 98.59,
+          "planAndApplyMs": 154.22,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 60,
+          "startedAt": "2026-09-18T05:47:02.543Z",
+          "plannedAt": "2026-09-18T05:47:02.599Z",
+          "completedAt": "2026-09-18T05:47:02.696Z",
+          "bytes": 1024,
+          "planMs": 55.49,
+          "applyMs": 97.93,
+          "planAndApplyMs": 153.42,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 61,
+          "startedAt": "2026-09-18T05:47:02.697Z",
+          "plannedAt": "2026-09-18T05:47:02.753Z",
+          "completedAt": "2026-09-18T05:47:02.853Z",
+          "bytes": 1024,
+          "planMs": 55.4,
+          "applyMs": 99.75,
+          "planAndApplyMs": 155.15,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 62,
+          "startedAt": "2026-09-18T05:47:02.853Z",
+          "plannedAt": "2026-09-18T05:47:02.908Z",
+          "completedAt": "2026-09-18T05:47:03.009Z",
+          "bytes": 1024,
+          "planMs": 54.46,
+          "applyMs": 101.25,
+          "planAndApplyMs": 155.71,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 63,
+          "startedAt": "2026-09-18T05:47:03.010Z",
+          "plannedAt": "2026-09-18T05:47:03.068Z",
+          "completedAt": "2026-09-18T05:47:03.166Z",
+          "bytes": 1024,
+          "planMs": 57.94,
+          "applyMs": 98.11,
+          "planAndApplyMs": 156.05,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 64,
+          "startedAt": "2026-09-18T05:47:03.166Z",
+          "plannedAt": "2026-09-18T05:47:03.221Z",
+          "completedAt": "2026-09-18T05:47:03.323Z",
+          "bytes": 1024,
+          "planMs": 54.83,
+          "applyMs": 102.01,
+          "planAndApplyMs": 156.85,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 65,
+          "startedAt": "2026-09-18T05:47:03.324Z",
+          "plannedAt": "2026-09-18T05:47:03.379Z",
+          "completedAt": "2026-09-18T05:47:03.479Z",
+          "bytes": 1024,
+          "planMs": 54.93,
+          "applyMs": 100.53,
+          "planAndApplyMs": 155.46,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 66,
+          "startedAt": "2026-09-18T05:47:03.480Z",
+          "plannedAt": "2026-09-18T05:47:03.535Z",
+          "completedAt": "2026-09-18T05:47:03.632Z",
+          "bytes": 1024,
+          "planMs": 55.08,
+          "applyMs": 96.34,
+          "planAndApplyMs": 151.41,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 67,
+          "startedAt": "2026-09-18T05:47:03.633Z",
+          "plannedAt": "2026-09-18T05:47:03.690Z",
+          "completedAt": "2026-09-18T05:47:03.788Z",
+          "bytes": 1024,
+          "planMs": 57.32,
+          "applyMs": 98.31,
+          "planAndApplyMs": 155.63,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 68,
+          "startedAt": "2026-09-18T05:47:03.789Z",
+          "plannedAt": "2026-09-18T05:47:03.845Z",
+          "completedAt": "2026-09-18T05:47:03.951Z",
+          "bytes": 1024,
+          "planMs": 56.12,
+          "applyMs": 106.23,
+          "planAndApplyMs": 162.35,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 69,
+          "startedAt": "2026-09-18T05:47:03.952Z",
+          "plannedAt": "2026-09-18T05:47:04.005Z",
+          "completedAt": "2026-09-18T05:47:04.104Z",
+          "bytes": 1024,
+          "planMs": 53.21,
+          "applyMs": 98.9,
+          "planAndApplyMs": 152.11,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 70,
+          "startedAt": "2026-09-18T05:47:04.105Z",
+          "plannedAt": "2026-09-18T05:47:04.162Z",
+          "completedAt": "2026-09-18T05:47:04.263Z",
+          "bytes": 1024,
+          "planMs": 56.97,
+          "applyMs": 101.2,
+          "planAndApplyMs": 158.17,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 71,
+          "startedAt": "2026-09-18T05:47:04.264Z",
+          "plannedAt": "2026-09-18T05:47:04.320Z",
+          "completedAt": "2026-09-18T05:47:04.422Z",
+          "bytes": 1024,
+          "planMs": 56.21,
+          "applyMs": 102.52,
+          "planAndApplyMs": 158.73,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 72,
+          "startedAt": "2026-09-18T05:47:04.423Z",
+          "plannedAt": "2026-09-18T05:47:04.478Z",
+          "completedAt": "2026-09-18T05:47:04.575Z",
+          "bytes": 1024,
+          "planMs": 55.24,
+          "applyMs": 96.97,
+          "planAndApplyMs": 152.21,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 73,
+          "startedAt": "2026-09-18T05:47:04.576Z",
+          "plannedAt": "2026-09-18T05:47:04.630Z",
+          "completedAt": "2026-09-18T05:47:04.725Z",
+          "bytes": 1024,
+          "planMs": 54.29,
+          "applyMs": 94.74,
+          "planAndApplyMs": 149.04,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 74,
+          "startedAt": "2026-09-18T05:47:04.726Z",
+          "plannedAt": "2026-09-18T05:47:04.779Z",
+          "completedAt": "2026-09-18T05:47:04.877Z",
+          "bytes": 1024,
+          "planMs": 53.71,
+          "applyMs": 98.18,
+          "planAndApplyMs": 151.89,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 75,
+          "startedAt": "2026-09-18T05:47:04.878Z",
+          "plannedAt": "2026-09-18T05:47:04.932Z",
+          "completedAt": "2026-09-18T05:47:05.025Z",
+          "bytes": 1024,
+          "planMs": 53.84,
+          "applyMs": 93.03,
+          "planAndApplyMs": 146.87,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 76,
+          "startedAt": "2026-09-18T05:47:05.026Z",
+          "plannedAt": "2026-09-18T05:47:05.081Z",
+          "completedAt": "2026-09-18T05:47:05.178Z",
+          "bytes": 1024,
+          "planMs": 54.95,
+          "applyMs": 97.05,
+          "planAndApplyMs": 152,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 77,
+          "startedAt": "2026-09-18T05:47:05.178Z",
+          "plannedAt": "2026-09-18T05:47:05.237Z",
+          "completedAt": "2026-09-18T05:47:05.335Z",
+          "bytes": 1024,
+          "planMs": 58.31,
+          "applyMs": 98.55,
+          "planAndApplyMs": 156.85,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 78,
+          "startedAt": "2026-09-18T05:47:05.336Z",
+          "plannedAt": "2026-09-18T05:47:05.391Z",
+          "completedAt": "2026-09-18T05:47:05.491Z",
+          "bytes": 1024,
+          "planMs": 55.36,
+          "applyMs": 99.7,
+          "planAndApplyMs": 155.06,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 79,
+          "startedAt": "2026-09-18T05:47:05.492Z",
+          "plannedAt": "2026-09-18T05:47:05.546Z",
+          "completedAt": "2026-09-18T05:47:05.644Z",
+          "bytes": 1024,
+          "planMs": 54.54,
+          "applyMs": 97.44,
+          "planAndApplyMs": 151.98,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 80,
+          "startedAt": "2026-09-18T05:47:05.645Z",
+          "plannedAt": "2026-09-18T05:47:05.701Z",
+          "completedAt": "2026-09-18T05:47:05.800Z",
+          "bytes": 1024,
+          "planMs": 56.71,
+          "applyMs": 98.7,
+          "planAndApplyMs": 155.41,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 81,
+          "startedAt": "2026-09-18T05:47:05.801Z",
+          "plannedAt": "2026-09-18T05:47:05.856Z",
+          "completedAt": "2026-09-18T05:47:05.952Z",
+          "bytes": 1024,
+          "planMs": 54.9,
+          "applyMs": 95.73,
+          "planAndApplyMs": 150.63,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 82,
+          "startedAt": "2026-09-18T05:47:05.952Z",
+          "plannedAt": "2026-09-18T05:47:06.007Z",
+          "completedAt": "2026-09-18T05:47:06.109Z",
+          "bytes": 1024,
+          "planMs": 54.43,
+          "applyMs": 102.14,
+          "planAndApplyMs": 156.57,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 83,
+          "startedAt": "2026-09-18T05:47:06.109Z",
+          "plannedAt": "2026-09-18T05:47:06.179Z",
+          "completedAt": "2026-09-18T05:47:06.307Z",
+          "bytes": 1024,
+          "planMs": 70.02,
+          "applyMs": 127.39,
+          "planAndApplyMs": 197.41,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 84,
+          "startedAt": "2026-09-18T05:47:06.307Z",
+          "plannedAt": "2026-09-18T05:47:06.372Z",
+          "completedAt": "2026-09-18T05:47:06.490Z",
+          "bytes": 1024,
+          "planMs": 64.45,
+          "applyMs": 117.89,
+          "planAndApplyMs": 182.35,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 85,
+          "startedAt": "2026-09-18T05:47:06.490Z",
+          "plannedAt": "2026-09-18T05:47:06.547Z",
+          "completedAt": "2026-09-18T05:47:06.647Z",
+          "bytes": 1024,
+          "planMs": 56.16,
+          "applyMs": 99.9,
+          "planAndApplyMs": 156.06,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 86,
+          "startedAt": "2026-09-18T05:47:06.648Z",
+          "plannedAt": "2026-09-18T05:47:06.703Z",
+          "completedAt": "2026-09-18T05:47:06.803Z",
+          "bytes": 1024,
+          "planMs": 55.48,
+          "applyMs": 100.31,
+          "planAndApplyMs": 155.8,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 87,
+          "startedAt": "2026-09-18T05:47:06.804Z",
+          "plannedAt": "2026-09-18T05:47:06.861Z",
+          "completedAt": "2026-09-18T05:47:06.959Z",
+          "bytes": 1024,
+          "planMs": 56.97,
+          "applyMs": 97.75,
+          "planAndApplyMs": 154.72,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 88,
+          "startedAt": "2026-09-18T05:47:06.959Z",
+          "plannedAt": "2026-09-18T05:47:07.015Z",
+          "completedAt": "2026-09-18T05:47:07.116Z",
+          "bytes": 1024,
+          "planMs": 55.23,
+          "applyMs": 101.08,
+          "planAndApplyMs": 156.31,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 89,
+          "startedAt": "2026-09-18T05:47:07.116Z",
+          "plannedAt": "2026-09-18T05:47:07.184Z",
+          "completedAt": "2026-09-18T05:47:07.282Z",
+          "bytes": 1024,
+          "planMs": 67.4,
+          "applyMs": 98.78,
+          "planAndApplyMs": 166.18,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 90,
+          "startedAt": "2026-09-18T05:47:07.283Z",
+          "plannedAt": "2026-09-18T05:47:07.338Z",
+          "completedAt": "2026-09-18T05:47:07.437Z",
+          "bytes": 1024,
+          "planMs": 54.47,
+          "applyMs": 99.52,
+          "planAndApplyMs": 153.99,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 91,
+          "startedAt": "2026-09-18T05:47:07.438Z",
+          "plannedAt": "2026-09-18T05:47:07.492Z",
+          "completedAt": "2026-09-18T05:47:07.593Z",
+          "bytes": 1024,
+          "planMs": 54.34,
+          "applyMs": 100.66,
+          "planAndApplyMs": 155,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 92,
+          "startedAt": "2026-09-18T05:47:07.594Z",
+          "plannedAt": "2026-09-18T05:47:07.647Z",
+          "completedAt": "2026-09-18T05:47:07.746Z",
+          "bytes": 1024,
+          "planMs": 53.81,
+          "applyMs": 98.29,
+          "planAndApplyMs": 152.1,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 93,
+          "startedAt": "2026-09-18T05:47:07.746Z",
+          "plannedAt": "2026-09-18T05:47:07.800Z",
+          "completedAt": "2026-09-18T05:47:07.899Z",
+          "bytes": 1024,
+          "planMs": 53.27,
+          "applyMs": 99.78,
+          "planAndApplyMs": 153.04,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 94,
+          "startedAt": "2026-09-18T05:47:07.900Z",
+          "plannedAt": "2026-09-18T05:47:07.954Z",
+          "completedAt": "2026-09-18T05:47:08.053Z",
+          "bytes": 1024,
+          "planMs": 54.4,
+          "applyMs": 98.94,
+          "planAndApplyMs": 153.34,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 95,
+          "startedAt": "2026-09-18T05:47:08.054Z",
+          "plannedAt": "2026-09-18T05:47:08.108Z",
+          "completedAt": "2026-09-18T05:47:08.204Z",
+          "bytes": 1024,
+          "planMs": 54.5,
+          "applyMs": 95.33,
+          "planAndApplyMs": 149.84,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 96,
+          "startedAt": "2026-09-18T05:47:08.205Z",
+          "plannedAt": "2026-09-18T05:47:08.259Z",
+          "completedAt": "2026-09-18T05:47:08.359Z",
+          "bytes": 1024,
+          "planMs": 54.41,
+          "applyMs": 100.39,
+          "planAndApplyMs": 154.81,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 97,
+          "startedAt": "2026-09-18T05:47:08.360Z",
+          "plannedAt": "2026-09-18T05:47:08.415Z",
+          "completedAt": "2026-09-18T05:47:08.511Z",
+          "bytes": 1024,
+          "planMs": 54.83,
+          "applyMs": 96.54,
+          "planAndApplyMs": 151.37,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 98,
+          "startedAt": "2026-09-18T05:47:08.512Z",
+          "plannedAt": "2026-09-18T05:47:08.566Z",
+          "completedAt": "2026-09-18T05:47:08.663Z",
+          "bytes": 1024,
+          "planMs": 53.85,
+          "applyMs": 96.93,
+          "planAndApplyMs": 150.78,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 99,
+          "startedAt": "2026-09-18T05:47:08.663Z",
+          "plannedAt": "2026-09-18T05:47:08.717Z",
+          "completedAt": "2026-09-18T05:47:08.815Z",
+          "bytes": 1024,
+          "planMs": 54.1,
+          "applyMs": 97.8,
+          "planAndApplyMs": 151.9,
+          "withinBudget": true,
+          "sampleSource": "new"
+        },
+        {
+          "index": 100,
+          "startedAt": "2026-09-18T05:47:08.816Z",
+          "plannedAt": "2026-09-18T05:47:08.870Z",
+          "completedAt": "2026-09-18T05:47:08.969Z",
+          "bytes": 1024,
+          "planMs": 54.27,
+          "applyMs": 98.98,
+          "planAndApplyMs": 153.25,
+          "withinBudget": true,
+          "sampleSource": "new"
+        }
+      ],
+      "planMs": {
+        "samples": 120,
+        "min": 46.09,
+        "mean": 55.85,
+        "p50": 55.36,
+        "p95": 64.45,
+        "max": 76.1
+      },
+      "applyMs": {
+        "samples": 120,
+        "min": 87.81,
+        "mean": 99.44,
+        "p50": 99,
+        "p95": 108.59,
+        "max": 127.39
+      },
+      "planAndApplyMs": {
+        "samples": 120,
+        "min": 136.03,
+        "mean": 155.29,
+        "p50": 155.06,
+        "p95": 172.09,
+        "max": 197.41
+      },
+      "allSamplesWithinBudget": true,
+      "p95WithinBudget": true,
+      "withinBudget": true,
+      "overBudgetSamples": 0
+    },
+    "configSaves": {
+      "status": "passed",
+      "resource": "config",
+      "samples": [
+        {
+          "index": 1,
+          "bytes": 25,
+          "planMs": 647.67,
+          "applyMs": 91.55,
+          "planAndApplyMs": 739.22,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 2,
+          "bytes": 26,
+          "planMs": 505.58,
+          "applyMs": 90.48,
+          "planAndApplyMs": 596.07,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 3,
+          "bytes": 25,
+          "planMs": 486.21,
+          "applyMs": 93.71,
+          "planAndApplyMs": 579.92,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 4,
+          "bytes": 26,
+          "planMs": 508.24,
+          "applyMs": 92.5,
+          "planAndApplyMs": 600.74,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 5,
+          "bytes": 25,
+          "planMs": 508.56,
+          "applyMs": 838.56,
+          "planAndApplyMs": 1347.12,
+          "withinBudget": false,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 6,
+          "bytes": 26,
+          "planMs": 847.53,
+          "applyMs": 99.42,
+          "planAndApplyMs": 946.95,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 7,
+          "bytes": 25,
+          "planMs": 548.85,
+          "applyMs": 100.18,
+          "planAndApplyMs": 649.03,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 8,
+          "bytes": 26,
+          "planMs": 513.12,
+          "applyMs": 96.49,
+          "planAndApplyMs": 609.61,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 9,
+          "bytes": 25,
+          "planMs": 526.89,
+          "applyMs": 96.31,
+          "planAndApplyMs": 623.21,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 10,
+          "bytes": 26,
+          "planMs": 524.13,
+          "applyMs": 95.24,
+          "planAndApplyMs": 619.36,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 11,
+          "bytes": 25,
+          "planMs": 559.65,
+          "applyMs": 94.87,
+          "planAndApplyMs": 654.52,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 12,
+          "bytes": 26,
+          "planMs": 512.63,
+          "applyMs": 100.98,
+          "planAndApplyMs": 613.6,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 13,
+          "bytes": 25,
+          "planMs": 559.88,
+          "applyMs": 102.99,
+          "planAndApplyMs": 662.88,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 14,
+          "bytes": 26,
+          "planMs": 1499.74,
+          "applyMs": 112.61,
+          "planAndApplyMs": 1612.36,
+          "withinBudget": false,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 15,
+          "bytes": 25,
+          "planMs": 735.96,
+          "applyMs": 104.28,
+          "planAndApplyMs": 840.24,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 16,
+          "bytes": 26,
+          "planMs": 579.18,
+          "applyMs": 106.6,
+          "planAndApplyMs": 685.78,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 17,
+          "bytes": 25,
+          "planMs": 568.18,
+          "applyMs": 100.38,
+          "planAndApplyMs": 668.56,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 18,
+          "bytes": 26,
+          "planMs": 555.51,
+          "applyMs": 106.38,
+          "planAndApplyMs": 661.89,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 19,
+          "bytes": 25,
+          "planMs": 553.17,
+          "applyMs": 95.15,
+          "planAndApplyMs": 648.32,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 20,
+          "bytes": 26,
+          "planMs": 515.81,
+          "applyMs": 99.42,
+          "planAndApplyMs": 615.22,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "original-20"
+        },
+        {
+          "index": 1,
+          "startedAt": "2026-09-18T05:47:08.971Z",
+          "plannedAt": "2026-09-18T05:47:09.750Z",
+          "completedAt": "2026-09-18T05:47:09.852Z",
+          "bytes": 25,
+          "planMs": 778.75,
+          "applyMs": 102.25,
+          "planAndApplyMs": 881,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 2,
+          "startedAt": "2026-09-18T05:47:09.853Z",
+          "plannedAt": "2026-09-18T05:47:10.402Z",
+          "completedAt": "2026-09-18T05:47:10.508Z",
+          "bytes": 26,
+          "planMs": 548.78,
+          "applyMs": 105.9,
+          "planAndApplyMs": 654.68,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 3,
+          "startedAt": "2026-09-18T05:47:10.508Z",
+          "plannedAt": "2026-09-18T05:47:11.079Z",
+          "completedAt": "2026-09-18T05:47:11.181Z",
+          "bytes": 25,
+          "planMs": 570.43,
+          "applyMs": 102.4,
+          "planAndApplyMs": 672.84,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 4,
+          "startedAt": "2026-09-18T05:47:11.182Z",
+          "plannedAt": "2026-09-18T05:47:11.799Z",
+          "completedAt": "2026-09-18T05:47:11.901Z",
+          "bytes": 26,
+          "planMs": 616.94,
+          "applyMs": 101.74,
+          "planAndApplyMs": 718.69,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 5,
+          "startedAt": "2026-09-18T05:47:11.902Z",
+          "plannedAt": "2026-09-18T05:47:12.492Z",
+          "completedAt": "2026-09-18T05:47:12.596Z",
+          "bytes": 25,
+          "planMs": 589.86,
+          "applyMs": 104.33,
+          "planAndApplyMs": 694.19,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 6,
+          "startedAt": "2026-09-18T05:47:12.598Z",
+          "plannedAt": "2026-09-18T05:47:13.269Z",
+          "completedAt": "2026-09-18T05:47:13.385Z",
+          "bytes": 26,
+          "planMs": 671.28,
+          "applyMs": 115.97,
+          "planAndApplyMs": 787.26,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 7,
+          "startedAt": "2026-09-18T05:47:13.386Z",
+          "plannedAt": "2026-09-18T05:47:13.995Z",
+          "completedAt": "2026-09-18T05:47:14.095Z",
+          "bytes": 25,
+          "planMs": 609.59,
+          "applyMs": 99.51,
+          "planAndApplyMs": 709.1,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 8,
+          "startedAt": "2026-09-18T05:47:14.095Z",
+          "plannedAt": "2026-09-18T05:47:14.684Z",
+          "completedAt": "2026-09-18T05:47:14.788Z",
+          "bytes": 26,
+          "planMs": 588.65,
+          "applyMs": 103.92,
+          "planAndApplyMs": 692.57,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 9,
+          "startedAt": "2026-09-18T05:47:14.789Z",
+          "plannedAt": "2026-09-18T05:47:15.355Z",
+          "completedAt": "2026-09-18T05:47:15.460Z",
+          "bytes": 25,
+          "planMs": 566.38,
+          "applyMs": 104.56,
+          "planAndApplyMs": 670.94,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 10,
+          "startedAt": "2026-09-18T05:47:15.460Z",
+          "plannedAt": "2026-09-18T05:47:16.014Z",
+          "completedAt": "2026-09-18T05:47:16.114Z",
+          "bytes": 26,
+          "planMs": 553.25,
+          "applyMs": 100.6,
+          "planAndApplyMs": 653.85,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 11,
+          "startedAt": "2026-09-18T05:47:16.115Z",
+          "plannedAt": "2026-09-18T05:47:16.676Z",
+          "completedAt": "2026-09-18T05:47:16.780Z",
+          "bytes": 25,
+          "planMs": 561.37,
+          "applyMs": 103.08,
+          "planAndApplyMs": 664.45,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 12,
+          "startedAt": "2026-09-18T05:47:16.782Z",
+          "plannedAt": "2026-09-18T05:47:17.674Z",
+          "completedAt": "2026-09-18T05:47:17.781Z",
+          "bytes": 26,
+          "planMs": 892.42,
+          "applyMs": 106.77,
+          "planAndApplyMs": 999.19,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 13,
+          "startedAt": "2026-09-18T05:47:17.782Z",
+          "plannedAt": "2026-09-18T05:47:18.355Z",
+          "completedAt": "2026-09-18T05:47:18.464Z",
+          "bytes": 25,
+          "planMs": 573.38,
+          "applyMs": 108.52,
+          "planAndApplyMs": 681.9,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 14,
+          "startedAt": "2026-09-18T05:47:18.465Z",
+          "plannedAt": "2026-09-18T05:47:19.022Z",
+          "completedAt": "2026-09-18T05:47:19.125Z",
+          "bytes": 26,
+          "planMs": 557.92,
+          "applyMs": 102.08,
+          "planAndApplyMs": 660,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 15,
+          "startedAt": "2026-09-18T05:47:19.125Z",
+          "plannedAt": "2026-09-18T05:47:19.653Z",
+          "completedAt": "2026-09-18T05:47:19.755Z",
+          "bytes": 25,
+          "planMs": 527.57,
+          "applyMs": 102.24,
+          "planAndApplyMs": 629.81,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 16,
+          "startedAt": "2026-09-18T05:47:19.756Z",
+          "plannedAt": "2026-09-18T05:47:20.285Z",
+          "completedAt": "2026-09-18T05:47:20.383Z",
+          "bytes": 26,
+          "planMs": 528.32,
+          "applyMs": 98.27,
+          "planAndApplyMs": 626.59,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 17,
+          "startedAt": "2026-09-18T05:47:20.384Z",
+          "plannedAt": "2026-09-18T05:47:20.918Z",
+          "completedAt": "2026-09-18T05:47:21.020Z",
+          "bytes": 25,
+          "planMs": 534.45,
+          "applyMs": 101.53,
+          "planAndApplyMs": 635.98,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 18,
+          "startedAt": "2026-09-18T05:47:21.020Z",
+          "plannedAt": "2026-09-18T05:47:21.584Z",
+          "completedAt": "2026-09-18T05:47:21.689Z",
+          "bytes": 26,
+          "planMs": 563.11,
+          "applyMs": 105.2,
+          "planAndApplyMs": 668.32,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 19,
+          "startedAt": "2026-09-18T05:47:21.689Z",
+          "plannedAt": "2026-09-18T05:47:22.222Z",
+          "completedAt": "2026-09-18T05:47:22.325Z",
+          "bytes": 25,
+          "planMs": 532.31,
+          "applyMs": 102.93,
+          "planAndApplyMs": 635.24,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 20,
+          "startedAt": "2026-09-18T05:47:22.325Z",
+          "plannedAt": "2026-09-18T05:47:22.876Z",
+          "completedAt": "2026-09-18T05:47:22.980Z",
+          "bytes": 26,
+          "planMs": 550.58,
+          "applyMs": 104.18,
+          "planAndApplyMs": 654.76,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 21,
+          "startedAt": "2026-09-18T05:47:22.981Z",
+          "plannedAt": "2026-09-18T05:47:23.539Z",
+          "completedAt": "2026-09-18T05:47:23.641Z",
+          "bytes": 25,
+          "planMs": 558.31,
+          "applyMs": 101.78,
+          "planAndApplyMs": 660.09,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 22,
+          "startedAt": "2026-09-18T05:47:23.642Z",
+          "plannedAt": "2026-09-18T05:47:24.198Z",
+          "completedAt": "2026-09-18T05:47:24.307Z",
+          "bytes": 26,
+          "planMs": 556.06,
+          "applyMs": 108.55,
+          "planAndApplyMs": 664.61,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 23,
+          "startedAt": "2026-09-18T05:47:24.307Z",
+          "plannedAt": "2026-09-18T05:47:24.875Z",
+          "completedAt": "2026-09-18T05:47:24.974Z",
+          "bytes": 25,
+          "planMs": 567.1,
+          "applyMs": 99.88,
+          "planAndApplyMs": 666.97,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 24,
+          "startedAt": "2026-09-18T05:47:24.975Z",
+          "plannedAt": "2026-09-18T05:47:25.565Z",
+          "completedAt": "2026-09-18T05:47:25.665Z",
+          "bytes": 26,
+          "planMs": 589.67,
+          "applyMs": 100.56,
+          "planAndApplyMs": 690.23,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 25,
+          "startedAt": "2026-09-18T05:47:25.666Z",
+          "plannedAt": "2026-09-18T05:47:26.206Z",
+          "completedAt": "2026-09-18T05:47:26.313Z",
+          "bytes": 25,
+          "planMs": 540.5,
+          "applyMs": 106.56,
+          "planAndApplyMs": 647.06,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 26,
+          "startedAt": "2026-09-18T05:47:26.314Z",
+          "plannedAt": "2026-09-18T05:47:26.854Z",
+          "completedAt": "2026-09-18T05:47:26.959Z",
+          "bytes": 26,
+          "planMs": 540.51,
+          "applyMs": 104.49,
+          "planAndApplyMs": 645,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 27,
+          "startedAt": "2026-09-18T05:47:26.960Z",
+          "plannedAt": "2026-09-18T05:47:27.522Z",
+          "completedAt": "2026-09-18T05:47:27.623Z",
+          "bytes": 25,
+          "planMs": 562.65,
+          "applyMs": 100.99,
+          "planAndApplyMs": 663.64,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 28,
+          "startedAt": "2026-09-18T05:47:27.624Z",
+          "plannedAt": "2026-09-18T05:47:28.181Z",
+          "completedAt": "2026-09-18T05:47:28.282Z",
+          "bytes": 26,
+          "planMs": 557.36,
+          "applyMs": 100.71,
+          "planAndApplyMs": 658.07,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 29,
+          "startedAt": "2026-09-18T05:47:28.283Z",
+          "plannedAt": "2026-09-18T05:47:28.845Z",
+          "completedAt": "2026-09-18T05:47:28.953Z",
+          "bytes": 25,
+          "planMs": 562.45,
+          "applyMs": 108.19,
+          "planAndApplyMs": 670.64,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 30,
+          "startedAt": "2026-09-18T05:47:28.954Z",
+          "plannedAt": "2026-09-18T05:47:29.517Z",
+          "completedAt": "2026-09-18T05:47:29.621Z",
+          "bytes": 26,
+          "planMs": 562.6,
+          "applyMs": 104.49,
+          "planAndApplyMs": 667.1,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 31,
+          "startedAt": "2026-09-18T05:47:29.622Z",
+          "plannedAt": "2026-09-18T05:47:30.447Z",
+          "completedAt": "2026-09-18T05:47:30.553Z",
+          "bytes": 25,
+          "planMs": 824.51,
+          "applyMs": 106.11,
+          "planAndApplyMs": 930.62,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 32,
+          "startedAt": "2026-09-18T05:47:30.554Z",
+          "plannedAt": "2026-09-18T05:47:31.099Z",
+          "completedAt": "2026-09-18T05:47:31.200Z",
+          "bytes": 26,
+          "planMs": 545.28,
+          "applyMs": 101.57,
+          "planAndApplyMs": 646.86,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 33,
+          "startedAt": "2026-09-18T05:47:31.201Z",
+          "plannedAt": "2026-09-18T05:47:32.029Z",
+          "completedAt": "2026-09-18T05:47:32.144Z",
+          "bytes": 25,
+          "planMs": 827.79,
+          "applyMs": 114.8,
+          "planAndApplyMs": 942.59,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 34,
+          "startedAt": "2026-09-18T05:47:32.146Z",
+          "plannedAt": "2026-09-18T05:47:32.715Z",
+          "completedAt": "2026-09-18T05:47:32.817Z",
+          "bytes": 26,
+          "planMs": 569.38,
+          "applyMs": 101.63,
+          "planAndApplyMs": 671.02,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 35,
+          "startedAt": "2026-09-18T05:47:32.817Z",
+          "plannedAt": "2026-09-18T05:47:33.916Z",
+          "completedAt": "2026-09-18T05:47:34.027Z",
+          "bytes": 25,
+          "planMs": 1098.62,
+          "applyMs": 110.5,
+          "planAndApplyMs": 1209.12,
+          "withinBudget": false,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 36,
+          "startedAt": "2026-09-18T05:47:34.028Z",
+          "plannedAt": "2026-09-18T05:47:34.564Z",
+          "completedAt": "2026-09-18T05:47:34.665Z",
+          "bytes": 26,
+          "planMs": 535.84,
+          "applyMs": 101.27,
+          "planAndApplyMs": 637.11,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 37,
+          "startedAt": "2026-09-18T05:47:34.666Z",
+          "plannedAt": "2026-09-18T05:47:35.202Z",
+          "completedAt": "2026-09-18T05:47:35.308Z",
+          "bytes": 25,
+          "planMs": 536.91,
+          "applyMs": 106.01,
+          "planAndApplyMs": 642.93,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 38,
+          "startedAt": "2026-09-18T05:47:35.309Z",
+          "plannedAt": "2026-09-18T05:47:35.858Z",
+          "completedAt": "2026-09-18T05:47:35.960Z",
+          "bytes": 26,
+          "planMs": 548.92,
+          "applyMs": 102.11,
+          "planAndApplyMs": 651.03,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 39,
+          "startedAt": "2026-09-18T05:47:35.961Z",
+          "plannedAt": "2026-09-18T05:47:36.492Z",
+          "completedAt": "2026-09-18T05:47:36.598Z",
+          "bytes": 25,
+          "planMs": 531.39,
+          "applyMs": 105.45,
+          "planAndApplyMs": 636.84,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 40,
+          "startedAt": "2026-09-18T05:47:36.598Z",
+          "plannedAt": "2026-09-18T05:47:37.672Z",
+          "completedAt": "2026-09-18T05:47:37.782Z",
+          "bytes": 26,
+          "planMs": 1073.27,
+          "applyMs": 110.74,
+          "planAndApplyMs": 1184.01,
+          "withinBudget": false,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 41,
+          "startedAt": "2026-09-18T05:47:37.783Z",
+          "plannedAt": "2026-09-18T05:47:38.335Z",
+          "completedAt": "2026-09-18T05:47:38.439Z",
+          "bytes": 25,
+          "planMs": 551.82,
+          "applyMs": 103.82,
+          "planAndApplyMs": 655.65,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 42,
+          "startedAt": "2026-09-18T05:47:38.440Z",
+          "plannedAt": "2026-09-18T05:47:39.011Z",
+          "completedAt": "2026-09-18T05:47:39.113Z",
+          "bytes": 26,
+          "planMs": 571.48,
+          "applyMs": 101.95,
+          "planAndApplyMs": 673.43,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 43,
+          "startedAt": "2026-09-18T05:47:39.114Z",
+          "plannedAt": "2026-09-18T05:47:39.655Z",
+          "completedAt": "2026-09-18T05:47:39.759Z",
+          "bytes": 25,
+          "planMs": 541.53,
+          "applyMs": 103.19,
+          "planAndApplyMs": 644.72,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 44,
+          "startedAt": "2026-09-18T05:47:39.759Z",
+          "plannedAt": "2026-09-18T05:47:40.270Z",
+          "completedAt": "2026-09-18T05:47:40.371Z",
+          "bytes": 26,
+          "planMs": 510.92,
+          "applyMs": 101.17,
+          "planAndApplyMs": 612.09,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 45,
+          "startedAt": "2026-09-18T05:47:40.372Z",
+          "plannedAt": "2026-09-18T05:47:40.893Z",
+          "completedAt": "2026-09-18T05:47:40.999Z",
+          "bytes": 25,
+          "planMs": 521.13,
+          "applyMs": 105.63,
+          "planAndApplyMs": 626.76,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 46,
+          "startedAt": "2026-09-18T05:47:41.000Z",
+          "plannedAt": "2026-09-18T05:47:41.542Z",
+          "completedAt": "2026-09-18T05:47:41.642Z",
+          "bytes": 26,
+          "planMs": 542.17,
+          "applyMs": 100.07,
+          "planAndApplyMs": 642.24,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 47,
+          "startedAt": "2026-09-18T05:47:41.643Z",
+          "plannedAt": "2026-09-18T05:47:42.186Z",
+          "completedAt": "2026-09-18T05:47:42.290Z",
+          "bytes": 25,
+          "planMs": 542.8,
+          "applyMs": 104.12,
+          "planAndApplyMs": 646.92,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 48,
+          "startedAt": "2026-09-18T05:47:42.291Z",
+          "plannedAt": "2026-09-18T05:47:42.819Z",
+          "completedAt": "2026-09-18T05:47:42.918Z",
+          "bytes": 26,
+          "planMs": 528.19,
+          "applyMs": 99.51,
+          "planAndApplyMs": 627.69,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 49,
+          "startedAt": "2026-09-18T05:47:42.919Z",
+          "plannedAt": "2026-09-18T05:47:43.439Z",
+          "completedAt": "2026-09-18T05:47:43.539Z",
+          "bytes": 25,
+          "planMs": 519.82,
+          "applyMs": 100.48,
+          "planAndApplyMs": 620.3,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 50,
+          "startedAt": "2026-09-18T05:47:43.541Z",
+          "plannedAt": "2026-09-18T05:47:44.078Z",
+          "completedAt": "2026-09-18T05:47:44.177Z",
+          "bytes": 26,
+          "planMs": 537.49,
+          "applyMs": 98.95,
+          "planAndApplyMs": 636.44,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 51,
+          "startedAt": "2026-09-18T05:47:44.178Z",
+          "plannedAt": "2026-09-18T05:47:44.714Z",
+          "completedAt": "2026-09-18T05:47:44.814Z",
+          "bytes": 25,
+          "planMs": 535.92,
+          "applyMs": 100.02,
+          "planAndApplyMs": 635.93,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 52,
+          "startedAt": "2026-09-18T05:47:44.815Z",
+          "plannedAt": "2026-09-18T05:47:45.357Z",
+          "completedAt": "2026-09-18T05:47:45.464Z",
+          "bytes": 26,
+          "planMs": 542.51,
+          "applyMs": 107.44,
+          "planAndApplyMs": 649.96,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 53,
+          "startedAt": "2026-09-18T05:47:45.465Z",
+          "plannedAt": "2026-09-18T05:47:46.003Z",
+          "completedAt": "2026-09-18T05:47:46.105Z",
+          "bytes": 25,
+          "planMs": 538,
+          "applyMs": 102.16,
+          "planAndApplyMs": 640.16,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 54,
+          "startedAt": "2026-09-18T05:47:46.106Z",
+          "plannedAt": "2026-09-18T05:47:46.643Z",
+          "completedAt": "2026-09-18T05:47:46.743Z",
+          "bytes": 26,
+          "planMs": 536.98,
+          "applyMs": 99.86,
+          "planAndApplyMs": 636.84,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 55,
+          "startedAt": "2026-09-18T05:47:46.743Z",
+          "plannedAt": "2026-09-18T05:47:47.281Z",
+          "completedAt": "2026-09-18T05:47:47.382Z",
+          "bytes": 25,
+          "planMs": 537.62,
+          "applyMs": 100.51,
+          "planAndApplyMs": 638.12,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 56,
+          "startedAt": "2026-09-18T05:47:47.382Z",
+          "plannedAt": "2026-09-18T05:47:47.927Z",
+          "completedAt": "2026-09-18T05:47:48.033Z",
+          "bytes": 26,
+          "planMs": 544.42,
+          "applyMs": 105.78,
+          "planAndApplyMs": 650.21,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 57,
+          "startedAt": "2026-09-18T05:47:48.033Z",
+          "plannedAt": "2026-09-18T05:47:48.600Z",
+          "completedAt": "2026-09-18T05:47:48.704Z",
+          "bytes": 25,
+          "planMs": 566.32,
+          "applyMs": 103.91,
+          "planAndApplyMs": 670.23,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 58,
+          "startedAt": "2026-09-18T05:47:48.704Z",
+          "plannedAt": "2026-09-18T05:47:49.249Z",
+          "completedAt": "2026-09-18T05:47:49.353Z",
+          "bytes": 26,
+          "planMs": 544.72,
+          "applyMs": 103.54,
+          "planAndApplyMs": 648.26,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 59,
+          "startedAt": "2026-09-18T05:47:49.353Z",
+          "plannedAt": "2026-09-18T05:47:49.897Z",
+          "completedAt": "2026-09-18T05:47:50.002Z",
+          "bytes": 25,
+          "planMs": 543.26,
+          "applyMs": 104.98,
+          "planAndApplyMs": 648.24,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 60,
+          "startedAt": "2026-09-18T05:47:50.002Z",
+          "plannedAt": "2026-09-18T05:47:50.532Z",
+          "completedAt": "2026-09-18T05:47:50.640Z",
+          "bytes": 26,
+          "planMs": 529.66,
+          "applyMs": 108.48,
+          "planAndApplyMs": 638.14,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 61,
+          "startedAt": "2026-09-18T05:47:50.641Z",
+          "plannedAt": "2026-09-18T05:47:51.518Z",
+          "completedAt": "2026-09-18T05:47:51.626Z",
+          "bytes": 25,
+          "planMs": 877.1,
+          "applyMs": 107.94,
+          "planAndApplyMs": 985.04,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 62,
+          "startedAt": "2026-09-18T05:47:51.627Z",
+          "plannedAt": "2026-09-18T05:47:52.208Z",
+          "completedAt": "2026-09-18T05:47:52.308Z",
+          "bytes": 26,
+          "planMs": 581.66,
+          "applyMs": 99.92,
+          "planAndApplyMs": 681.59,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 63,
+          "startedAt": "2026-09-18T05:47:52.309Z",
+          "plannedAt": "2026-09-18T05:47:52.879Z",
+          "completedAt": "2026-09-18T05:47:52.986Z",
+          "bytes": 25,
+          "planMs": 570.21,
+          "applyMs": 107.14,
+          "planAndApplyMs": 677.36,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 64,
+          "startedAt": "2026-09-18T05:47:52.987Z",
+          "plannedAt": "2026-09-18T05:47:53.590Z",
+          "completedAt": "2026-09-18T05:47:53.703Z",
+          "bytes": 26,
+          "planMs": 603,
+          "applyMs": 113.32,
+          "planAndApplyMs": 716.32,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 65,
+          "startedAt": "2026-09-18T05:47:53.704Z",
+          "plannedAt": "2026-09-18T05:47:54.242Z",
+          "completedAt": "2026-09-18T05:47:54.343Z",
+          "bytes": 25,
+          "planMs": 537.63,
+          "applyMs": 101.38,
+          "planAndApplyMs": 639.02,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 66,
+          "startedAt": "2026-09-18T05:47:54.347Z",
+          "plannedAt": "2026-09-18T05:47:54.934Z",
+          "completedAt": "2026-09-18T05:47:55.035Z",
+          "bytes": 26,
+          "planMs": 587.4,
+          "applyMs": 100.79,
+          "planAndApplyMs": 688.19,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 67,
+          "startedAt": "2026-09-18T05:47:55.036Z",
+          "plannedAt": "2026-09-18T05:47:55.588Z",
+          "completedAt": "2026-09-18T05:47:55.692Z",
+          "bytes": 25,
+          "planMs": 552.84,
+          "applyMs": 103.12,
+          "planAndApplyMs": 655.97,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 68,
+          "startedAt": "2026-09-18T05:47:55.692Z",
+          "plannedAt": "2026-09-18T05:47:56.520Z",
+          "completedAt": "2026-09-18T05:47:56.635Z",
+          "bytes": 26,
+          "planMs": 827.31,
+          "applyMs": 115.66,
+          "planAndApplyMs": 942.97,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 69,
+          "startedAt": "2026-09-18T05:47:56.636Z",
+          "plannedAt": "2026-09-18T05:47:57.462Z",
+          "completedAt": "2026-09-18T05:47:57.576Z",
+          "bytes": 25,
+          "planMs": 825.95,
+          "applyMs": 114.41,
+          "planAndApplyMs": 940.37,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 70,
+          "startedAt": "2026-09-18T05:47:57.577Z",
+          "plannedAt": "2026-09-18T05:47:58.110Z",
+          "completedAt": "2026-09-18T05:47:58.212Z",
+          "bytes": 26,
+          "planMs": 533.35,
+          "applyMs": 101.07,
+          "planAndApplyMs": 634.42,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 71,
+          "startedAt": "2026-09-18T05:47:58.212Z",
+          "plannedAt": "2026-09-18T05:47:58.793Z",
+          "completedAt": "2026-09-18T05:47:58.898Z",
+          "bytes": 25,
+          "planMs": 580.69,
+          "applyMs": 105.36,
+          "planAndApplyMs": 686.04,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 72,
+          "startedAt": "2026-09-18T05:47:58.899Z",
+          "plannedAt": "2026-09-18T05:47:59.428Z",
+          "completedAt": "2026-09-18T05:47:59.531Z",
+          "bytes": 26,
+          "planMs": 529.36,
+          "applyMs": 102.16,
+          "planAndApplyMs": 631.52,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 73,
+          "startedAt": "2026-09-18T05:47:59.531Z",
+          "plannedAt": "2026-09-18T05:48:00.063Z",
+          "completedAt": "2026-09-18T05:48:00.164Z",
+          "bytes": 25,
+          "planMs": 531.5,
+          "applyMs": 101.61,
+          "planAndApplyMs": 633.1,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 74,
+          "startedAt": "2026-09-18T05:48:00.165Z",
+          "plannedAt": "2026-09-18T05:48:00.990Z",
+          "completedAt": "2026-09-18T05:48:01.102Z",
+          "bytes": 26,
+          "planMs": 824.78,
+          "applyMs": 112.18,
+          "planAndApplyMs": 936.96,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 75,
+          "startedAt": "2026-09-18T05:48:01.103Z",
+          "plannedAt": "2026-09-18T05:48:01.628Z",
+          "completedAt": "2026-09-18T05:48:01.731Z",
+          "bytes": 25,
+          "planMs": 525.38,
+          "applyMs": 102.59,
+          "planAndApplyMs": 627.98,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 76,
+          "startedAt": "2026-09-18T05:48:01.732Z",
+          "plannedAt": "2026-09-18T05:48:02.567Z",
+          "completedAt": "2026-09-18T05:48:02.684Z",
+          "bytes": 26,
+          "planMs": 835.48,
+          "applyMs": 116.94,
+          "planAndApplyMs": 952.42,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 77,
+          "startedAt": "2026-09-18T05:48:02.685Z",
+          "plannedAt": "2026-09-18T05:48:03.238Z",
+          "completedAt": "2026-09-18T05:48:03.343Z",
+          "bytes": 25,
+          "planMs": 552.75,
+          "applyMs": 105.64,
+          "planAndApplyMs": 658.39,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 78,
+          "startedAt": "2026-09-18T05:48:03.344Z",
+          "plannedAt": "2026-09-18T05:48:03.903Z",
+          "completedAt": "2026-09-18T05:48:04.008Z",
+          "bytes": 26,
+          "planMs": 559.08,
+          "applyMs": 104.81,
+          "planAndApplyMs": 663.89,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 79,
+          "startedAt": "2026-09-18T05:48:04.009Z",
+          "plannedAt": "2026-09-18T05:48:04.559Z",
+          "completedAt": "2026-09-18T05:48:04.663Z",
+          "bytes": 25,
+          "planMs": 550.51,
+          "applyMs": 104,
+          "planAndApplyMs": 654.51,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 80,
+          "startedAt": "2026-09-18T05:48:04.664Z",
+          "plannedAt": "2026-09-18T05:48:05.198Z",
+          "completedAt": "2026-09-18T05:48:05.302Z",
+          "bytes": 26,
+          "planMs": 533.99,
+          "applyMs": 104.7,
+          "planAndApplyMs": 638.68,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 81,
+          "startedAt": "2026-09-18T05:48:05.303Z",
+          "plannedAt": "2026-09-18T05:48:05.884Z",
+          "completedAt": "2026-09-18T05:48:05.988Z",
+          "bytes": 25,
+          "planMs": 580.8,
+          "applyMs": 103.39,
+          "planAndApplyMs": 684.19,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 82,
+          "startedAt": "2026-09-18T05:48:05.988Z",
+          "plannedAt": "2026-09-18T05:48:06.542Z",
+          "completedAt": "2026-09-18T05:48:06.645Z",
+          "bytes": 26,
+          "planMs": 553.84,
+          "applyMs": 102.81,
+          "planAndApplyMs": 656.65,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 83,
+          "startedAt": "2026-09-18T05:48:06.646Z",
+          "plannedAt": "2026-09-18T05:48:07.464Z",
+          "completedAt": "2026-09-18T05:48:07.580Z",
+          "bytes": 25,
+          "planMs": 818.47,
+          "applyMs": 116.37,
+          "planAndApplyMs": 934.84,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 84,
+          "startedAt": "2026-09-18T05:48:07.581Z",
+          "plannedAt": "2026-09-18T05:48:08.153Z",
+          "completedAt": "2026-09-18T05:48:08.258Z",
+          "bytes": 26,
+          "planMs": 571.35,
+          "applyMs": 105.32,
+          "planAndApplyMs": 676.68,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 85,
+          "startedAt": "2026-09-18T05:48:08.259Z",
+          "plannedAt": "2026-09-18T05:48:08.796Z",
+          "completedAt": "2026-09-18T05:48:08.898Z",
+          "bytes": 25,
+          "planMs": 537.48,
+          "applyMs": 102.06,
+          "planAndApplyMs": 639.54,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 86,
+          "startedAt": "2026-09-18T05:48:08.899Z",
+          "plannedAt": "2026-09-18T05:48:09.450Z",
+          "completedAt": "2026-09-18T05:48:09.550Z",
+          "bytes": 26,
+          "planMs": 550.78,
+          "applyMs": 100.01,
+          "planAndApplyMs": 650.8,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 87,
+          "startedAt": "2026-09-18T05:48:09.550Z",
+          "plannedAt": "2026-09-18T05:48:10.088Z",
+          "completedAt": "2026-09-18T05:48:10.198Z",
+          "bytes": 25,
+          "planMs": 537.42,
+          "applyMs": 109.76,
+          "planAndApplyMs": 647.18,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 88,
+          "startedAt": "2026-09-18T05:48:10.198Z",
+          "plannedAt": "2026-09-18T05:48:10.766Z",
+          "completedAt": "2026-09-18T05:48:10.870Z",
+          "bytes": 26,
+          "planMs": 568.13,
+          "applyMs": 103.44,
+          "planAndApplyMs": 671.56,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 89,
+          "startedAt": "2026-09-18T05:48:10.871Z",
+          "plannedAt": "2026-09-18T05:48:11.627Z",
+          "completedAt": "2026-09-18T05:48:11.734Z",
+          "bytes": 25,
+          "planMs": 756.59,
+          "applyMs": 106.79,
+          "planAndApplyMs": 863.38,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 90,
+          "startedAt": "2026-09-18T05:48:11.735Z",
+          "plannedAt": "2026-09-18T05:48:12.316Z",
+          "completedAt": "2026-09-18T05:48:12.424Z",
+          "bytes": 26,
+          "planMs": 581.46,
+          "applyMs": 107.53,
+          "planAndApplyMs": 689,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 91,
+          "startedAt": "2026-09-18T05:48:12.425Z",
+          "plannedAt": "2026-09-18T05:48:13.068Z",
+          "completedAt": "2026-09-18T05:48:13.173Z",
+          "bytes": 25,
+          "planMs": 642.93,
+          "applyMs": 104.86,
+          "planAndApplyMs": 747.79,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 92,
+          "startedAt": "2026-09-18T05:48:13.174Z",
+          "plannedAt": "2026-09-18T05:48:13.741Z",
+          "completedAt": "2026-09-18T05:48:13.846Z",
+          "bytes": 26,
+          "planMs": 567.61,
+          "applyMs": 104.36,
+          "planAndApplyMs": 671.96,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 93,
+          "startedAt": "2026-09-18T05:48:13.846Z",
+          "plannedAt": "2026-09-18T05:48:14.404Z",
+          "completedAt": "2026-09-18T05:48:14.506Z",
+          "bytes": 25,
+          "planMs": 557.18,
+          "applyMs": 102.17,
+          "planAndApplyMs": 659.34,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 94,
+          "startedAt": "2026-09-18T05:48:14.506Z",
+          "plannedAt": "2026-09-18T05:48:15.324Z",
+          "completedAt": "2026-09-18T05:48:15.433Z",
+          "bytes": 26,
+          "planMs": 817.71,
+          "applyMs": 108.48,
+          "planAndApplyMs": 926.19,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 95,
+          "startedAt": "2026-09-18T05:48:15.433Z",
+          "plannedAt": "2026-09-18T05:48:15.966Z",
+          "completedAt": "2026-09-18T05:48:16.079Z",
+          "bytes": 25,
+          "planMs": 532.29,
+          "applyMs": 113,
+          "planAndApplyMs": 645.3,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 96,
+          "startedAt": "2026-09-18T05:48:16.079Z",
+          "plannedAt": "2026-09-18T05:48:16.741Z",
+          "completedAt": "2026-09-18T05:48:16.848Z",
+          "bytes": 26,
+          "planMs": 661.32,
+          "applyMs": 106.84,
+          "planAndApplyMs": 768.15,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 97,
+          "startedAt": "2026-09-18T05:48:16.849Z",
+          "plannedAt": "2026-09-18T05:48:17.405Z",
+          "completedAt": "2026-09-18T05:48:17.508Z",
+          "bytes": 25,
+          "planMs": 556.46,
+          "applyMs": 102.42,
+          "planAndApplyMs": 658.88,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 98,
+          "startedAt": "2026-09-18T05:48:17.508Z",
+          "plannedAt": "2026-09-18T05:48:18.057Z",
+          "completedAt": "2026-09-18T05:48:18.164Z",
+          "bytes": 26,
+          "planMs": 549.21,
+          "applyMs": 106.62,
+          "planAndApplyMs": 655.83,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 99,
+          "startedAt": "2026-09-18T05:48:18.165Z",
+          "plannedAt": "2026-09-18T05:48:18.715Z",
+          "completedAt": "2026-09-18T05:48:18.821Z",
+          "bytes": 25,
+          "planMs": 550.04,
+          "applyMs": 105.96,
+          "planAndApplyMs": 655.99,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        },
+        {
+          "index": 100,
+          "startedAt": "2026-09-18T05:48:18.821Z",
+          "plannedAt": "2026-09-18T05:48:19.376Z",
+          "completedAt": "2026-09-18T05:48:19.481Z",
+          "bytes": 26,
+          "planMs": 554.59,
+          "applyMs": 105.18,
+          "planAndApplyMs": 659.78,
+          "withinBudget": true,
+          "officialDoctor": [
+            "OFFICIAL_DOCTOR_PASSED"
+          ],
+          "sampleSource": "new"
+        }
+      ],
+      "planMs": {
+        "samples": 120,
+        "min": 486.21,
+        "mean": 601.78,
+        "p50": 554.59,
+        "p95": 835.48,
+        "max": 1499.74
+      },
+      "applyMs": {
+        "samples": 120,
+        "min": 90.48,
+        "mean": 109.9,
+        "p50": 103.39,
+        "p95": 114.41,
+        "max": 838.56
+      },
+      "planAndApplyMs": {
+        "samples": 120,
+        "min": 579.92,
+        "mean": 711.68,
+        "p50": 658.39,
+        "p95": 952.42,
+        "max": 1612.36
+      },
+      "allSamplesWithinBudget": false,
+      "p95WithinBudget": true,
+      "withinBudget": true,
+      "overBudgetSamples": 4
+    },
+    "saveBudgetWithinLimit": true,
+    "allSaveSamplesWithinBudget": false
+  },
+  "completedAt": "2026-09-18T05:48:19.667Z",
+  "sanitizedForPublication": true
+}

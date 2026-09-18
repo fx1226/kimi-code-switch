@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "linear": {
+      "url": "https://mcp.linear.app/mcp"
+    },
+    "legacy-events": {
+      "transport": "sse",
+      "url": "https://mcp.example.com/sse"
+    }
+  }
+}

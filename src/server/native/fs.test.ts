@@ -252,6 +252,15 @@ describe("authorization (B1)", () => {
     fsCommands.write_text({ path: join(base, "backups", "2026", "config.toml"), content: "ok" });
     expect(readFileSync(join(base, "backups", "2026", "config.toml"), "utf8")).toBe("ok");
   });
+
+  it("limits File grants to the exact file and never grants child paths or directory operations", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "kimi-fs-file-grant-")));
+    const path = join(base, ".mcp.json");
+    const grants: GrantRecord[] = [{ root: path, kind: "File", source: "managed-root", createdAt: new Date().toISOString() }];
+    expect(authorizeMutation(grants, path, "SingleFile")).toBe(path);
+    expect(() => authorizeMutation(grants, join(path, "unrelated"), "SingleFile")).toThrow(/outside the authorized scope/);
+    expect(() => authorizeMutation(grants, path, "DirectoryTree")).toThrow(/outside the authorized scope/);
+  });
 });
 
 describe("quarantine_journal", () => {
@@ -267,7 +276,7 @@ describe("quarantine_journal", () => {
     expect(existsSync(src)).toBe(false);
     if (IS_UNIX) {
       expect(statSync(quarantined).mode & 0o777).toBe(0o600);
-      expect(statSync(join(fakeHome, ".kimi-code-switch-gui", "quarantine")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(fakeHome, ".kimi-code-switch", "quarantine")).mode & 0o777).toBe(0o700);
     }
   });
 });

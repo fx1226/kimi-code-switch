@@ -1,0 +1,19 @@
+{
+  "measuredAt": "2026-09-18T06:12:20.013Z",
+  "binarySha256": "528ba09d62830966f66611b2bfe9d3611f1a98fb3b200ff9c8fc397b9c7475e5",
+  "browser": "153.0.8010.52",
+  "fixtureEntries": 135,
+  "actualUserDataTouched": false,
+  "noAutoMigration": true,
+  "confirmationCount": 1,
+  "previewViewports": [
+    1440,
+    768
+  ],
+  "nativeAndLegacyBytesPreserved": true,
+  "copiedEntriesVerified": 133,
+  "archivedEntriesVerified": 1,
+  "retainedNativeDirectory": true,
+  "freshBootstrapUnlocked": true,
+  "pageErrors": []
+}

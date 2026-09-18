@@ -1,0 +1,77 @@
+{
+  "verifiedAt": "2026-09-18T06:51:26.100Z",
+  "scope": "Fix 9 independent precommit review findings; all pre-existing refactor work preserved",
+  "tests": {
+    "files": 58,
+    "passed": 925,
+    "coverage": {
+      "lines": 86.6,
+      "statements": 86.6,
+      "branches": 80.56,
+      "functions": 88.92
+    }
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "package": "passed",
+  "formulaRubySyntax": "passed",
+  "officialSourceConsumption": {
+    "sourceFilesVerified": 26,
+    "nativeTransactions": 9,
+    "result": "passed"
+  },
+  "browser": {
+    "measuredAt": "2026-09-18T06:48:30.970Z",
+    "browser": "153.0.8010.52",
+    "binarySha256": "29395990141e157db7aa65d45729ed5c3ca3deca3d5781551c1c906e0b078408",
+    "officialCli": "2.0.0",
+    "checks": {
+      "independentDraftGuard": true,
+      "savedDraftReleased": true,
+      "multilineSourceRedacted": true,
+      "annotatedArrayRefusedWithoutWrite": true,
+      "mcpTransportPersisted": true,
+      "blankMcpCreated": true,
+      "narrowWindowNoOverflow": true
+    },
+    "consoleErrors": [],
+    "personalDataAccessed": false
+  },
+  "packageMetrics": {
+    "measuredAt": "2026-09-18T06:46:56.700Z",
+    "platform": "darwin",
+    "arch": "arm64",
+    "binarySha256": "29395990141e157db7aa65d45729ed5c3ca3deca3d5781551c1c906e0b078408",
+    "archiveSha256": "e61b8dea4e7f1449c233cc606ff13546af2cc92ac0e1c050df3579e0d07b44af",
+    "executableMiB": 60.3,
+    "readyMs": 102,
+    "startupBudgetMs": 2000,
+    "startupWithinBudget": true,
+    "initialWebGzipBytes": 105042,
+    "initialWebBudgetBytes": 358400,
+    "initialWebWithinBudget": true,
+    "webAssets": [
+      {
+        "asset": "/assets/index-Cwolwq5O.js",
+        "bytes": 334733,
+        "gzipBytes": 101521
+      },
+      {
+        "asset": "/assets/index-i9kHjJEz.css",
+        "bytes": 13913,
+        "gzipBytes": 3521
+      }
+    ],
+    "rssMiB": 53.1,
+    "cpuPercent": 0
+  },
+  "boundaries": {
+    "personalConfigurationWritten": false,
+    "personalMigrationRun": false,
+    "existingTrialServiceRestarted": false,
+    "committed": false,
+    "published": false,
+    "safariMatrixRepeated": false,
+    "fullPerformanceRepeated": false
+  }
+}

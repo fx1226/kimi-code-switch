@@ -1,8 +1,7 @@
 // tui.toml 支持：Kimi Code 0.38.0 起，TUI 主题与编辑器命令从 config.toml 迁移到
 // <activeEnvHome>/tui.toml。此模块负责「从激活 Profile 渲染 tui.toml 文档」与
-// 「解析/合并现有 tui.toml」。GUI 只管理 theme 与 [editor].command 两个字段，
-// 其余字段（[notifications]/[upgrade]/disable_paste_burst 等）在合并时原样保留，
-// 防止「保存全部」时抹掉用户或 CLI 写入的内容。
+// 「解析/合并现有 tui.toml」。Profile 管理 theme 与 [editor].command，
+// 其余官方字段仅在显式传入时更新，未知字段在合并时保留。
 //
 // 0.38.0 tui.toml schema：
 //   theme = "auto|dark|light|自定义主题名"     （顶层直接键）
@@ -27,6 +26,7 @@ export const TUI_CONFIG_FILENAME = "tui.toml";
 export const TUI_NOTIFICATION_CONDITIONS = ["unfocused", "always"] as const;
 export type TuiNotificationCondition = (typeof TUI_NOTIFICATION_CONDITIONS)[number];
 export const TUI_STATUS_LINE_ITEMS = ["mode", "goal", "model", "tasks", "cwd", "git", "tips"] as const;
+export const TUI_MERMAID_MODES = ["final", "off"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,6 +50,12 @@ export function buildTuiConfigDocument(tui: TuiConfig): string {
   }
   if (tui.cacheExpiryHint !== undefined) {
     raw.cache_expiry_hint = tui.cacheExpiryHint;
+  }
+  if (tui.disableFeedbackSurvey !== undefined) {
+    raw.disable_feedback_survey = tui.disableFeedbackSurvey;
+  }
+  if (tui.markdownMermaid !== undefined) {
+    raw.markdown = { mermaid: tui.markdownMermaid };
   }
   if (tui.editorCommand !== undefined && tui.editorCommand !== "") {
     raw.editor = { command: tui.editorCommand };
@@ -137,6 +143,15 @@ function parseTuiConfigRaw(raw: Record<string, unknown>, warnings: string[] = []
   }
   if (typeof raw.cache_expiry_hint === "boolean") {
     result.cacheExpiryHint = raw.cache_expiry_hint;
+  }
+  if (typeof raw.disable_feedback_survey === "boolean") {
+    result.disableFeedbackSurvey = raw.disable_feedback_survey;
+  }
+  const markdown = isRecord(raw.markdown) ? raw.markdown : {};
+  if (markdown.mermaid === "final" || markdown.mermaid === "off") {
+    result.markdownMermaid = markdown.mermaid;
+  } else if (markdown.mermaid !== undefined) {
+    warnings.push(`Unknown markdown.mermaid value ignored: ${String(markdown.mermaid)}`);
   }
   const editor = isRecord(raw.editor) ? raw.editor : {};
   if (typeof editor.command === "string" && editor.command !== "") {
@@ -238,6 +253,11 @@ export function mergeTuiConfigDocument(existing: string | null, tui: TuiConfig):
   if (tui.disable_paste_burst !== undefined) next.disable_paste_burst = tui.disable_paste_burst;
   if (tui.renderLatex !== undefined) next.render_latex = tui.renderLatex;
   if (tui.cacheExpiryHint !== undefined) next.cache_expiry_hint = tui.cacheExpiryHint;
+  if (tui.disableFeedbackSurvey !== undefined) next.disable_feedback_survey = tui.disableFeedbackSurvey;
+  if (tui.markdownMermaid !== undefined) {
+    const markdown = isRecord(raw.markdown) ? raw.markdown : {};
+    next.markdown = { ...markdown, mermaid: tui.markdownMermaid };
+  }
 
   if (tui.notificationsEnabled !== undefined || tui.notificationCondition !== undefined) {
     const notifications = isRecord(raw.notifications) ? raw.notifications : {};
@@ -279,6 +299,8 @@ export const EFFECTIVE_TUI_DEFAULTS = {
   disablePasteBurst: false,
   renderLatex: true,
   cacheExpiryHint: true,
+  disableFeedbackSurvey: false,
+  markdownMermaid: "final" as "final" | "off",
   editorCommand: null as string | null,
   notificationsEnabled: true,
   notificationCondition: "unfocused" as "unfocused" | "always",
@@ -298,6 +320,8 @@ export function normalizeTuiConfig(explicit: TuiConfig): EffectiveTuiConfig {
     disablePasteBurst: explicit.disable_paste_burst ?? EFFECTIVE_TUI_DEFAULTS.disablePasteBurst,
     renderLatex: explicit.renderLatex ?? EFFECTIVE_TUI_DEFAULTS.renderLatex,
     cacheExpiryHint: explicit.cacheExpiryHint ?? EFFECTIVE_TUI_DEFAULTS.cacheExpiryHint,
+    disableFeedbackSurvey: explicit.disableFeedbackSurvey ?? EFFECTIVE_TUI_DEFAULTS.disableFeedbackSurvey,
+    markdownMermaid: explicit.markdownMermaid ?? EFFECTIVE_TUI_DEFAULTS.markdownMermaid,
     editorCommand: trimmedEditor && trimmedEditor.length > 0
       ? trimmedEditor
       : EFFECTIVE_TUI_DEFAULTS.editorCommand,
