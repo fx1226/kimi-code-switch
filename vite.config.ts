@@ -21,6 +21,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // dev 联调：浏览器形态经 Vite 代理访问本地 Node 服务的 /api。
+    proxy: {
+      "/api": "http://127.0.0.1:8417",
+    },
   },
   build: {
     outDir: resolve(__dirname, "dist"),

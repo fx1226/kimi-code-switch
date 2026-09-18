@@ -5475,6 +5475,14 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* 裸文本段落用法：不套 strong/span 两列网格 */
+.form-note.is-block {
+  display: block;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
 .oauth-login-success {
   border-color: rgba(var(--success-rgb), 0.3);
 }

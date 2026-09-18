@@ -981,6 +981,11 @@ function notImplemented(name: string): never {
   throw new Error(`[tauri] ${name} 尚未迁移`);
 }
 
+/** pickFile 的返回：Tauri 形态只有路径；浏览器形态附带文件内容与文件名。 */
+export type PickFileResult =
+  | { canceled: false; filePath: string; content?: string; fileName?: string }
+  | { canceled: true };
+
 export const kimiSwitchTauri = {
   // ── 核心状态链路 ──
   loadState: async (paths?: LoadStatePaths): Promise<AppState> => {
@@ -1446,7 +1451,9 @@ export const kimiSwitchTauri = {
   defaultSettings: (): Promise<PanelSettings> => Promise.resolve(createDefaultPanelSettings()),
 
   // ── dialog / shell ──
-  pickFile: async (options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; properties?: Array<string> }) => {
+  // content/fileName 供浏览器形态（kimiSwitchHttp）的 pickFile 直接带回文件内容；
+  // Tauri 形态只返回原生对话框选中的路径，字段保持缺省。
+  pickFile: async (options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; properties?: Array<string> }): Promise<PickFileResult> => {
     // 从 renderer 打开仅用于"读取"；写路径一律走 Rust 组合命令（save_file_with_dialog 等）。
     const selected = await openDialog({ title: options?.title, multiple: false, filters: options?.filters, directory: options?.properties?.includes("openDirectory"), canCreateDirectories: options?.properties?.includes("createDirectory") });
     return typeof selected === "string" ? { canceled: false, filePath: selected } : { canceled: true };
@@ -1850,14 +1857,23 @@ export const kimiSwitchTauri = {
     });
     return filePath == null ? { canceled: true as const } : { canceled: false as const, filePath };
   },
-  importBackupEncryptionKey: async () => {
-    const selected = await openDialog({
-      multiple: false,
-      filters: [{ name: "Recovery key", extensions: ["txt", "key"] }],
-    });
-    if (typeof selected !== "string") return { canceled: true as const };
-    const secret = await tauriFileAccess.readText(selected);
-    if (secret === null) throw new Error("Backup recovery key file could not be read.");
+  importBackupEncryptionKey: async (content?: string) => {
+    // 浏览器形态由 kimiSwitchHttp 先读出文件内容传入，此时跳过原生对话框直接导入。
+    let secret: string;
+    let selected = "";
+    if (typeof content === "string") {
+      secret = content;
+    } else {
+      const picked = await openDialog({
+        multiple: false,
+        filters: [{ name: "Recovery key", extensions: ["txt", "key"] }],
+      });
+      if (typeof picked !== "string") return { canceled: true as const };
+      selected = picked;
+      const read = await tauriFileAccess.readText(picked);
+      if (read === null) throw new Error("Backup recovery key file could not be read.");
+      secret = read;
+    }
     const keyPath = await invoke<string>("import_backup_encryption_secret", { secret, replace: true });
     return { canceled: false as const, filePath: selected, keyPath };
   },

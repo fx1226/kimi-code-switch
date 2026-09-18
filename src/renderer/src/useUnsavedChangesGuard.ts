@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 
 import type { AppState, Locale } from "@shared/types";
@@ -99,6 +99,12 @@ export function useUnsavedChangesGuard(ctx: UnsavedChangesGuardContext) {
       await action();
     })();
   }, [resolveUnsavedChanges]);
+
+  // 把脏状态同步广播出去：浏览器形态（kimiSwitchHttp）的 beforeunload 守卫据此同步判定。
+  // Tauri 形态没有人监听该事件，多发一次无副作用。
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("kimi-unsaved-changed", { detail: hasUnsavedChanges }));
+  }, [hasUnsavedChanges]);
 
   return {
     unsavedResolutionRef,

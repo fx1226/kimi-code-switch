@@ -220,6 +220,24 @@ describe("kimiSwitchTauri API surface", () => {
     });
   });
 
+  it("imports the recovery key from provided content without opening a dialog", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "import_backup_encryption_secret") return "~/.kimi-code-switch-gui/backup-encryption.key" as never;
+      return undefined as never;
+    });
+
+    await expect(kimiSwitchTauri.importBackupEncryptionKey(`${"c".repeat(64)}\n`)).resolves.toEqual({
+      canceled: false,
+      filePath: "",
+      keyPath: "~/.kimi-code-switch-gui/backup-encryption.key",
+    });
+    expect(mockedOpen).not.toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledWith("import_backup_encryption_secret", {
+      secret: `${"c".repeat(64)}\n`,
+      replace: true,
+    });
+  });
+
   it("checks endpoint reachability and update metadata without exposing unsafe schemes", async () => {
     mockedGetVersion.mockResolvedValue("2.2.5");
     mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {

@@ -6,6 +6,8 @@ export interface ShortcutActionDefinition {
   defaultAccelerator: string;
   defaultEnabled: boolean;
   label: LocalizedText;
+  /** 仅桌面（Tauri）形态可用；依赖 Rust 原生能力的条目（如窗口呼出全局快捷键）标记为 true。 */
+  desktopOnly?: boolean;
 }
 
 export interface ShortcutConflict {
@@ -20,6 +22,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDefinition[] = [
     scope: "global",
     defaultAccelerator: "Command+Shift+H",
     defaultEnabled: true,
+    desktopOnly: true,
     label: {
       "zh-CN": "显示/隐藏主窗口",
       "zh-TW": "顯示/隱藏主視窗",

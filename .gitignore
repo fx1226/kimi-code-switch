@@ -3,6 +3,7 @@
 node_modules
 dist
 dist-bridge
+dist-server
 out
 release
 coverage

@@ -24,6 +24,7 @@ import {
 import { DialogShell } from "./dialogs";
 import { parseEndpointUrl } from "./endpointUtils";
 import { t, translateError } from "./i18n";
+import { isDesktopRuntime } from "./runtime";
 import {
   ActionFooter, CompactSelect, Field, KeyValueListField, MultiSelectField,
   ReadOnlyField, SelectField, Toggle,
@@ -1901,7 +1902,8 @@ export function PathField(props: {
               <Eye size={16} />
             </button>
           ) : null}
-          {!props.readOnly ? (
+          {/* 浏览器形态没有原生路径选择对话框，隐藏浏览按钮；输入框保留手输。 */}
+          {!props.readOnly && isDesktopRuntime() ? (
             <button
               className="action-button compact icon-only"
               type="button"

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -271,11 +271,34 @@ fn start_reader_loop(
     })
 }
 
+/// 生产 sidecar 候选可执行文件名（externalBin 在 Windows 下带 `.exe`）。
+fn sidecar_candidate_names() -> Vec<&'static str> {
+    if cfg!(target_os = "windows") {
+        vec!["bridge.exe", "bridge"]
+    } else {
+        vec!["bridge"]
+    }
+}
+
+/// 在与主程序同目录里找已存在的 sidecar。
+/// macOS 的 externalBin 产物在 Contents/MacOS，Windows/Linux 与主程序同目录，
+/// 均不在 resource_dir（Contents/Resources）。
+fn installed_sidecar(exe_dir: &Path) -> Option<PathBuf> {
+    sidecar_candidate_names()
+        .into_iter()
+        .map(|name| exe_dir.join(name))
+        .find(|path| path.exists())
+}
+
 /// 确定桥接启动命令。
 /// - dev（debug）：优先 `node <repo>/dist-bridge/bridge.mjs`，即时反映 JS 改动；
-///   缺失时回退 resource sidecar。
-/// - release：使用 resource_dir/bridge sidecar（最终用户无需 Node）。
+///   缺失时回退 sidecar。
+/// - release：使用与主程序同目录的 bridge sidecar，resource_dir 仅作兜底。
 fn bridge_command(app: &AppHandle) -> Result<(String, Vec<String>), String> {
+    let exe_bridge = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+        .and_then(|dir| installed_sidecar(&dir));
     let resource_bridge = app
         .path()
         .resource_dir()
@@ -292,7 +315,7 @@ fn bridge_command(app: &AppHandle) -> Result<(String, Vec<String>), String> {
             return Ok(("node".to_string(), vec![bridge_js.to_string_lossy().to_string(), "stdio".to_string()]));
         }
     }
-    if let Some(path) = resource_bridge {
+    if let Some(path) = exe_bridge.or(resource_bridge) {
         return Ok((path.to_string_lossy().to_string(), vec!["stdio".to_string()]));
     }
     Err("bridge bundle missing: run `npm run build:bridge` (dev) or build a release bundle".to_string())
@@ -573,6 +596,17 @@ mod tests {
     fn keyring_names_are_fixed() {
         assert_eq!(KEYRING_SERVICE, "kimi-code-switch-gui");
         assert_eq!(KEYRING_USER, "chatgpt-oauth");
+    }
+
+    /// sidecar 文件名必须覆盖平台后缀：非 Windows 为 `bridge`，
+    /// Windows 下同时回退 `bridge.exe`（与 externalBin 命名一致）。
+    #[test]
+    fn sidecar_candidate_names_match_platform_suffix() {
+        let names = sidecar_candidate_names();
+        assert!(names.contains(&"bridge"), "missing basename bridge");
+        if cfg!(target_os = "windows") {
+            assert!(names.contains(&"bridge.exe"), "missing windows suffix");
+        }
     }
 
     /// 配置键名必须与 bridge TS `BridgeInstanceConfig` 一致（camelCase），

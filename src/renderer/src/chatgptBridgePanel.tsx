@@ -265,7 +265,7 @@ export function ChatgptBridgePanel(props: Props): JSX.Element {
             </ul>
           </div>
         ) : null}
-        {!running && !signedIn ? <p className="form-note">{t(locale, "chatgptBridgeHint")}</p> : null}
+        {!running && !signedIn ? <p className="form-note is-block">{t(locale, "chatgptBridgeHint")}</p> : null}
       </div>
     </SettingsGroup>
   );

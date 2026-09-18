@@ -44,6 +44,7 @@ import {
 import type { KimiCodeSubTab, SettingsSubTab } from "../appOptions";
 import { DialogShell } from "../dialogs";
 import { ErrorBoundary } from "../ErrorBoundary";
+import { isDesktopRuntime } from "../runtime";
 import { CompactSelect, Field, FontSizeSliderField, SelectField, SettingsGroup, ShortcutRecorderField } from "../formControls";
 import { t, translateError } from "../i18n";
 import { InsightsSettingsPanel, InsightsDashboard } from "../insightsComponents";
@@ -622,18 +623,22 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
       </>
     );
   };
+  // window.toggle 等标记 desktopOnly 的条目依赖 Rust 全局快捷键注册，浏览器形态不展示。
+  const visibleShortcutActions = SHORTCUT_ACTIONS.filter(
+    (definition) => isDesktopRuntime() || definition.desktopOnly !== true,
+  );
   const shortcutGroups = [
     {
       scope: "global" as const,
       title: t(locale, "shortcutGlobalGroup"),
       description: t(locale, "shortcutGlobalDescription"),
-      actions: SHORTCUT_ACTIONS.filter((definition) => definition.scope === "global"),
+      actions: visibleShortcutActions.filter((definition) => definition.scope === "global"),
     },
     {
       scope: "window" as const,
       title: t(locale, "shortcutWindowGroup"),
       description: t(locale, "shortcutWindowDescription"),
-      actions: SHORTCUT_ACTIONS.filter((definition) => definition.scope === "window"),
+      actions: visibleShortcutActions.filter((definition) => definition.scope === "window"),
     },
   ];
   // 空状态检查
@@ -1955,7 +1960,7 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                       />
                       <span>{t(locale, "officialAccountVaultEnable")}</span>
                     </label>
-                    <p className="form-note">{t(locale, "officialAccountVaultDescription")}</p>
+                    <p className="form-note is-block">{t(locale, "officialAccountVaultDescription")}</p>
                     {state.panelSettings.official_account_vault_enabled ? (
                     <>
                     <div className="official-account-toolbar">
@@ -2323,26 +2328,29 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                   />
                 </SettingsGroup>
                 <SettingsGroup title={t(locale, "settingsGroupBehavior")}>
-                  <label className="toggle-row">
-                    <span>{t(locale, "trayIcon")}</span>
-                    <input
-                      type="checkbox"
-                      checked={state.panelSettings.tray_icon}
-                      onChange={(event) => {
-                        const enabled = event.target.checked;
-                        updateImmediateState((draft) => {
-                          draft.panelSettings.tray_icon = enabled;
-                          draft.panelSettings.close_behavior = enabled ? "keep-in-tray" : "quit";
-                        });
-                        void getApi()?.setTray?.(enabled).catch((trayError: unknown) => {
-                          const message = trayError instanceof Error ? trayError.message : String(trayError);
-                          setNotice("");
-                          setError(translateError(locale, message));
-                        });
-                      }}
-                    />
-                  </label>
-                  {state.panelSettings.tray_icon ? (
+                  {/* 托盘与关闭行为依赖 Rust 原生托盘/窗口控制，仅桌面形态展示。 */}
+                  {isDesktopRuntime() ? (
+                    <label className="toggle-row">
+                      <span>{t(locale, "trayIcon")}</span>
+                      <input
+                        type="checkbox"
+                        checked={state.panelSettings.tray_icon}
+                        onChange={(event) => {
+                          const enabled = event.target.checked;
+                          updateImmediateState((draft) => {
+                            draft.panelSettings.tray_icon = enabled;
+                            draft.panelSettings.close_behavior = enabled ? "keep-in-tray" : "quit";
+                          });
+                          void getApi()?.setTray?.(enabled).catch((trayError: unknown) => {
+                            const message = trayError instanceof Error ? trayError.message : String(trayError);
+                            setNotice("");
+                            setError(translateError(locale, message));
+                          });
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  {isDesktopRuntime() && state.panelSettings.tray_icon ? (
                     <SelectField
                       label={t(locale, "closeBehavior")}
                       value={state.panelSettings.close_behavior}
@@ -2544,11 +2552,16 @@ export function TabPanels(props: TabPanelsProps): JSX.Element {
                         if (!api) { setError(t(locale, "runtimeUnavailable")); return; }
                         if (typeof api.importFullBackup !== "function") { setError(t(locale, "backupRuntimeOutdated")); return; }
                         const fileResult = await api.pickFile({ filters: [{ name: "JSON", extensions: ["json"] }] });
-                        if (fileResult.canceled || !fileResult.filePath) return;
+                        if (fileResult.canceled) return;
                         try {
-                          const readResult = await api.readFile(fileResult.filePath);
-                          if (!readResult.ok || !readResult.content) { setError(readResult.error ?? t(locale, "importInvalidFile")); return; }
-                          const parsed = JSON.parse(readResult.content);
+                          // 浏览器形态 pickFile 直接带回文件内容；Tauri 形态继续按路径 readFile。
+                          let rawJson = fileResult.content;
+                          if (rawJson === undefined) {
+                            const readResult = await api.readFile(fileResult.filePath);
+                            if (!readResult.ok || !readResult.content) { setError(readResult.error ?? t(locale, "importInvalidFile")); return; }
+                            rawJson = readResult.content;
+                          }
+                          const parsed = JSON.parse(rawJson);
                           const validation = validateFullBackup(parsed);
                           if (!validation.valid) { setError(validation.errors.join(" ")); return; }
                           const data = parsed as FullBackupBundle;
