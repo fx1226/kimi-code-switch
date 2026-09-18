@@ -2,7 +2,7 @@
 
 轻量的本机 Kimi Code 配置工具。浏览器是唯一界面，本地服务直接读取和修改 Kimi Code 原生文件，帮助你检查变更、处理冲突、备份和恢复配置。
 
-本项目由 `kimi-code-switch-gui` 演进而来，由 **fx1226** 独立维护，保留原项目的 MIT 许可、Git 历史和来源说明。**Web 版本尚未正式发布**，本 README 描述待发行的 Web 实现；旧仓库中的桌面 Release 不提供这里所述的 Web 程序。
+本项目由 `kimi-code-switch-gui` 演进而来，由 **fx1226** 独立维护，保留原项目的 MIT 许可、Git 历史和来源说明。本 README 描述 Web 版 v1.0.0 的实现；旧仓库中的桌面 Release 不提供这里所述的 Web 程序。
 
 ![Kimi Code Switch 浏览器概览](docs/images/web-overview.png)
 
@@ -28,7 +28,7 @@ Skills 与 Plugins 首版以发现、来源和诊断展示为主；Plugins 不�
 
 首个 Web 发行目标是 **macOS Apple Silicon**。自包含压缩包内的 `kimi-code-switch` 包含 Node 运行时与 Web 静态资源，用户无需安装 Node。其他平台尚未作发行验收。
 
-以下命令适用于从源码构建得到的候选包，以及未来正式发布的 Web 压缩包。在解压后的目录运行：
+以下命令适用于从源码构建得到的候选包，以及正式发布的 Web 压缩包。在解压后的目录运行：
 
 ```bash
 ./kimi-code-switch
@@ -48,7 +48,7 @@ Skills 与 Plugins 首版以发现、来源和诊断展示为主；Plugins 不�
 
 服务只监听 `127.0.0.1`，默认端口 `8417`，占用时向后查找可用端口。API 使用本机 Bearer token、Host 与 Origin 校验。首次打开的地址会携带连接凭证，浏览器接收后将其从地址栏移除；连接失效时运行 `open` 重新进入。
 
-Homebrew **formula 生成脚本已提供**，会使用压缩包的实际 SHA-256 生成公式；Web 版本尚未发布公式或新的 tap 安装入口。这里暂不提供尚不可验证的 `brew install` 命令。
+Homebrew **formula 生成脚本已提供**，会使用压缩包的实际 SHA-256 生成公式；公式随 Release 资产发布，尚未提供新的 tap 安装入口。这里暂不提供尚不可验证的 `brew install` 命令。
 
 ## 原生文件与工具数据
 
@@ -129,6 +129,6 @@ npm run check:performance -- --kimi /absolute/path/to/kimi
 
 本项目起源于 [sunhao-java/kimi-code-switch-gui](https://github.com/sunhao-java/kimi-code-switch-gui)，保留原 Git 历史、版权声明和 [MIT License](LICENSE)。项目名称为 `kimi-code-switch`，显示名称为 `Kimi Code Switch`，后续开发使用独立仓库 [fx1226/kimi-code-switch](https://github.com/fx1226/kimi-code-switch)。
 
-源码已迁入本独立仓库并通过 CI。[旧仓库 fx1226/kimi-code-switch-gui](https://github.com/fx1226/kimi-code-switch-gui) 已添加迁移说明并归档，保留旧桌面 Release、全部 6 个资产和 28 个历史 tag。旧仓库名称和 fork 关系保留；新的 Web 版本尚未正式发布。验收记录见 [仓库迁移记录](docs/repository-detach-review.md)。
+源码已迁入本独立仓库并通过 CI。[旧仓库 fx1226/kimi-code-switch-gui](https://github.com/fx1226/kimi-code-switch-gui) 已添加迁移说明并归档，保留旧桌面 Release、全部 6 个资产和 28 个历史 tag。旧仓库名称和 fork 关系保留；新的 Web 版本已作为 v1.0.0 发布。验收记录见 [仓库迁移记录](docs/repository-detach-review.md)。
 
 这是独立维护的配置工具，不是 Kimi 官方客户端。旧桌面实现、旧截图和早期调研保留在历史记录中，不代表当前 Web 版本的功能或验证结果。

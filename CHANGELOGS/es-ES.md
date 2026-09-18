@@ -2,6 +2,19 @@
 
 Este archivo recoge los cambios relevantes del proyecto. El formato sigue Keep a Changelog y el proyecto adopta el esquema de versiones `major.minor.patch`.
 
+## [1.0.0] - 2026-09-18
+
+### Añadido
+
+- **Primera versión pública independiente**: una consola de configuración local con el navegador como único punto de entrada; el backend es un servidor Node independiente que expone capacidades a través de HTTP con una capa compartida de reglas puras.
+- **Binarios autocontenidos para macOS Apple Silicon**: incorporan su propio runtime, no requieren un Node del sistema y se ejecutan en un HOME aislado fuera del árbol de fuentes; la versión incluye sumas de verificación y una fórmula de Homebrew.
+- **Núcleo unificado de transacciones de configuración**: edición, preajustes, importación, copia de seguridad y restauración comparten un flujo read → plan → commit; los archivos nativos de Provider/modelo/MCP siguen siendo la única fuente de la configuración activa, y SQLite guarda solo preferencias e historial.
+- **Alineación con el contrato nativo oficial 2.0**: validación diferencial frente a fuentes y muestras oficiales fijadas, que cubre el análisis y el round-trip de config/TUI/MCP/Skills/Plugins.
+
+### Cambiado
+
+- **Migración de arquitectura**: reconstruido desde la GUI de escritorio a una versión web independiente y eliminada la cadena de compilación de escritorio Tauri/Rust; el código fuente se trasladó al repositorio independiente `fx1226/kimi-code-switch`, con el antiguo fork archivado y sus Releases y recursos conservados.
+
 ## [2.2.7] - 2026-09-15
 
 ### Cambiado

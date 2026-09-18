@@ -2,6 +2,19 @@
 
 Diese Datei dokumentiert die wesentlichen Änderungen des Projekts. Das Format folgt Keep a Changelog; verwendet wird das `major.minor.patch`-Versionsschema.
 
+## [1.0.0] - 2026-09-18
+
+### Hinzugefügt
+
+- **Erste eigenständige öffentliche Version**: eine lokale Konfigurationskonsole mit dem Browser als einzigem Einstiegspunkt; das Backend ist ein unabhängiger Node-Server, der Funktionen über HTTP und eine gemeinsame reine Regelschicht bereitstellt.
+- **In sich geschlossene macOS-Apple-Silicon-Binaries**: integrieren eigene Laufzeit, benötigen kein System-Node und laufen in einem isolierten HOME außerhalb des Quellbaums; die Version enthält Prüfsummen und eine Homebrew-Formel.
+- **Einheitlicher Konfigurationstransaktionskern**: Bearbeitung, Voreinstellungen, Import, Backup und Wiederherstellung teilen einen read → plan → commit-Ablauf; native Provider-/Modell-/MCP-Dateien bleiben die einzige Quelle der aktiven Konfiguration, SQLite speichert nur Präferenzen und Verlauf.
+- **Ausrichtung am offiziellen 2.0-Natividateikontrakt**: differenzielle Validierung gegen festgelegte offizielle Quellen und Beispiele, die Parsing und Round-Trip von config/TUI/MCP/Skills/Plugins abdeckt.
+
+### Geändert
+
+- **Architekturmigration**: von der Desktop-GUI zu einer eigenständigen Web-Version neu gebaut und die Tauri/Rust-Desktop-Build-Kette entfernt; der Quellcode wurde in das unabhängige Repository `fx1226/kimi-code-switch` verschoben, der alte Fork ist archiviert, seine Releases und Assets bleiben erhalten.
+
 ## [2.2.7] - 2026-09-15
 
 ### Geändert

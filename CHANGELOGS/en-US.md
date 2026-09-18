@@ -2,6 +2,19 @@
 
 This file records the project's notable changes. Format follows Keep a Changelog; the project uses `major.minor.patch` versioning.
 
+## [1.0.0] - 2026-09-18
+
+### Added
+
+- **First standalone public release**: a local configuration console with the browser as the only entry point; the backend is an independent Node server exposing capabilities over HTTP through a shared pure-rule layer.
+- **Self-contained macOS Apple Silicon binaries**: embed their own runtime, do not require a system Node, and run from an isolated HOME outside the source tree; the release ships checksums and a Homebrew formula.
+- **Unified configuration transaction core**: editing, presets, import, backup, and restore share a read → plan → commit pipeline; native provider/model/MCP files remain the single source of the active configuration, with SQLite storing only preferences and history.
+- **Official 2.0 native file contract alignment**: differential validation against pinned official sources and samples, covering parsing and round-tripping of config/TUI/MCP/Skills/Plugins.
+
+### Changed
+
+- **Architecture migration**: rebuilt from the desktop GUI into a standalone web version and removed the Tauri/Rust desktop build chain; the source moved to the independent repository `fx1226/kimi-code-switch`, with the old fork archived and its releases and assets preserved.
+
 ## [2.2.7] - 2026-09-15
 
 ### Changed

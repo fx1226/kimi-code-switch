@@ -2,6 +2,19 @@
 
 本文件记录项目的重要变更。格式参考 Keep a Changelog，当前项目采用 `major.minor.patch` 版本号方案。
 
+## [1.0.0] - 2026-09-18
+
+### 新增
+
+- **首个独立公开版本**：以浏览器为唯一入口的本机配置控制台；服务端为独立 Node 后端，业务能力经 HTTP 与共享纯规则层对外提供。
+- **自包含 macOS Apple Silicon 程序**：内嵌运行时，不依赖系统 Node，可在脱离源码目录的隔离 HOME 下运行；随 Release 提供校验和与 Homebrew formula。
+- **统一配置事务内核**：编辑、预设、导入、备份与恢复共用 read → plan → commit 流程；原生 Provider/模型/MCP 文件仍是活动配置的唯一来源，SQLite 只保存偏好与历史。
+- **官方 2.0 原生文件契约对齐**：基于固定的官方源码与样本做差分验证，覆盖 config/TUI/MCP/Skills/Plugins 的解析与往返。
+
+### 变更
+
+- **架构迁移**：由桌面 GUI 重构为本地 Web 版本，移除 Tauri/Rust 桌面构建链；源码迁移至独立仓库 `fx1226/kimi-code-switch`，旧 fork 已归档且其 Release 与资产保留。
+
 ## [2.2.7] - 2026-09-15
 
 ### 变更

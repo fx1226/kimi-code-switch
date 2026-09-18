@@ -2,6 +2,19 @@
 
 本檔案記錄專案的重要變更。格式參考 Keep a Changelog，當前專案採用 `major.minor.patch` 版本號方案。
 
+## [1.0.0] - 2026-09-18
+
+### 新增
+
+- **首個獨立公開版本**：以瀏覽器為唯一入口的本機設定主控台；伺服器端為獨立 Node 後端，業務能力經 HTTP 與共享純規則層對外提供。
+- **自包含 macOS Apple Silicon 程式**：內嵌執行環境，不依賴系統 Node，可在脫離原始碼目錄的隔離 HOME 下執行；隨 Release 提供校驗和與 Homebrew formula。
+- **統一設定交易內核**：編輯、預設、匯入、備份與還原共用 read → plan → commit 流程；原生 Provider/模型/MCP 檔案仍是活動設定的唯一來源，SQLite 只保存偏好與歷史。
+- **官方 2.0 原生檔案契約對齊**：以固定的官方原始碼與樣本進行差分驗證，涵蓋 config/TUI/MCP/Skills/Plugins 的解析與往返。
+
+### 變更
+
+- **架構遷移**：由桌面 GUI 重構為本機 Web 版本，移除 Tauri/Rust 桌面建置鏈；原始碼遷移至獨立倉庫 `fx1226/kimi-code-switch`，舊 fork 已封存且其 Release 與資源保留。
+
 ## [2.2.7] - 2026-09-15
 
 ### 變更
